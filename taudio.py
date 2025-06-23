@@ -5,19 +5,13 @@ import torch.nn.functional as F
 from transformers import Qwen2_5OmniThinkerForConditionalGeneration, BitsAndBytesConfig
 
 class TAudio(nn.Module):
-    def __init__(self, model_id: str, freeze_text_model: bool) -> None:
+    def __init__(self, model_id: str, freeze_text_model: bool, load_in_8bit: bool) -> None:
         super(TAudio, self).__init__()
-
-        quantization_config_8bit = BitsAndBytesConfig(
-            load_in_8bit=True,
-            llm_int8_threshold=6.0,
-            llm_int8_has_fp16_weight=False,
-        )
 
         self.base_model = Qwen2_5OmniThinkerForConditionalGeneration.from_pretrained(
             model_id, 
-            quantization_config=quantization_config_8bit,
-            torch_dtype="auto"
+            torch_dtype="auto",
+            load_in_8bit=load_in_8bit,
         )
         self.base_audio_encoder = self.base_model.audio_tower
         self.base_text_model = self.base_model.model

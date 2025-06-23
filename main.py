@@ -2,6 +2,7 @@ import torch
 import wandb
 from tqdm.auto import tqdm
 from taudio import TAudio
+import bitsandbytes as bnb
 
 from dataset import get_ds
 
@@ -11,6 +12,7 @@ split = 'train_clean_100'
 model_id = "Qwen/Qwen2.5-Omni-7B"
 freeze_text_model = False
 epochs = 1
+load_in_8bit = True
 
 run = wandb.init(
     entity="taudio",
@@ -21,17 +23,19 @@ run = wandb.init(
         "split": split,
         "model_id": model_id,
         "epochs": epochs,
+        "load_in_8bit": load_in_8bit,
     },
 )
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-model = TAudio(model_id=model_id, freeze_text_model=freeze_text_model).to(device)
+model = TAudio(model_id=model_id, freeze_text_model=freeze_text_model, load_in_8bit=load_in_8bit).to(device)
 
 ds = get_ds(model_id=model_id, audio_token_id=model.get_audio_token_id(), split=split)
 dataloader = torch.utils.data.DataLoader(ds)
 
-optim = torch.optim.AdamW(model.parameters(), lr=learning_rate)
+# optim = torch.optim.AdamW(model.parameters(), lr=learning_rate)
+optim = bnb.optim.AdamW8bit(model.parameters(), lr=learning_rate)
 
 for epoch in range(epochs):
     progress_bar = tqdm(dataloader, desc=f"Epoch {epoch + 1}")
