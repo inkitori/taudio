@@ -6,7 +6,7 @@ from typing import Any, Dict, Optional
 
 from utils import clamp
 
-SECONDS_TO_EMBEDDING = (1000) * (1 / 40) # 40 milliseconds per embedding
+SECONDS_TO_EMBEDDING = (1000) * (1 / 40) # 40 milliseconds per embedding (from technical report)
 # For example, 10 seconds of audio would be 10 * 1000 = 10000 milliseconds, which would be 10000 / 40 = 250 embeddings.
 
 def _build_conversation(processor: Qwen2_5OmniProcessor, transcript: str, word: str) -> str:
