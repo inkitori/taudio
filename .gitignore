@@ -1,4 +1,5 @@
-data/
-.cache/
+data
+.cache
 __pycache__/
 *.wav
+wandb/

@@ -2,46 +2,76 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from transformers import Qwen2_5OmniThinkerForConditionalGeneration
+from transformers import Qwen2_5OmniThinkerForConditionalGeneration, BitsAndBytesConfig
 
 class TAudio(nn.Module):
-	def __init__(self, model_id, freeze_model=False):
-		super(TAudio, self).__init__()
+    def __init__(self, model_id: str, freeze_text_model: bool) -> None:
+        super(TAudio, self).__init__()
 
-		self.model = Qwen2_5OmniThinkerForConditionalGeneration.from_pretrained(model_id, torch_dtype="auto", device_map="auto")
-		self.hidden_dim = self.model.config.audio_config.output_dim
+        quantization_config_8bit = BitsAndBytesConfig(
+            load_in_8bit=True,
+            llm_int8_threshold=6.0,
+            llm_int8_has_fp16_weight=False,
+        )
 
-		if freeze_model:
-			for param in self.model.parameters():
-				param.requires_grad = False
+        self.base_model = Qwen2_5OmniThinkerForConditionalGeneration.from_pretrained(
+            model_id, 
+            quantization_config=quantization_config_8bit,
+            torch_dtype="auto"
+        )
+        self.base_audio_encoder = self.base_model.audio_tower
+        self.base_text_model = self.base_model.model
+        
+        self.hidden_dim = self.base_model.config.audio_config.output_dim
 
-		self.linear = nn.Linear(self.hidden_dim, 1, dtype=self.model.dtype)
+        if freeze_text_model:
+            for param in self.base_text_model.parameters():
+                param.requires_grad = False
 
-	def forward(self, input_ids, attention_mask, input_features, feature_attention_mask, labels):
-		outputs = self.model(
-			input_ids=input_ids, 
-			attention_mask=attention_mask,
-			input_features=input_features,
-			feature_attention_mask=feature_attention_mask,
-			output_hidden_states=True
-		)
+        self.linear = nn.Linear(self.hidden_dim, 1, dtype=self.base_model.dtype)
 
-		last_layer_hidden_state = outputs.hidden_states[-1]  # (batch_size, seq_len, hidden_dim)
+    def get_audio_token_id(self) -> int:
+        return self.base_model.config.audio_token_index
 
-		audio_hidden_states = last_layer_hidden_state[input_ids == self.model.config.audio_token_index]  # (num_audio_tokens, hidden_dim)
+    def forward(
+        self,
+        input_ids: torch.Tensor,
+        attention_mask: torch.Tensor,
+        input_features: torch.Tensor,
+        feature_attention_mask: torch.Tensor,
+        labels: torch.Tensor
+    ) -> torch.Tensor:
+        outputs = self.base_model(
+            input_ids=input_ids, 
+            attention_mask=attention_mask,
+            input_features=input_features,
+            feature_attention_mask=feature_attention_mask,
+            output_hidden_states=True
+        )
 
-		# do some stuff to segment only the audio embeddings (i think we can just use the features attention mask)
+        last_layer_hidden_state = outputs.hidden_states[-1]  # (batch_size, seq_len, hidden_dim)
 
-		pred = F.sigmoid(self.linear(audio_hidden_states))
+        audio_hidden_states = last_layer_hidden_state[input_ids == self.get_audio_token_id()]  # (num_audio_tokens, hidden_dim)
 
-		labels = labels.to(pred.dtype)
+        logits = self.linear(audio_hidden_states)
+        pred = torch.sigmoid(logits)
 
-		# print(pred)
+        labels = labels.to(logits.dtype)
 
-		print(' ')
-		print("PREDICTED\t" + str(torch.argmax(pred.squeeze()).item()) + "\t" + str(torch.max(pred.squeeze()).item()))
-		print("GROUND TRUTH\t" + str(torch.argmax(labels.squeeze()).item()))
+        num_ones = (labels == 1).sum().item()
+        num_zeros = (labels == 0).sum().item()
+        pos_weight = (num_zeros / num_ones) if num_ones > 0 else 1.0
 
-		loss = F.binary_cross_entropy(pred.squeeze(), labels.squeeze(), reduction='none')
-		loss[torch.argmax(labels.squeeze()).item()] *= 10
-		return loss.mean()
+        # print("PREDICTED\t" + str(torch.argmax(pred.squeeze()).item()) + "\t" + str(torch.max(pred.squeeze()).item()) + '\t' + str(pred.sum().item()))
+        # print("GROUND TRUTH\t" + str(torch.argmax(labels.squeeze()).item()))
+        # print(labels.squeeze() - pred.squeeze())
+
+        # with open('predictions.txt', 'a') as f:
+        #     f.write(str(pred.squeeze().tolist()) + '\n')
+        #     f.write(str(labels.squeeze().tolist()) + '\n')
+        #     f.write('\n')
+
+        criterion = nn.BCEWithLogitsLoss(pos_weight=torch.tensor(pos_weight, device=logits.device, dtype=logits.dtype))
+        loss = criterion(logits.squeeze(), labels.squeeze())
+
+        return loss
