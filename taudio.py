@@ -59,8 +59,8 @@ class TAudio(nn.Module):
         logits = self.linear(audio_hidden_states).squeeze() # (num_audio_tokens)
         labels = labels.to(logits.dtype)
 
-        num_ones = (labels == 1).sum().item()
-        num_zeros = (labels == 0).sum().item()
+        num_ones = (labels == 1).sum()
+        num_zeros = (labels == 0).sum()
         pos_weight = (num_zeros / num_ones) if num_ones > 0 else 1.0
 
         # print("PREDICTED\t" + str(torch.argmax(pred.squeeze()).item()) + "\t" + str(torch.max(pred.squeeze()).item()) + '\t' + str(pred.sum().item()))
@@ -73,7 +73,7 @@ class TAudio(nn.Module):
         #     f.write('\n')
 
         if self.class_weighting:
-            criterion = nn.BCEWithLogitsLoss(pos_weight=torch.tensor(pos_weight, device=logits.device, dtype=logits.dtype))
+            criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
         else:
             criterion = nn.BCEWithLogitsLoss()
 

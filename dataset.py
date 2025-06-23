@@ -92,7 +92,7 @@ def get_ds(
 
 	base_ds = load_dataset("gilkeyio/librispeech-alignments", split=split, streaming=True)
 
-	ds = base_ds.map(preprocess_fn, remove_columns=base_ds.column_names).with_format('torch')
+	ds = base_ds.map(preprocess_fn, remove_columns=base_ds.column_names)
 
 	return ds
 
