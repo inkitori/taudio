@@ -73,13 +73,16 @@ def get_ds(model_id: str, audio_token_id: int, split: str = 'train_clean_100') -
 			labels[start_idx:end_idx + 1] = 1.0
 
 		return {
-			# 'prompt': prompt,
-			# 'audio_frames': audio_frames,
 			'input_ids': input_ids[0],
 			'attention_mask': attention_mask[0],
+
 			'input_features': input_features[0],
 			'feature_attention_mask': feature_attention_mask[0],
+
 			'labels': labels,
+			
+			# 'prompt': prompt,
+			# 'audio_frames': audio_frames,
 			# 'audio_features': audio_features.to('cpu'),
 		}
 
