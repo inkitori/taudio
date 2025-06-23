@@ -38,11 +38,11 @@ class TAudio(nn.Module):
 
     def forward(
         self,
-        input_ids: torch.Tensor,
-        attention_mask: torch.Tensor,
-        input_features: torch.Tensor,
-        feature_attention_mask: torch.Tensor,
-        labels: torch.Tensor
+        input_ids: torch.Tensor, # (batch_size, seq_len)
+        attention_mask: torch.Tensor, # (batch_size, seq_len)
+        input_features: torch.Tensor, # (batch_size, embedding_dim, audio_context_len)
+        feature_attention_mask: torch.Tensor, # (batch_size, audio_context_len)
+        labels: torch.Tensor # (num_audio_tokens)
     ) -> torch.Tensor:
         outputs = self.base_model(
             input_ids=input_ids, 
@@ -56,7 +56,7 @@ class TAudio(nn.Module):
 
         audio_hidden_states = hidden_states[input_ids == self.get_audio_token_id()]  # (num_audio_tokens, hidden_dim)
 
-        logits = self.linear(audio_hidden_states)
+        logits = self.linear(audio_hidden_states).squeeze() # (num_audio_tokens)
         labels = labels.to(logits.dtype)
 
         num_ones = (labels == 1).sum().item()
@@ -77,6 +77,6 @@ class TAudio(nn.Module):
         else:
             criterion = nn.BCEWithLogitsLoss()
 
-        loss = criterion(logits.squeeze(), labels.squeeze())
+        loss = criterion(logits, labels)
 
         return loss

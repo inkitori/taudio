@@ -34,7 +34,11 @@ def _build_conversation(processor: Qwen2_5OmniProcessor, transcript: str, word: 
 
 	return text
 
-def get_ds(model_id: str, audio_token_id: int, split: str = 'train_clean_100') -> Dataset:
+def get_ds(
+		model_id: str, 
+		audio_token_id: int, 
+		split: str = 'train_clean_100'
+) -> Dataset:
 	def preprocess_fn(example: Dict[str, Any]) -> Dict[str, Any]:
 		audio = example['audio']
 		words = example['words']
@@ -42,8 +46,6 @@ def get_ds(model_id: str, audio_token_id: int, split: str = 'train_clean_100') -
 
 		target_word = random.choice([word['word'] for word in words])
 		occurences = [word for word in words if word['word'] == target_word]
-
-		print(f"\nSelected word: {target_word}")
 
 		prompt = _build_conversation(processor, transcript, target_word)
 		audio_frames = audio['array'] # 16 khz
@@ -93,3 +95,18 @@ def get_ds(model_id: str, audio_token_id: int, split: str = 'train_clean_100') -
 	ds = base_ds.map(preprocess_fn, remove_columns=base_ds.column_names).with_format('torch')
 
 	return ds
+
+def collate_fn(batch: list) -> Dict[str, torch.Tensor]:
+	batch_keys = batch[0].keys()
+	collated = {}
+
+	for key in batch_keys:
+		items = [item[key] for item in batch]
+		if key == 'input_ids' or key == 'attention_mask':
+			collated[key] = torch.nn.utils.rnn.pad_sequence(items, batch_first=True, padding_value=0, padding_side='left')
+		elif key == 'labels':
+			collated[key] = torch.cat(items, dim=0)
+		else:
+			collated[key] = torch.stack(items)
+
+	return collated

@@ -4,12 +4,13 @@ from tqdm.auto import tqdm
 from taudio import TAudio
 import bitsandbytes as bnb
 
-from dataset import get_ds
+from dataset import get_ds, collate_fn
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 # hyperparams
-grad_accumulation_steps = 16
+batch_size = 2
+grad_accumulation_steps = 1
 learning_rate = 5e-6
 split = 'train_clean_100'
 model_id = "Qwen/Qwen2.5-Omni-3B"
@@ -20,11 +21,13 @@ audio_layer = -1 # which layer of the text model to project down to score
 class_weighting = False
 eta_min_scale = 0.1  
 optim_8bit = False
+dataloader_num_workers = 4
 
 run = wandb.init(
     entity="taudio",
     project="Temporal Audio", 
     config={
+        "batch_size": batch_size,
         "learning_rate": learning_rate,
         "grad_accumulation_steps": grad_accumulation_steps,
         "split": split,
@@ -47,8 +50,19 @@ model = TAudio(
     class_weighting=class_weighting
 ).to(device)
 
-ds = get_ds(model_id=model_id, audio_token_id=model.get_audio_token_id(), split=split)
-dataloader = torch.utils.data.DataLoader(ds)
+ds = get_ds(
+    model_id=model_id, 
+    audio_token_id=model.get_audio_token_id(), 
+    split=split,
+)
+
+dataloader = torch.utils.data.DataLoader(
+    ds, 
+    collate_fn=collate_fn,
+    batch_size=batch_size, 
+    num_workers=dataloader_num_workers, 
+    pin_memory=True
+)
 
 # total_optimizer_steps = (len(dataloader) * epochs) // grad_accumulation_steps
 total_optimizer_steps = (28_500 * epochs) // grad_accumulation_steps # can't get length of iterabledataset
