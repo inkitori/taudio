@@ -8,8 +8,13 @@ from dataset import get_ds, collate_fn
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
+UNK_TOKEN = "<unk>"
+AUDIO_BOS_ID = 151647 # fill in later
+AUDIO_EOS_ID = 151648
+IM_END_ID = 151645
+
 # hyperparams
-batch_size = 2
+batch_size = 8
 grad_accumulation_steps = 1
 learning_rate = 5e-6
 split = 'train_clean_100'
@@ -53,6 +58,10 @@ model = TAudio(
 ds = get_ds(
     model_id=model_id, 
     audio_token_id=model.get_audio_token_id(), 
+    audio_bos_id=AUDIO_BOS_ID,
+    audio_eos_id=AUDIO_EOS_ID,
+    im_end_id=IM_END_ID,
+    unk_token=UNK_TOKEN,
     split=split,
 )
 

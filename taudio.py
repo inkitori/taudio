@@ -4,6 +4,8 @@ import torch.nn.functional as F
 
 from transformers import Qwen2_5OmniThinkerForConditionalGeneration, BitsAndBytesConfig
 
+from helpers import poisson_loss
+
 class TAudio(nn.Module):
     def __init__(
             self, 
@@ -63,20 +65,29 @@ class TAudio(nn.Module):
         num_zeros = (labels == 0).sum()
         pos_weight = (num_zeros / num_ones) if num_ones > 0 else 1.0
 
-        # print("PREDICTED\t" + str(torch.argmax(pred.squeeze()).item()) + "\t" + str(torch.max(pred.squeeze()).item()) + '\t' + str(pred.sum().item()))
-        # print("GROUND TRUTH\t" + str(torch.argmax(labels.squeeze()).item()))
-        # print(labels.squeeze() - pred.squeeze())
+        top_count = (labels == 1).sum().item()
+        top_vals, top_indices = torch.topk(logits, top_count)
+        print('')
+        print(
+            "PREDICTED\t"
+            + "\t".join([f"{idx.item()} ({val.item():.4f})" for idx, val in zip(top_indices, top_vals)])
+        )
 
-        # with open('predictions.txt', 'a') as f:
-        #     f.write(str(pred.squeeze().tolist()) + '\n')
-        #     f.write(str(labels.squeeze().tolist()) + '\n')
-        #     f.write('\n')
+        gt_top_vals, gt_top_indices = torch.topk(labels, top_count)
+        print(
+            "GROUND TRUTH\t"
+            + "\t".join([f"{idx.item()} ({val.item():.4f})" for idx, val in zip(gt_top_indices, gt_top_vals)])
+        )
 
         if self.class_weighting:
             criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
         else:
             criterion = nn.BCEWithLogitsLoss()
 
-        loss = criterion(logits, labels)
+        # loss = criterion(logits, labels)
+        
+        logits = logits.unsqueeze(0)
+        labels = labels.unsqueeze(0)
+        loss = poisson_loss(logits, labels, torch.ones_like(logits))
 
         return loss
