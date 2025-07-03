@@ -3,11 +3,15 @@ from datasets import load_dataset, Dataset
 from transformers import Qwen2_5OmniProcessor
 import random
 from typing import Any, Dict, Optional
+import nltk
+from nltk.corpus import stopwords
 
 from utils import clamp
 
 SECONDS_TO_EMBEDDING = (1000) * (1 / 40) # 40 milliseconds per embedding (from technical report)
 # For example, 10 seconds of audio would be 10 * 1000 = 10000 milliseconds, which would be 10000 / 40 = 250 embeddings.
+
+STOPS = set(stopwords.words('english'))
 
 def _build_conversation(processor: Qwen2_5OmniProcessor, transcript: str, word: str) -> str:
 	conversation = [
@@ -21,7 +25,7 @@ def _build_conversation(processor: Qwen2_5OmniProcessor, transcript: str, word: 
 			"role": "user",
 			"content": [
 				{"type": "audio", "audio": "PLACEHOLDER AUDIO"}, # we will manually fill in the audio
-				{"type": "text", "text": f"When is '{word}' said?"},
+				{"type": "text", "text": f"What is the first occurence of the word '{word}'?"},
 			],
 		},
 	]
@@ -48,8 +52,15 @@ def get_ds(
 		words = example['words']
 		transcript = example['transcript']
 
-		target_word = random.choice([word['word'] for word in words if word != unk_token])
-		occurences = [word for word in words if word['word'] == target_word]
+		target_word = random.choice([word['word'] for word in words if word['word'] != unk_token and word['word'] not in STOPS])
+		print('')
+		print(f"Selected Word: {target_word}")
+
+		for word in words:
+			if word['word'] == target_word:
+				first_occurence = word
+				break
+
 
 		prompt = _build_conversation(processor, transcript, target_word)
 		audio_frames = audio['array'] # 16 khz
@@ -72,12 +83,10 @@ def get_ds(
 		labels_size = (input_ids == audio_token_id).sum().item()
 		labels = torch.zeros(labels_size)
 
-		for w in occurences:
-			start_idx = clamp(int(w['start'] * SECONDS_TO_EMBEDDING), 0, labels_size - 1)
-			end_idx = clamp(int(w['end'] * SECONDS_TO_EMBEDDING), 0, labels_size - 1)
+		start_idx = clamp(int(first_occurence['start'] * SECONDS_TO_EMBEDDING), 0, labels_size - 1)
+		end_idx = clamp(int(first_occurence['end'] * SECONDS_TO_EMBEDDING), 0, labels_size - 1)
 
-			labels[start_idx] = 1.0
-			labels[end_idx] = 1.0
+		labels[end_idx] = 1.0
 
 		# --- Start of modification ---
 		# The processor returns tensors with a batch dimension of 1, so we squeeze to work with 1D tensors

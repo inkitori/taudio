@@ -14,8 +14,8 @@ AUDIO_EOS_ID = 151648
 IM_END_ID = 151645
 
 # hyperparams
-batch_size = 8
-grad_accumulation_steps = 1
+batch_size = 1
+grad_accumulation_steps = 8
 learning_rate = 5e-6
 split = 'train_clean_100'
 model_id = "Qwen/Qwen2.5-Omni-3B"
@@ -27,6 +27,7 @@ class_weighting = False
 eta_min_scale = 0.1  
 optim_8bit = False
 dataloader_num_workers = 4
+checkpoints_dir = 'data/checkpoints'
 
 run = wandb.init(
     entity="taudio",
@@ -90,31 +91,57 @@ scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
 for epoch in range(epochs):
     progress_bar = tqdm(dataloader, desc=f"Epoch {epoch + 1}")
     accumulated_loss = 0.0
+    accumulated_mse = 0.0
     
     for step, batch in enumerate(progress_bar):
         batch = {k: v.to('cuda') for k, v in batch.items()}
         
-        loss = model(**batch)
+        output = model(**batch)
+        
+        loss = output.loss
+
+        pred_top_val, pred_top_idx = output.pred
+        gt_top_val, gt_top_idx = output.gt
         
         scaled_loss = loss / grad_accumulation_steps
         scaled_loss.backward()
         
         accumulated_loss += loss.item()
-        
+
+        mse = ((pred_top_idx.float() - gt_top_idx.float()) ** 2).item()
+        accumulated_mse += mse
+
+        print('')
+        print(f"PRED\t{pred_top_idx}\t{pred_top_val}")
+        print(f"GT\t{gt_top_idx}\t{gt_top_val}")
+
         if (step + 1) % grad_accumulation_steps == 0: #or (step + 1) == len(dataloader):
             optim.step()
             optim.zero_grad() 
             scheduler.step()
             
             avg_loss = accumulated_loss / grad_accumulation_steps
+            avg_mse = accumulated_mse / grad_accumulation_steps
+
             print(f"Step {step + 1}, Average Loss: {avg_loss:.4f}")
 
-            run.log({"loss": avg_loss, "epoch": epoch + 1, "step": step + 1, "learning_rate": scheduler.get_last_lr()[0]})
+            run.log({
+                "loss": avg_loss, 
+                "epoch": epoch + 1, 
+                "step": step + 1, 
+                "learning_rate": scheduler.get_last_lr()[0],
+                "mse": avg_mse,
+            })
 
             accumulated_loss = 0.0
+            accumulated_mse = 0.0
         
         progress_bar.set_description(f"Epoch {epoch + 1}, Loss: {loss.item():.4f}")
     
     print(f"Epoch {epoch + 1} completed.")
+
+    checkpoint_path = f"{checkpoints_dir}/model_{run.id}_epoch{epoch + 1}.pt"
+    torch.save(model.state_dict(), checkpoint_path)
+    print(f"Model saved to {checkpoint_path}")
 
 run.finish()
