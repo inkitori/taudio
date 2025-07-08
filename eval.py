@@ -16,8 +16,8 @@ parser.add_argument('--checkpoint_path', type=str, required=True, help='Path to 
 args = parser.parse_args()
 
 checkpoint_path = args.checkpoint_path
-split = 'test_clean'
-aux_output = False
+split = 'dev_clean'
+aux_output = True
 error_bound = 0.1
 
 run = wandb.init(
