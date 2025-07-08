@@ -12,8 +12,14 @@ SECONDS_TO_EMBEDDING = (1000) * (1 / 40) # 40 milliseconds per embedding (from t
 # For example, 10 seconds of audio would be 10 * 1000 = 10000 milliseconds, which would be 10000 / 40 = 250 embeddings.
 
 STOPS = set(stopwords.words('english'))
+UNK_TOKEN = "<unk>"
+ASSISTANT_ID = 77091
+SEED = 80
 
-def _build_conversation(processor: Qwen2_5OmniProcessor, transcript: str, word: str) -> str:
+random.seed(SEED)
+
+def _build_conversation(processor: Qwen2_5OmniProcessor, transcript: str, word: Dict[str, any]) -> str:
+	word_end_json = '{"%s": %s}' % (word['word'], word['end'])
 	conversation = [
 		{
 			"role": "system",
@@ -24,8 +30,14 @@ def _build_conversation(processor: Qwen2_5OmniProcessor, transcript: str, word: 
 		{
 			"role": "user",
 			"content": [
+				{"type": "text", "text": f"What is the first occurence of the word '{word['word']}'?"},
 				{"type": "audio", "audio": "PLACEHOLDER AUDIO"}, # we will manually fill in the audio
-				{"type": "text", "text": f"What is the first occurence of the word '{word}'?"},
+			],
+		},
+		{
+			"role": "assistant",
+			"content": [
+				{"type": "text", "text": f"{word_end_json}"},
 			],
 		},
 	]
@@ -33,7 +45,7 @@ def _build_conversation(processor: Qwen2_5OmniProcessor, transcript: str, word: 
 	text = processor.apply_chat_template(
 		conversation,
 		tokenize=False,
-		add_generation_prompt=True,
+		add_generation_prompt=False,
 	)
 
 	return text
@@ -41,10 +53,6 @@ def _build_conversation(processor: Qwen2_5OmniProcessor, transcript: str, word: 
 def get_ds(
 		model_id: str, 
 		audio_token_id: int, 
-		audio_bos_id: int,
-		audio_eos_id: int,
-		im_end_id: int,
-		unk_token: str,
 		split: str = 'train_clean_100'
 ) -> Dataset:
 	def preprocess_fn(example: Dict[str, Any]) -> Dict[str, Any]:
@@ -52,7 +60,12 @@ def get_ds(
 		words = example['words']
 		transcript = example['transcript']
 
-		target_word = random.choice([word['word'] for word in words if word['word'] != unk_token and word['word'] not in STOPS])
+		candidate_words = [word['word'] for word in words if word['word'] != UNK_TOKEN and word['word'] not in STOPS]
+		if len(candidate_words) > 0:
+			target_word = random.choice(candidate_words)
+		else:
+			target_word = words[0]['word']
+
 		print('')
 		print(f"Selected Word: {target_word}")
 
@@ -61,8 +74,7 @@ def get_ds(
 				first_occurence = word
 				break
 
-
-		prompt = _build_conversation(processor, transcript, target_word)
+		prompt = _build_conversation(processor, transcript, first_occurence)
 		audio_frames = audio['array'] # 16 khz
 
 		inputs = processor(
@@ -73,6 +85,7 @@ def get_ds(
 		)
 
 		input_ids = inputs['input_ids'] # (batch_size, seq_len)
+		# print(processor.tokenizer.batch_decode(input_ids)[0])
 		attention_mask = inputs['attention_mask'] # (batch_size, seq_len)
 
 		# input_features comes in milliseconds. audio_context_len is 30,000 for 30 seconds of audio.
@@ -88,52 +101,10 @@ def get_ds(
 
 		labels[end_idx] = 1.0
 
-		# --- Start of modification ---
-		# The processor returns tensors with a batch dimension of 1, so we squeeze to work with 1D tensors
-		ids = input_ids[0]
-		mask = attention_mask[0]
-
-		# Find the start and end of the audio token block
-		# .nonzero() returns a tensor of indices. We expect exactly one match for BOS and EOS.
-		audio_bos_locs = (ids == audio_bos_id).nonzero(as_tuple=True)[0]
-		audio_eos_locs = (ids == audio_eos_id).nonzero(as_tuple=True)[0]
-
-		if audio_bos_locs.nelement() != 1 or audio_eos_locs.nelement() != 1:
-			raise ValueError(f"Expected one audio_bos and one audio_eos token, but found {audio_bos_locs.nelement()} and {audio_eos_locs.nelement()}.")
-		
-		audio_bos_idx = audio_bos_locs.item()
-		audio_eos_idx = audio_eos_locs.item()
-
-		# Extract the audio block from both input_ids and attention_mask
-		audio_block_ids = ids[audio_bos_idx : audio_eos_idx + 1]
-		audio_block_mask = mask[audio_bos_idx : audio_eos_idx + 1]
-
-		# Create the remaining tensors by removing the audio block
-		remaining_ids = torch.cat([ids[:audio_bos_idx], ids[audio_eos_idx + 1:]])
-		remaining_mask = torch.cat([mask[:audio_bos_idx], mask[audio_eos_idx + 1:]])
-
-		# Find the index of the *last* im_end token in the remaining sequence
-		im_end_indices = (remaining_ids == im_end_id).nonzero(as_tuple=True)[0]
-		if im_end_indices.nelement() == 0:
-			raise ValueError(f"Could not find the insertion point token (im_end_id).")
-		
-		# The insertion point is right before the last im_end token
-		insertion_point = im_end_indices[-1].item()
-
-		# Reconstruct the sequences by inserting the audio block before the last im_end_id
-		# [ ... text before ... ] + [ audio_block ] + [ ... im_end and after ... ]
-		input_ids = torch.cat([
-			remaining_ids[:insertion_point],
-			audio_block_ids,
-			remaining_ids[insertion_point:]
-		]).unsqueeze(0) # Add the batch dimension back
-
-		attention_mask = torch.cat([
-			remaining_mask[:insertion_point],
-			audio_block_mask,
-			remaining_mask[insertion_point:]
-		]).unsqueeze(0) # Add the batch dimension back
-		# --- End of modification ---
+		# mask out everything up to and including the assistant token
+		label_ids = input_ids.clone()
+		assistant_idx = (input_ids == ASSISTANT_ID).nonzero(as_tuple=True)[1][0] if (input_ids == ASSISTANT_ID).any() else 0
+		label_ids[0, :assistant_idx + 1] = -100
 
 		return {
 			'input_ids': input_ids[0],
@@ -143,6 +114,7 @@ def get_ds(
 			'feature_attention_mask': feature_attention_mask[0],
 
 			'labels': labels,
+			'label_ids': label_ids[0],
 			
 			# 'prompt': prompt,
 			# 'audio_frames': audio_frames,
@@ -167,6 +139,8 @@ def collate_fn(batch: list) -> Dict[str, torch.Tensor]:
 			collated[key] = torch.nn.utils.rnn.pad_sequence(items, batch_first=True, padding_value=0, padding_side='left')
 		elif key == 'labels':
 			collated[key] = torch.cat(items, dim=0)
+		elif key == 'label_ids':
+			collated[key] = torch.nn.utils.rnn.pad_sequence(items, batch_first=True, padding_value=-100, padding_side='right')
 		else:
 			collated[key] = torch.stack(items)
 

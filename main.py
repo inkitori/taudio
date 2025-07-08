@@ -8,11 +8,6 @@ from dataset import get_ds, collate_fn
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-UNK_TOKEN = "<unk>"
-AUDIO_BOS_ID = 151647 # fill in later
-AUDIO_EOS_ID = 151648
-IM_END_ID = 151645
-
 # hyperparams
 batch_size = 1
 grad_accumulation_steps = 8
@@ -25,13 +20,14 @@ load_in_8bit = False
 audio_layer = -1 # which layer of the text model to project down to score
 class_weighting = False
 eta_min_scale = 0.1  
-optim_8bit = False
-dataloader_num_workers = 4
+optim_8bit = True
+dataloader_num_workers = 8
 checkpoints_dir = 'data/checkpoints'
+surrogate_loss = True
 
 run = wandb.init(
     entity="taudio",
-    project="Temporal Audio", 
+    project="Train", 
     config={
         "batch_size": batch_size,
         "learning_rate": learning_rate,
@@ -45,6 +41,9 @@ run = wandb.init(
         "class_weighting": class_weighting,
         "eta_min_scale": eta_min_scale,
         "optim_8bit": optim_8bit,
+        "dataloader_num_workers": dataloader_num_workers,
+        "checkpoints_dir": checkpoints_dir,
+        "surrogate_loss": surrogate_loss
     },
 )
 
@@ -53,16 +52,13 @@ model = TAudio(
     freeze_text_model=freeze_text_model, 
     load_in_8bit=load_in_8bit,
     audio_layer=audio_layer,
-    class_weighting=class_weighting
+    class_weighting=class_weighting,
+    surrogate_loss=surrogate_loss
 ).to(device)
 
 ds = get_ds(
     model_id=model_id, 
     audio_token_id=model.get_audio_token_id(), 
-    audio_bos_id=AUDIO_BOS_ID,
-    audio_eos_id=AUDIO_EOS_ID,
-    im_end_id=IM_END_ID,
-    unk_token=UNK_TOKEN,
     split=split,
 )
 
@@ -91,6 +87,8 @@ scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
 for epoch in range(epochs):
     progress_bar = tqdm(dataloader, desc=f"Epoch {epoch + 1}")
     accumulated_loss = 0.0
+    accumulated_surrogate_loss = 0.0
+    accumulated_token_loss = 0.0
     accumulated_mse = 0.0
     
     for step, batch in enumerate(progress_bar):
@@ -99,6 +97,8 @@ for epoch in range(epochs):
         output = model(**batch)
         
         loss = output.loss
+        token_loss = output.token_loss
+        surrogate_loss = output.surrogate_loss
 
         pred_top_val, pred_top_idx = output.pred
         gt_top_val, gt_top_idx = output.gt
@@ -107,6 +107,8 @@ for epoch in range(epochs):
         scaled_loss.backward()
         
         accumulated_loss += loss.item()
+        accumulated_token_loss += token_loss.item()
+        accumulated_surrogate_loss += surrogate_loss.item()
 
         mse = ((pred_top_idx.float() - gt_top_idx.float()) ** 2).item()
         accumulated_mse += mse
@@ -121,12 +123,16 @@ for epoch in range(epochs):
             scheduler.step()
             
             avg_loss = accumulated_loss / grad_accumulation_steps
+            avg_token_loss = accumulated_token_loss / grad_accumulation_steps
+            avg_surrogate_loss = accumulated_surrogate_loss / grad_accumulation_steps
             avg_mse = accumulated_mse / grad_accumulation_steps
 
             print(f"Step {step + 1}, Average Loss: {avg_loss:.4f}")
 
             run.log({
                 "loss": avg_loss, 
+                "token_loss": avg_token_loss,
+                "surrogate_loss": avg_surrogate_loss,
                 "epoch": epoch + 1, 
                 "step": step + 1, 
                 "learning_rate": scheduler.get_last_lr()[0],
@@ -134,6 +140,8 @@ for epoch in range(epochs):
             })
 
             accumulated_loss = 0.0
+            accumulated_token_loss = 0.0
+            accumulated_surrogate_loss = 0.0
             accumulated_mse = 0.0
         
         progress_bar.set_description(f"Epoch {epoch + 1}, Loss: {loss.item():.4f}")

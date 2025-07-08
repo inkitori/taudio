@@ -8,7 +8,7 @@ from collections import namedtuple
 
 from helpers import poisson_loss
 
-Output = namedtuple('Output', ['loss', 'pred', 'gt'])
+Output = namedtuple('Output', ['loss', 'token_loss', 'surrogate_loss', 'pred', 'gt'])
 
 class TAudio(nn.Module):
     def __init__(
@@ -18,6 +18,7 @@ class TAudio(nn.Module):
             load_in_8bit: bool, 
             audio_layer: int,
             class_weighting: bool,
+            surrogate_loss: bool,
     ) -> None:
         super(TAudio, self).__init__()
 
@@ -38,6 +39,7 @@ class TAudio(nn.Module):
         self.linear = nn.Linear(self.hidden_dim, 1, dtype=self.base_model.dtype)
         self.audio_layer = audio_layer
         self.class_weighting = class_weighting
+        self.surrogate_loss = surrogate_loss
 
     def get_audio_token_id(self) -> int:
         return self.base_model.config.audio_token_index
@@ -48,14 +50,16 @@ class TAudio(nn.Module):
         attention_mask: torch.Tensor, # (batch_size, seq_len)
         input_features: torch.Tensor, # (batch_size, embedding_dim, audio_context_len)
         feature_attention_mask: torch.Tensor, # (batch_size, audio_context_len)
-        labels: torch.Tensor # (num_audio_tokens)
+        labels: torch.Tensor, # (num_audio_tokens)
+        label_ids: torch.Tensor
     ) -> torch.Tensor:
         outputs = self.base_model(
             input_ids=input_ids, 
             attention_mask=attention_mask,
             input_features=input_features,
             feature_attention_mask=feature_attention_mask,
-            output_hidden_states=True
+            output_hidden_states=True,
+            labels=label_ids,
         )
 
         hidden_states = outputs.hidden_states[self.audio_layer]  # (batch_size, seq_len, hidden_dim)
@@ -78,9 +82,16 @@ class TAudio(nn.Module):
         else:
             criterion = nn.BCEWithLogitsLoss()
 
-        loss = criterion(logits, labels)
+        if self.surrogate_loss:
+            surrogate_loss = criterion(logits, labels)
+        else:
+            surrogate_loss = torch.tensor(0.0, device=logits.device, dtype=logits.dtype)
 
-        output = Output(loss=loss, pred=(pred_top_val, pred_top_idx), gt=(gt_top_val, gt_top_idx))
+        token_loss = outputs.loss
+
+        loss = surrogate_loss + token_loss
+
+        output = Output(loss=loss, surrogate_loss=surrogate_loss, token_loss=token_loss, pred=(pred_top_val, pred_top_idx), gt=(gt_top_val, gt_top_idx))
         
         # logits = logits.unsqueeze(0)
         # labels = labels.unsqueeze(0)

@@ -1,0 +1,30 @@
+#!/bin/bash
+#SBATCH --partition=gpu-l40
+#SBATCH --account=ark
+#SBATCH --mem-per-gpu=128G
+#SBATCH --cpus-per-gpu=5
+#SBATCH --nodes=1
+#SBATCH --gres=gpu:1
+#SBATCH --time=3:59:00
+#SBATCH --job-name=train
+#SBATCH --output=/gscratch/ark/anjo0/taudio/scripts/%x/%j.out
+#SBATCH --error=/gscratch/ark/anjo0/taudio/scripts/%x/%j.err
+
+CONDA_BASE=$(conda info --base) # This is a good way to get it if conda is in PATH
+
+echo "CONDA_BASE detected as: ${CONDA_BASE}" # For debugging
+
+# Source the conda.sh script
+# The exact path might vary slightly based on your Conda version / installation type
+# but etc/profile.d/conda.sh is standard
+if [ -f "${CONDA_BASE}/etc/profile.d/conda.sh" ]; then
+    source "${CONDA_BASE}/etc/profile.d/conda.sh"
+    echo "Sourced ${CONDA_BASE}/etc/profile.d/conda.sh"
+else
+    echo "ERROR: conda.sh not found at ${CONDA_BASE}/etc/profile.d/conda.sh"
+    exit 1
+fi
+
+cd /gscratch/ark/anjo0/taudio
+conda activate taudio
+python main.py
