@@ -19,6 +19,7 @@ class TAudio(nn.Module):
             audio_layer: int,
             class_weighting: bool,
             surrogate_loss: bool,
+            token_loss: bool,
     ) -> None:
         super(TAudio, self).__init__()
 
@@ -37,9 +38,13 @@ class TAudio(nn.Module):
                 param.requires_grad = False
 
         self.linear = nn.Linear(self.hidden_dim, 1, dtype=self.base_model.dtype)
+
         self.audio_layer = audio_layer
+
         self.class_weighting = class_weighting
+
         self.surrogate_loss = surrogate_loss
+        self.token_loss = token_loss
 
     def get_audio_token_id(self) -> int:
         return self.base_model.config.audio_token_index
@@ -87,7 +92,10 @@ class TAudio(nn.Module):
         else:
             surrogate_loss = torch.tensor(0.0, device=logits.device, dtype=logits.dtype)
 
-        token_loss = outputs.loss
+        if self.token_loss:
+            token_loss = outputs.loss
+        else:
+            token_loss = torch.tensor(0.0, device=logits.device, dtype=logits.dtype)
 
         loss = surrogate_loss + token_loss
 

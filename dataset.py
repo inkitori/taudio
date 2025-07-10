@@ -14,11 +14,8 @@ SECONDS_TO_EMBEDDING = (1000) * (1 / 40) # 40 milliseconds per embedding (from t
 STOPS = set(stopwords.words('english'))
 UNK_TOKEN = "<unk>"
 ASSISTANT_ID = 77091
-SEED = 80
 
-random.seed(SEED)
-
-def _build_conversation(processor: Qwen2_5OmniProcessor, transcript: str, word: Dict[str, any]) -> str:
+def _build_conversation(processor: Qwen2_5OmniProcessor, word: Dict[str, any]) -> str:
 	word_end_json = '{"%s": %s}' % (word['word'], word['end'])
 	conversation = [
 		{
@@ -53,12 +50,12 @@ def _build_conversation(processor: Qwen2_5OmniProcessor, transcript: str, word: 
 def get_ds(
 		model_id: str, 
 		audio_token_id: int, 
-		split: str = 'train_clean_100'
+		split: str,
+		key: str
 ) -> Dataset:
 	def preprocess_fn(example: Dict[str, Any]) -> Dict[str, Any]:
 		audio = example['audio']
 		words = example['words']
-		transcript = example['transcript']
 
 		candidate_words = [word['word'] for word in words if word['word'] != UNK_TOKEN and word['word'] not in STOPS]
 		if len(candidate_words) > 0:
@@ -74,7 +71,7 @@ def get_ds(
 				first_occurence = word
 				break
 
-		prompt = _build_conversation(processor, transcript, first_occurence)
+		prompt = _build_conversation(processor, first_occurence)
 		audio_frames = audio['array'] # 16 khz
 
 		inputs = processor(
@@ -96,10 +93,11 @@ def get_ds(
 		labels_size = (input_ids == audio_token_id).sum().item()
 		labels = torch.zeros(labels_size)
 
-		start_idx = clamp(int(first_occurence['start'] * SECONDS_TO_EMBEDDING), 0, labels_size - 1)
-		end_idx = clamp(int(first_occurence['end'] * SECONDS_TO_EMBEDDING), 0, labels_size - 1)
+		# start_idx = clamp(int(first_occurence['start'] * SECONDS_TO_EMBEDDING), 0, labels_size - 1)
+		# end_idx = clamp(int(first_occurence['end'] * SECONDS_TO_EMBEDDING), 0, labels_size - 1)
+		idx = clamp(int(first_occurence[key] * SECONDS_TO_EMBEDDING), 0, labels_size - 1)
 
-		labels[end_idx] = 1.0
+		labels[idx] = 1.0
 
 		# mask out everything up to and including the assistant token
 		label_ids = input_ids.clone()
