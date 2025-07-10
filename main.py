@@ -29,11 +29,12 @@ dataloader_num_workers = 8
 checkpoints_dir = 'data/checkpoints'
 
 freeze_text_model = False
-audio_layer = -1 # which layer of the text model to project down to score
+audio_layer = 18 # which layer of the text model to project down to score
 class_weighting = True
-surrogate_loss = False
+surrogate_loss = True
 token_loss = True
 key = 'start'
+surrogate_loss_weight = 0.2
 
 run = wandb.init(
     entity="taudio",
@@ -59,7 +60,8 @@ run = wandb.init(
         "class_weighting": class_weighting,
         "surrogate_loss": surrogate_loss,
         "token_loss": token_loss,
-        "key": key
+        "key": key,
+        "surrogate_loss_weight": surrogate_loss_weight
     },
 )
 
@@ -70,14 +72,17 @@ model_config = {
     "audio_layer": audio_layer,
     "class_weighting": class_weighting,
     "surrogate_loss": surrogate_loss,
-    "token_loss": token_loss
+    "token_loss": token_loss,
+    "key": key,
+    "surrogate_loss_weight": surrogate_loss_weight
 }
 
 config_path = f"{checkpoints_dir}/model_{run.id}.yml"
 with open(config_path, 'w') as f:
     yaml.dump(model_config, f, default_flow_style=False)
 
-model = TAudio(**model_config).to(device)
+taudio_config = {k: v for k, v in model_config.items() if k != 'key'}
+model = TAudio(**taudio_config).to(device)
 
 ds = get_ds(
     model_id=model_id, 

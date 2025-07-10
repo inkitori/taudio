@@ -27,4 +27,4 @@ fi
 
 cd /gscratch/ark/anjo0/taudio
 conda activate taudio
-python eval.py --checkpoint_path $1
+python eval.py --checkpoint_path $1 --config_path $2
