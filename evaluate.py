@@ -131,27 +131,7 @@ def main():
         
         word = random.choice(list(candidates.values()))
         
-        conversation = [
-            {
-                "role": "system",
-                "content": [
-                    {"type": "text", "text": "You are Qwen, a virtual human developed by the Qwen Team, Alibaba Group, capable of perceiving auditory and visual inputs, as well as generating text and speech."}
-                ],
-            },
-            {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": f"What is the first occurence of the word '{word['word']}'?"},
-                    {"type": "audio", "audio": "PLACEHOLDER AUDIO"},
-                ],
-            },
-        ]
-        
-        text = processor.apply_chat_template(
-            conversation,
-            tokenize=False,
-            add_generation_prompt=True,
-        )
+        text = _build_conversation(processor, word, eval=True)
         
         inputs = processor(
             text=text,

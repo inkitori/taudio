@@ -14,8 +14,8 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 # hyperparams
 epochs = 1
-batch_size = 1
-grad_accumulation_steps = 8
+batch_size = 8
+grad_accumulation_steps = 1
 learning_rate = 5e-6
 eta_min_scale = 0.1  
 
@@ -25,7 +25,7 @@ model_id = "Qwen/Qwen2.5-Omni-3B"
 load_in_8bit = False
 optim_8bit = True
 
-dataloader_num_workers = 8
+dataloader_num_workers = 1
 checkpoints_dir = 'data/checkpoints'
 
 freeze_text_model = False

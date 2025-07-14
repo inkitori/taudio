@@ -15,8 +15,7 @@ STOPS = set(stopwords.words('english'))
 UNK_TOKEN = "<unk>"
 ASSISTANT_ID = 77091
 
-def _build_conversation(processor: Qwen2_5OmniProcessor, word: Dict[str, any]) -> str:
-	word_end_json = '{"%s": %s}' % (word['word'], word['end'])
+def _build_conversation(processor: Qwen2_5OmniProcessor, word: Dict[str, any], eval: bool = False) -> str:
 	conversation = [
 		{
 			"role": "system",
@@ -31,18 +30,21 @@ def _build_conversation(processor: Qwen2_5OmniProcessor, word: Dict[str, any]) -
 				{"type": "audio", "audio": "PLACEHOLDER AUDIO"}, # we will manually fill in the audio
 			],
 		},
-		{
+	]
+
+	if not eval:
+		word_end_json = '{"%s": %s}' % (word['word'], word['end'])
+		conversation.append({
 			"role": "assistant",
 			"content": [
 				{"type": "text", "text": f"{word_end_json}"},
 			],
-		},
-	]
+		})
 
 	text = processor.apply_chat_template(
 		conversation,
 		tokenize=False,
-		add_generation_prompt=False,
+		add_generation_prompt=eval,
 	)
 
 	return text
@@ -71,7 +73,7 @@ def get_ds(
 				first_occurence = word
 				break
 
-		prompt = _build_conversation(processor, first_occurence)
+		prompt = _build_conversation(processor, first_occurence, eval=False)
 		audio_frames = audio['array'] # 16 khz
 
 		inputs = processor(
@@ -119,6 +121,7 @@ def get_ds(
 			# 'audio_features': audio_features.to('cpu'),
 		}
 
+	print(f"Loading processor for {model_id}")
 	processor = Qwen2_5OmniProcessor.from_pretrained(model_id)
 
 	base_ds = load_dataset("gilkeyio/librispeech-alignments", split=split, streaming=True)
