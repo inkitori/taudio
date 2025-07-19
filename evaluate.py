@@ -131,7 +131,7 @@ def main():
         
         word = random.choice(list(candidates.values()))
         
-        text = _build_conversation(processor, word, eval=True)
+        text = _build_conversation(processor, word, key, eval=True)
         
         inputs = processor(
             text=text,

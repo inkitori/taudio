@@ -95,6 +95,7 @@ def main():
     )
     
     # Setup optimizer and scheduler
+    # TODO: get rid of this magic number
     total_optimizer_steps = (28_500 * training_config['epochs']) // training_config['grad_accumulation_steps']
     
     if training_config['optim_8bit']:

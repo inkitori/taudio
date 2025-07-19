@@ -15,7 +15,7 @@ STOPS = set(stopwords.words('english'))
 UNK_TOKEN = "<unk>"
 ASSISTANT_ID = 77091
 
-def _build_conversation(processor: Qwen2_5OmniProcessor, word: Dict[str, any], eval: bool = False) -> str:
+def _build_conversation(processor: Qwen2_5OmniProcessor, word: Dict[str, any], key: str,eval: bool = False) -> str:
 	conversation = [
 		{
 			"role": "system",
@@ -33,11 +33,11 @@ def _build_conversation(processor: Qwen2_5OmniProcessor, word: Dict[str, any], e
 	]
 
 	if not eval:
-		word_end_json = '{"%s": %s}' % (word['word'], word['end'])
+		word_json = '{"%s": %s}' % (word['word'], word[key])
 		conversation.append({
 			"role": "assistant",
 			"content": [
-				{"type": "text", "text": f"{word_end_json}"},
+				{"type": "text", "text": f"{word_json}"},
 			],
 		})
 
@@ -73,7 +73,7 @@ def get_ds(
 				first_occurence = word
 				break
 
-		prompt = _build_conversation(processor, first_occurence, eval=False)
+		prompt = _build_conversation(processor, first_occurence, key, eval=False)
 		audio_frames = audio['array'] # 16 khz
 
 		inputs = processor(
@@ -95,8 +95,6 @@ def get_ds(
 		labels_size = (input_ids == audio_token_id).sum().item()
 		labels = torch.zeros(labels_size)
 
-		# start_idx = clamp(int(first_occurence['start'] * SECONDS_TO_EMBEDDING), 0, labels_size - 1)
-		# end_idx = clamp(int(first_occurence['end'] * SECONDS_TO_EMBEDDING), 0, labels_size - 1)
 		idx = clamp(int(first_occurence[key] * SECONDS_TO_EMBEDDING), 0, labels_size - 1)
 
 		labels[idx] = 1.0
