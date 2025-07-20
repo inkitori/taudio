@@ -79,7 +79,8 @@ def main():
         model_id=model_config['model_id'],
         audio_token_id=model.get_audio_token_id(),
         split=dataset_config['split'],
-        key=dataset_config['key']
+        key=dataset_config['key'],
+        padding=dataset_config['padding']
     )
     
     # Create dataloader
