@@ -1,0 +1,36 @@
+dataset:
+  key: start
+  padding: 10
+  split: train_clean_100
+description: Surrogate loss, 8-bit optimizer, class weighting, start key, padding
+  10 tokens
+experiment_name: surrogate+optim_8bit+class_weighting [start] [padding_10]
+loss:
+  class_weighting: true
+  surrogate_loss: true
+  surrogate_loss_weight: 1.0
+  token_loss: false
+model:
+  audio_layer: -1
+  freeze_text_model: false
+  load_in_8bit: false
+  model_id: Qwen/Qwen2.5-Omni-3B
+system:
+  dataloader_num_workers: 1
+  seed: 80
+training:
+  batch_size: 1
+  epochs: 1
+  eta_min_scale: 0.1
+  grad_accumulation_steps: 8
+  learning_rate: 5.0e-06
+  optim_8bit: true
+wandb:
+  entity: taudio
+  project: Train
+  tags:
+  - surrogate
+  - optim_8bit
+  - class_weighting
+  - start
+  - padding_10

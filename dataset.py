@@ -5,6 +5,7 @@ import random
 from typing import Any, Dict, Optional
 import nltk
 from nltk.corpus import stopwords
+import numpy as np
 
 from utils import clamp
 
@@ -76,7 +77,12 @@ def get_ds(
 
 		prompt = _build_conversation(processor, first_occurence, key, eval=False)
 		audio_frames = audio['array'] # 16 khz
-		print(f"audio_frames.shape: {audio_frames.shape}")
+
+		# Right pad audio_frames by 16 (16 frames per ms) * 40 (40 ms per embedding) * padding zeros
+		if padding > 0:
+			pad_length = 16 * 40 * padding
+			audio_frames = np.pad(audio_frames, (0, pad_length), mode='constant')
+		
 
 		inputs = processor(
 			text=prompt,
@@ -93,73 +99,9 @@ def get_ds(
 		input_features = inputs['input_features'] # (batch_size, embedding_dim, audio_context_len)
 		feature_attention_mask = inputs['feature_attention_mask'] # (batch_size, audio_context_len)
 
-		print('ORIGINAL')
-		print(f"input_features.shape: {input_features.shape}")
-		print(f"feature_attention_mask.shape: {feature_attention_mask.shape}")
-		print(f"input_features: {input_features}")
-		print(f"feature_attention_mask: {feature_attention_mask}")
-		print(f"feature_attention_mask.sum(): {feature_attention_mask.sum()}")
-
-		# Apply padding if specified
-		if padding > 0:
-			# Find the last position of audio_token_id to insert padding after it
-			audio_token_positions = (input_ids == audio_token_id).nonzero(as_tuple=True)[1]
-			if len(audio_token_positions) > 0:
-				last_audio_pos = audio_token_positions[-1].item() + 1  # Position right after last audio token
-				
-				# Split input_ids at the insertion point
-				before_audio = input_ids[:, :last_audio_pos]
-				after_audio = input_ids[:, last_audio_pos:]
-				
-				# Create padding tokens and insert them
-				padding_tokens = torch.full((1, padding), audio_token_id, dtype=input_ids.dtype)
-				input_ids = torch.cat([before_audio, padding_tokens, after_audio], dim=1)
-				
-				# Do the same for attention_mask
-				before_attention = attention_mask[:, :last_audio_pos]
-				after_attention = attention_mask[:, last_audio_pos:]
-				padding_attention = torch.ones((1, padding), dtype=attention_mask.dtype)
-				attention_mask = torch.cat([before_attention, padding_attention, after_attention], dim=1)
-				
-				# Modify feature_attention_mask: replace padding amount of 0s after last 1 with 1s
-				# Find the last 1 in feature_attention_mask
-				ones_positions = (feature_attention_mask == 1).nonzero(as_tuple=True)[1]
-				if len(ones_positions) > 0:
-					last_one_pos = ones_positions[-1].item()
-					# Find how many 0s we can replace after the last 1
-					zeros_after = ((feature_attention_mask[0, last_one_pos+1:] == 0).sum()).item()
-					replace_count = min(padding * 4, zeros_after)
-					if replace_count > 0:
-						feature_attention_mask[0, last_one_pos+1:last_one_pos+1+replace_count] = 1
-			else:
-				print('NO AUDIO TOKENS FOUND')
-				# Fallback: if no audio tokens found, just append (shouldn't happen in normal cases)
-				padding_tokens = torch.full((1, padding), audio_token_id, dtype=input_ids.dtype)
-				input_ids = torch.cat([input_ids, padding_tokens], dim=1)
-				padding_attention = torch.ones((1, padding), dtype=attention_mask.dtype)
-				attention_mask = torch.cat([attention_mask, padding_attention], dim=1)
-				
-				# For fallback case, also modify feature_attention_mask
-				ones_positions = (feature_attention_mask == 1).nonzero(as_tuple=True)[1]
-				if len(ones_positions) > 0:
-					last_one_pos = ones_positions[-1].item()
-					zeros_after = ((feature_attention_mask[0, last_one_pos+1:] == 0).sum()).item()
-					replace_count = min(padding * 4, zeros_after)
-					if replace_count > 0:
-						feature_attention_mask[0, last_one_pos+1:last_one_pos+1+replace_count] = 1
-
-		print('ADJUSTED')
-		print(f"ADJUSTED_input_features.shape: {input_features.shape}")
-		print(f"ADJUSTED_feature_attention_mask.shape: {feature_attention_mask.shape}")
-		print(f"ADJUSTED_input_features: {input_features}")
-		print(f"ADJUSTED_feature_attention_mask: {feature_attention_mask}")
-		print(f"ADJUSTED_feature_attention_mask.sum(): {feature_attention_mask.sum()}")
-		print(f"ADJUSTED_input_ids.shape: {input_ids.shape}")
-		print(f"ADJUSTED_attention_mask.shape: {attention_mask.shape}")
 
 		# <AUDIO> tokens in input_ids correspond to audio embeddings (40 ms per embedding)
 		labels_size = (input_ids == audio_token_id).sum().item()
-		print(f"ADJUSTED_labels_size: {labels_size}")
 		labels = torch.zeros(labels_size)
 
 		# Left pad labels with zeros if padding was applied
@@ -170,7 +112,6 @@ def get_ds(
 
 		# mask out everything up to and including the assistant token
 		label_ids = input_ids.clone()
-		print(f"ADJUSTED_label_ids.shape: {label_ids.shape}")
 		assistant_idx = (input_ids == ASSISTANT_ID).nonzero(as_tuple=True)[1][0] if (input_ids == ASSISTANT_ID).any() else 0
 		label_ids[0, :assistant_idx + 1] = -100
 

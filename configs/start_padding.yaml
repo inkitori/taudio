@@ -1,6 +1,6 @@
 # Base experiment configuration
-experiment_name: "surrogate+optim_8bit+class_weighting [start] [padding_10]"
-description: "Surrogate loss, 8-bit optimizer, class weighting, start key, padding 10 tokens"
+experiment_name: "surrogate+optim_8bit+class_weighting [start] [padding_20]"
+description: "Surrogate loss, 8-bit optimizer, class weighting, start key, padding 20 tokens"
 
 # Model configuration
 model:
@@ -22,7 +22,7 @@ training:
 dataset:
   split: "train_clean_100"
   key: "start"  
-  padding: 10
+  padding: 20
   
 # Loss configuration
 loss:
@@ -40,4 +40,4 @@ system:
 wandb:
   entity: "taudio"
   project: "Train"
-  tags: ["surrogate", "optim_8bit", "class_weighting", "start", "padding_10"] 
+  tags: ["surrogate", "optim_8bit", "class_weighting", "start", "padding_20"] 

@@ -114,6 +114,12 @@ def main():
     token_correct = 0
     total = 0
     
+    # Variables for mean absolute deviation tracking
+    token_abs_error_sum = 0.0
+    aux_abs_error_sum = 0.0
+    token_valid_count = 0
+    aux_valid_count = 0
+    
     key = config['dataset']['key']
     audio_layer = model_config['audio_layer']
     
@@ -133,6 +139,7 @@ def main():
         
         text = _build_conversation(processor, word, key, eval=True)
         
+        print("DONT FORGET TO PAD example['audio']['array'] BY THE PADDING CONFIGURATION, AND THEN SUBTRACT THE AUXILIARY OUTPUT BY THE PAD AMOUNT")
         inputs = processor(
             text=text,
             audio=example['audio']['array'],
@@ -165,7 +172,12 @@ def main():
                 generated_string = processor.tokenizer.decode(generated_tokens)
                 token_pred = json.loads(generated_string)[word['word']]
                 
-                if abs(token_pred - gt) <= args.error_bound:
+                # Track absolute error for MAD calculation
+                token_abs_error = abs(token_pred - gt)
+                token_abs_error_sum += token_abs_error
+                token_valid_count += 1
+                
+                if token_abs_error <= args.error_bound:
                     token_correct += 1
                 
                 print(f"TOKEN_PRED: {token_pred}")
@@ -175,17 +187,24 @@ def main():
         if args.aux_output:
             aux_pred = float(aux_pred_top_idx) / 25
             
-            if abs(aux_pred - gt) <= args.error_bound:
+            # Track absolute error for MAD calculation
+            aux_abs_error = abs(aux_pred - gt)
+            aux_abs_error_sum += aux_abs_error
+            aux_valid_count += 1
+            
+            if aux_abs_error <= args.error_bound:
                 aux_correct += 1
             
             print(f"AUX_PRED: {aux_pred}")
         
         # Log metrics
         metrics = {}
-        if args.token_output:
+        if args.token_output and token_valid_count > 0:
             metrics["token_accuracy"] = token_correct / total
-        if args.aux_output:
+            metrics["token_mad"] = token_abs_error_sum / token_valid_count
+        if args.aux_output and aux_valid_count > 0:
             metrics["auxiliary_accuracy"] = aux_correct / total
+            metrics["auxiliary_mad"] = aux_abs_error_sum / aux_valid_count
         
         run.log(metrics)
     
@@ -193,8 +212,12 @@ def main():
     print(f"\nEvaluation completed on {total} examples:")
     if args.token_output:
         print(f"Token accuracy: {token_correct/total:.4f} ({token_correct}/{total})")
+        if token_valid_count > 0:
+            print(f"Token MAD: {token_abs_error_sum/token_valid_count:.4f} ({token_valid_count} valid predictions)")
     if args.aux_output:
         print(f"Auxiliary accuracy: {aux_correct/total:.4f} ({aux_correct}/{total})")
+        if aux_valid_count > 0:
+            print(f"Auxiliary MAD: {aux_abs_error_sum/aux_valid_count:.4f} ({aux_valid_count} valid predictions)")
     
     run.finish()
 
