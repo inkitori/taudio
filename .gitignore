@@ -6,3 +6,4 @@ wandb/
 *.err
 *.out
 env/
+outputs/

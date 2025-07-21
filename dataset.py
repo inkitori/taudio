@@ -7,7 +7,7 @@ import nltk
 from nltk.corpus import stopwords
 import numpy as np
 
-from utils import clamp
+from utils import clamp, pad_audio
 
 SECONDS_TO_EMBEDDING = (1000) * (1 / 40) # 40 milliseconds per embedding (from technical report)
 # For example, 10 seconds of audio would be 10 * 1000 = 10000 milliseconds, which would be 10000 / 40 = 250 embeddings.
@@ -80,9 +80,7 @@ def get_ds(
 
 		# Right pad audio_frames by 16 (16 frames per ms) * 40 (40 ms per embedding) * padding zeros
 		if padding > 0:
-			pad_length = 16 * 40 * padding
-			audio_frames = np.pad(audio_frames, (0, pad_length), mode='constant')
-		
+			audio_frames = pad_audio(audio_frames, padding)
 
 		inputs = processor(
 			text=prompt,

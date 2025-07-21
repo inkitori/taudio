@@ -11,8 +11,9 @@ import json
 import wandb
 import argparse
 from pathlib import Path
-
+from utils import pad_audio
 from config_utils import ConfigManager
+from dataset import _build_conversation, SECONDS_TO_EMBEDDING
 
 
 def main():
@@ -25,9 +26,9 @@ def main():
                        help='Dataset split to evaluate on')
     parser.add_argument('--error-bound', type=float, default=0.1,
                        help='Error bound for considering predictions correct')
-    parser.add_argument('--aux-output', action='store_true',
+    parser.add_argument('--aux-output', action='store_true', default=False,
                        help='Enable auxiliary output evaluation')
-    parser.add_argument('--token-output', action='store_true', default=True,
+    parser.add_argument('--token-output', action='store_true', default=False,
                        help='Enable token output evaluation')
     args = parser.parse_args()
     
@@ -124,6 +125,8 @@ def main():
     audio_layer = model_config['audio_layer']
     
     print(f"Evaluating on {args.split} split, predicting '{key}' times")
+
+    model.base_model.eval()
     
     for example in base_ds:
         candidates = {}
@@ -139,26 +142,16 @@ def main():
         
         text = _build_conversation(processor, word, key, eval=True)
         
-        print("DONT FORGET TO PAD example['audio']['array'] BY THE PADDING CONFIGURATION, AND THEN SUBTRACT THE AUXILIARY OUTPUT BY THE PAD AMOUNT")
+        audio_frames = example['audio']['array']
+        if config['dataset']['padding'] > 0:    # Pad the audio by the padding configuration
+            audio_frames = pad_audio(audio_frames, config['dataset']['padding'])
+        
         inputs = processor(
             text=text,
-            audio=example['audio']['array'],
+            audio=audio_frames,
             return_tensors='pt',
             padding=True,
         ).to(device)
-        
-        with torch.no_grad():
-            tokens = model.base_model.generate(
-                **inputs,
-                eos_token_id=processor.tokenizer.eos_token_id,
-            )
-            
-            if args.aux_output:
-                outputs = model.base_model(**inputs, output_hidden_states=True)
-                hidden_states = outputs.hidden_states[audio_layer]
-                audio_hidden_states = hidden_states[inputs['input_ids'] == model.get_audio_token_id()]
-                logits = model.linear(audio_hidden_states).squeeze()
-                _, aux_pred_top_idx = torch.max(logits, dim=0)
         
         gt = word[key]
         total += 1
@@ -168,6 +161,12 @@ def main():
         
         if args.token_output:
             try:
+                with torch.no_grad():
+                    tokens = model.base_model.generate(
+                        **inputs,
+                        eos_token_id=processor.tokenizer.eos_token_id,
+                    )
+
                 generated_tokens = tokens[0][inputs['input_ids'].shape[1]:-1]
                 generated_string = processor.tokenizer.decode(generated_tokens)
                 token_pred = json.loads(generated_string)[word['word']]
@@ -185,7 +184,17 @@ def main():
                 print(f"Token prediction failed: {e}")
         
         if args.aux_output:
-            aux_pred = float(aux_pred_top_idx) / 25
+            with torch.no_grad():
+                outputs = model.base_model(**inputs, output_hidden_states=True)
+                hidden_states = outputs.hidden_states[audio_layer]
+                audio_hidden_states = hidden_states[inputs['input_ids'] == model.get_audio_token_id()]
+                logits = model.linear(audio_hidden_states).squeeze()
+                _, aux_pred_top_idx = torch.max(logits, dim=0)
+
+            if config['dataset']['padding'] > 0:
+                aux_pred = float(aux_pred_top_idx - config['dataset']['padding']) / SECONDS_TO_EMBEDDING
+            else:
+                aux_pred = float(aux_pred_top_idx) / SECONDS_TO_EMBEDDING
             
             # Track absolute error for MAD calculation
             aux_abs_error = abs(aux_pred - gt)
