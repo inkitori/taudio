@@ -55,6 +55,7 @@ def get_ds(
 		audio_token_id: int, 
 		split: str,
 		key: str,
+		repository: str = "gilkeyio/librispeech-alignments",
 		padding: int = 0
 ) -> Dataset:
 	def preprocess_fn(example: Dict[str, Any]) -> Dict[str, Any]:
@@ -131,7 +132,7 @@ def get_ds(
 	print(f"Loading processor for {model_id}")
 	processor = Qwen2_5OmniProcessor.from_pretrained(model_id)
 
-	base_ds = load_dataset("gilkeyio/librispeech-alignments", split=split, streaming=True)
+	base_ds = load_dataset(repository, split=split, streaming=True)
 
 	ds = base_ds.map(preprocess_fn, remove_columns=base_ds.column_names)
 

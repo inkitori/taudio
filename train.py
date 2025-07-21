@@ -77,6 +77,7 @@ def main():
     dataset_config = config['dataset']
     ds = get_ds(
         model_id=model_config['model_id'],
+        repository=dataset_config['repository'],
         audio_token_id=model.get_audio_token_id(),
         split=dataset_config['split'],
         key=dataset_config['key'],

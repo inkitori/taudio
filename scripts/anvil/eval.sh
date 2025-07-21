@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --partition=ai
-#SBATCH --account=ai250124
+#SBATCH --account=ai250124-ai
 #SBATCH --mem-per-gpu=128G
 #SBATCH --cpus-per-gpu=20
 #SBATCH --nodes=1
