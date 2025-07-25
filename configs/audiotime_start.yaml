@@ -1,34 +1,36 @@
-# End prediction experiment configuration
-experiment_name: "end_prediction"
-description: "Experiment for predicting word end times instead of start times"
+# Base experiment configuration
+experiment_name: "[audiotime]surrogate+optim_8bit+class_weighting[start][padding_10]"
+description: "AudioTime timestamps"
 
 # Model configuration
 model:
   model_id: "Qwen/Qwen2.5-Omni-3B"
   load_in_8bit: false
   freeze_text_model: false
-  audio_layer: 18
+  audio_layer: -1
 
 # Training configuration
 training:
   epochs: 1
   batch_size: 1
   grad_accumulation_steps: 8
-  learning_rate: 5e-6
+  learning_rate: 5.0e-6
   eta_min_scale: 0.1
   optim_8bit: true
   
 # Dataset configuration
 dataset:
-  split: "train_clean_100"
-  key: "end"  # predicting end times instead of start
+  split: "train"
+  key: "start"  # or "end"
+  repository: "enyoukai/audiotime-timestamps"
+  padding: 10
   
 # Loss configuration
 loss:
   class_weighting: true
   surrogate_loss: true
-  token_loss: true
-  surrogate_loss_weight: 0.2
+  token_loss: false
+  surrogate_loss_weight: 1.0
 
 # System configuration
 system:
@@ -39,4 +41,4 @@ system:
 wandb:
   entity: "taudio"
   project: "Train"
-  tags: ["end_prediction", "experiment"] 
+  tags: ["audiotime", "timestamps"] 

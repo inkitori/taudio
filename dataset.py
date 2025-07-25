@@ -16,7 +16,14 @@ STOPS = set(stopwords.words('english'))
 UNK_TOKEN = "<unk>"
 ASSISTANT_ID = 77091
 
-def _build_conversation(processor: Qwen2_5OmniProcessor, word: Dict[str, any], key: str,eval: bool = False) -> str:
+def _build_conversation(processor: Qwen2_5OmniProcessor, repository: str, word: Dict[str, any], key: str, eval: bool = False) -> str:
+	if repository == "gilkeyio/librispeech-alignments":
+		prompt = f"What is the first occurence of the word '{word['word']}'?"
+	elif repository == "enyoukai/audiotime-timestamps":
+		prompt = f"When does the '{word['word']}' occur?"
+	else:
+		raise ValueError(f"Invalid repository: {repository}")
+
 	conversation = [
 		{
 			"role": "system",
@@ -27,7 +34,7 @@ def _build_conversation(processor: Qwen2_5OmniProcessor, word: Dict[str, any], k
 		{
 			"role": "user",
 			"content": [
-				{"type": "text", "text": f"What is the first occurence of the word '{word['word']}'?"},
+				{"type": "text", "text": prompt},
 				{"type": "audio", "audio": "PLACEHOLDER AUDIO"}, # we will manually fill in the audio
 			],
 		},
@@ -76,7 +83,7 @@ def get_ds(
 				first_occurence = word
 				break
 
-		prompt = _build_conversation(processor, first_occurence, key, eval=False)
+		prompt = _build_conversation(processor, first_occurence, key, eval=False, repository=repository)
 		audio_frames = audio['array'] # 16 khz
 
 		# Right pad audio_frames by 16 (16 frames per ms) * 40 (40 ms per embedding) * padding zeros

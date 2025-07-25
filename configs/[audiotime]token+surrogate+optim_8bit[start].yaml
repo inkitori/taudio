@@ -1,0 +1,44 @@
+# Base experiment configuration
+experiment_name: "[audiotime]token+surrogate+optim_8bit[start]"
+description: "AudioTime timestamps"
+
+# Model configuration
+model:
+  model_id: "Qwen/Qwen2.5-Omni-3B"
+  load_in_8bit: false
+  freeze_text_model: false
+  audio_layer: -1
+
+# Training configuration
+training:
+  epochs: 1
+  batch_size: 1
+  grad_accumulation_steps: 8
+  learning_rate: 5.0e-6
+  eta_min_scale: 0.1
+  optim_8bit: true
+  
+# Dataset configuration
+dataset:
+  split: "train"
+  key: "start"  # or "end"
+  repository: "enyoukai/audiotime-timestamps"
+  padding: 0
+  
+# Loss configuration
+loss:
+  class_weighting: false
+  surrogate_loss: true
+  token_loss: true
+  surrogate_loss_weight: 1.0
+
+# System configuration
+system:
+  dataloader_num_workers: 8
+  seed: 80
+
+# Wandb configuration
+wandb:
+  entity: "taudio"
+  project: "Train"
+  tags: ["audiotime", "timestamps", "token", "start", "surrogate", "optim_8bit"] 

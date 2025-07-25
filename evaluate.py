@@ -26,12 +26,8 @@ def main():
                        help='Dataset split to evaluate on')
     parser.add_argument('--error-bound', type=float, default=0.1,
                        help='Error bound for considering predictions correct')
-    parser.add_argument('--aux-output', action='store_true', default=False,
-                       help='Enable auxiliary output evaluation')
-    parser.add_argument('--token-output', action='store_true', default=False,
-                       help='Enable token output evaluation')
     args = parser.parse_args()
-    
+
     # Initialize config manager
     config_manager = ConfigManager()
     
@@ -58,6 +54,9 @@ def main():
     with open(config_path, 'r') as f:
         import yaml
         config = yaml.safe_load(f)
+    
+    args.aux_output = config['loss']['surrogate_loss']
+    args.token_output = config['loss']['token_loss']
     
     # Get model checkpoint
     checkpoint_path = config_manager.get_model_checkpoint(experiment_dir, args.epoch)
@@ -108,7 +107,7 @@ def main():
     model.eval()
     
     # Load dataset
-    base_ds = datasets.load_dataset("gilkeyio/librispeech-alignments", split=args.split, streaming=True)
+    base_ds = datasets.load_dataset(config['dataset']['repository'], split=args.split, streaming=True)
     
     # Evaluation loop
     aux_correct = 0
@@ -140,7 +139,7 @@ def main():
         
         word = random.choice(list(candidates.values()))
         
-        text = _build_conversation(processor, word, key, eval=True)
+        text = _build_conversation(processor, config['dataset']['repository'], word, key, eval=True)
         
         audio_frames = example['audio']['array']
         if config['dataset']['padding'] > 0:    # Pad the audio by the padding configuration
