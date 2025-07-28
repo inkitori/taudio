@@ -1,0 +1,46 @@
+# Base experiment configuration
+experiment_name: "[librispeech]surrogate+optim_8bit+bidirectional_audio[start][poisson]"
+description: "Surrogate loss, 8-bit optimizer, start key, bidirectional audio, poisson loss"
+
+# Model configuration
+model:
+  model_id: "Qwen/Qwen2.5-Omni-3B"
+  load_in_8bit: false
+  freeze_text_model: false
+  audio_layer: -1
+  bidirectional_audio: true
+
+# Training configuration
+training:
+  epochs: 1
+  batch_size: 1
+  grad_accumulation_steps: 8
+  learning_rate: 5.0e-6
+  eta_min_scale: 0.1
+  optim_8bit: true
+  
+# Dataset configuration
+dataset:
+  split: "train_clean_100"
+  key: "start"  
+  repository: "gilkeyio/librispeech-alignments"
+  padding: 0
+  
+# Loss configuration
+loss:
+  class_weighting: false
+  surrogate_loss: true
+  token_loss: false
+  surrogate_loss_weight: 1.0
+  poisson_loss: true
+
+# System configuration
+system:
+  dataloader_num_workers: 1
+  seed: 80
+
+# Wandb configuration
+wandb:
+  entity: "taudio"
+  project: "Train"
+  tags: ["surrogate", "optim_8bit", "bidirectional_audio", "start", "padding_0", "poisson"] 

@@ -41,8 +41,8 @@ def poisson_loss(log_hazard, label_mask, frame_mask):
     label_mask (batch, seq len): boolean mask for when the events occurred, 1 if the event occurred in that frame, 0 otherwise
     frame_mask (batch, seq len): boolean mask for the frame padding
     '''
-    cumulative_hazard = torch.cumsum(torch.exp(log_hazard) * frame_mask, dim=1)[:, -1]
-    return -(-cumulative_hazard + (log_hazard * label_mask).sum(dim=1))
+    cumulative_hazard = torch.sum(torch.exp(log_hazard) * frame_mask, dim=1)
+    return cumulative_hazard - (log_hazard * label_mask).sum(dim=1)
 
 # perform inference
 def infer_timestamps(num_pred, log_hazard, frame_mask, num_frames):
