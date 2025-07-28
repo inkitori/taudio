@@ -60,6 +60,7 @@ def extend_audio_with_noise(example, min_duration=5.0, max_duration=15.0):
     audio_data = example["audio"]
     audio_array = audio_data["array"]
     sampling_rate = audio_data["sampling_rate"]
+    audio_path = audio_data['path']
     
     # Randomly choose extension duration between min_duration and max_duration
     extension_duration = random.uniform(min_duration, max_duration)
@@ -74,7 +75,7 @@ def extend_audio_with_noise(example, min_duration=5.0, max_duration=15.0):
     
     # Create a new audio dictionary instead of modifying the AudioDecoder object
     example['audio'] = {
-        "path": audio_data['path'],
+        "path": audio_path,
         "array": extended_audio,
         "sampling_rate": sampling_rate
     }
