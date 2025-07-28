@@ -243,10 +243,10 @@ def create_audiotime_dataset(
         train_dataset = train_dataset.map(
             extend_audio_with_noise, 
             desc="Extending audio",
-            num_proc=1,  # Disable multiprocessing to avoid deadlocks with audio
-            load_from_cache_file=False,  # Disable caching to avoid memory issues
-            batched=False,  # Process one example at a time
-            writer_batch_size=100  # Write to disk in smaller batches
+            num_proc=1,
+            cache_file_name="audiotime_train_extended.cache",
+            batched=False,
+            writer_batch_size=100
         )
         dataset_dict["train"] = train_dataset
         logger.info(f"Created train split with {len(train_examples)} examples")
@@ -268,10 +268,10 @@ def create_audiotime_dataset(
             test_dataset = test_dataset.map(
                 extend_audio_with_noise, 
                 desc="Extending audio",
-                num_proc=1,  # Disable multiprocessing to avoid deadlocks with audio
-                load_from_cache_file=False,  # Disable caching to avoid memory issues
-                batched=False,  # Process one example at a time
-                writer_batch_size=100  # Write to disk in smaller batches
+                num_proc=1,
+                cache_file_name="audiotime_test_extended.cache",
+                batched=False,
+                writer_batch_size=100
             )
             dataset_dict["test"] = test_dataset
             logger.info(f"Created test split with {len(test_examples)} examples")
