@@ -56,49 +56,38 @@ def extend_audio_with_noise(example, min_duration=5.0, max_duration=15.0):
     Returns:
         Modified example with extended audio
     """
+    # Get audio data
+    audio_data = example["audio"]
+    audio_array = audio_data["array"]
+    sampling_rate = audio_data["sampling_rate"]
+    
+    # AudioDecoder may not have path accessible via dictionary access
+    # Try to get path, but fallback to None if not available
     try:
-        # Get audio data
-        audio_data = example["audio"]
-        audio_array = audio_data["array"]
-        sampling_rate = audio_data["sampling_rate"]
-        
-        # Ensure audio_array is a numpy array
-        if not isinstance(audio_array, np.ndarray):
-            audio_array = np.array(audio_array)
-        
-        # AudioDecoder may not have path accessible via dictionary access
-        # Try to get path, but fallback to None if not available
-        try:
-            audio_path = audio_data["path"]
-        except (KeyError, TypeError):
-            # Path might be stored differently or not available in AudioDecoder
-            audio_path = getattr(audio_data, 'path', None)
-        
-        # Use numpy random instead of random module for better multiprocessing behavior
-        rng = np.random.default_rng()
-        extension_duration = rng.uniform(min_duration, max_duration)
-        extension_samples = int(extension_duration * sampling_rate)
-        
-        # Generate white noise with same amplitude range as original audio
-        audio_std = np.std(audio_array) if len(audio_array) > 0 else 0.1
-        noise = rng.normal(0, audio_std * 0.1, extension_samples).astype(np.float32)
-        
-        # Concatenate original audio with noise
-        extended_audio = np.concatenate([audio_array, noise])
-        
-        # Create a new audio dictionary instead of modifying the AudioDecoder object
-        example['audio'] = {
-            "path": audio_path,
-            "array": extended_audio,
-            "sampling_rate": sampling_rate
-        }
-        
-        return example
-        
-    except Exception as e:
-        logger.error(f"Error processing audio example: {e}")
-        # Return original example if processing fails
-        return example
+        audio_path = audio_data["path"]
+    except (KeyError, TypeError):
+        # Path might be stored differently or not available in AudioDecoder
+        audio_path = getattr(audio_data, 'path', None)
+    
+    # Randomly choose extension duration between min_duration and max_duration
+    extension_duration = random.uniform(min_duration, max_duration)
+    extension_samples = int(extension_duration * sampling_rate)
+    
+    # Generate white noise with same amplitude range as original audio
+    audio_std = np.std(audio_array) if len(audio_array) > 0 else 0.1
+    noise = np.random.normal(0, audio_std * 0.1, extension_samples).astype(np.float32)
+    
+    # Concatenate original audio with noise
+    extended_audio = np.concatenate([audio_array, noise])
+    
+    # Create a new audio dictionary instead of modifying the AudioDecoder object
+    example['audio'] = {
+        "path": audio_path,
+        "array": extended_audio,
+        "sampling_rate": sampling_rate
+    }
+    
+    return example
 
 
 def parse_timestamp_events(events: Dict[str, List[List[float]]]) -> List[Dict[str, Any]]:
@@ -240,14 +229,7 @@ def create_audiotime_dataset(
         train_dataset = train_dataset.cast_column("audio", Audio(sampling_rate=target_sampling_rate))
         # Extend audio with random noise (5-15 seconds)
         logger.info("Extending train audio with random noise...")
-        train_dataset = train_dataset.map(
-            extend_audio_with_noise, 
-            desc="Extending audio",
-            num_proc=1,
-            cache_file_name="audiotime_train_extended.cache",
-            batched=False,
-            writer_batch_size=100
-        )
+        train_dataset = train_dataset.map(extend_audio_with_noise, desc="Extending audio")
         dataset_dict["train"] = train_dataset
         logger.info(f"Created train split with {len(train_examples)} examples")
     else:
@@ -265,14 +247,7 @@ def create_audiotime_dataset(
             test_dataset = test_dataset.cast_column("audio", Audio(sampling_rate=target_sampling_rate))
             # Extend audio with random noise (5-15 seconds)
             logger.info("Extending test audio with random noise...")
-            test_dataset = test_dataset.map(
-                extend_audio_with_noise, 
-                desc="Extending audio",
-                num_proc=1,
-                cache_file_name="audiotime_test_extended.cache",
-                batched=False,
-                writer_batch_size=100
-            )
+            test_dataset = test_dataset.map(extend_audio_with_noise, desc="Extending audio")
             dataset_dict["test"] = test_dataset
             logger.info(f"Created test split with {len(test_examples)} examples")
         else:
