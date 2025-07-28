@@ -60,7 +60,14 @@ def extend_audio_with_noise(example, min_duration=5.0, max_duration=15.0):
     audio_data = example["audio"]
     audio_array = audio_data["array"]
     sampling_rate = audio_data["sampling_rate"]
-    audio_path = audio_data['path']
+    
+    # AudioDecoder may not have path accessible via dictionary access
+    # Try to get path, but fallback to None if not available
+    try:
+        audio_path = audio_data["path"]
+    except (KeyError, TypeError):
+        # Path might be stored differently or not available in AudioDecoder
+        audio_path = getattr(audio_data, 'path', None)
     
     # Randomly choose extension duration between min_duration and max_duration
     extension_duration = random.uniform(min_duration, max_duration)
