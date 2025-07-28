@@ -80,6 +80,7 @@ def extend_audio_with_noise(example, min_duration=5.0, max_duration=15.0):
     # Concatenate original audio with noise
     extended_audio = np.concatenate([audio_array, noise])
     
+    print(extended_audio.shape)
     # Create a new audio dictionary instead of modifying the AudioDecoder object
     example['audio'] = {
         "path": audio_path,
@@ -229,6 +230,7 @@ def create_audiotime_dataset(
         train_dataset = train_dataset.cast_column("audio", Audio(sampling_rate=target_sampling_rate))
         # Extend audio with random noise (5-15 seconds)
         logger.info("Extending train audio with random noise...")
+        train_dataset.set_format("numpy")
         train_dataset = train_dataset.map(
             extend_audio_with_noise, 
             batched=False, 
@@ -253,6 +255,7 @@ def create_audiotime_dataset(
             test_dataset = test_dataset.cast_column("audio", Audio(sampling_rate=target_sampling_rate))
             # Extend audio with random noise (5-15 seconds)
             logger.info("Extending test audio with random noise...")
+            test_dataset.set_format("numpy")
             test_dataset = test_dataset.map(
                 extend_audio_with_noise, 
                 batched=False, 
