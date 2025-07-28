@@ -224,7 +224,7 @@ def create_audiotime_dataset(
         train_dataset = train_dataset.cast_column("audio", Audio(sampling_rate=target_sampling_rate))
         # Extend audio with random noise (5-15 seconds)
         logger.info("Extending train audio with random noise...")
-        train_dataset.set_format("numpy")
+        train_dataset.set_format("pt")
         train_dataset = train_dataset.map(
             extend_audio_with_noise, 
             batched=False, 
@@ -249,7 +249,7 @@ def create_audiotime_dataset(
             test_dataset = test_dataset.cast_column("audio", Audio(sampling_rate=target_sampling_rate))
             # Extend audio with random noise (5-15 seconds)
             logger.info("Extending test audio with random noise...")
-            test_dataset.set_format("numpy")
+            test_dataset.set_format("pt")
             test_dataset = test_dataset.map(
                 extend_audio_with_noise, 
                 batched=False, 
