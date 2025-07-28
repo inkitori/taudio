@@ -71,10 +71,13 @@ def extend_audio_with_noise(example, min_duration=5.0, max_duration=15.0):
     
     # Concatenate original audio with noise
     extended_audio = np.concatenate([audio_array, noise])
-    # If example['audio'] does not support item assignment, create a new dict
-    audio_data = dict(example['audio'])
-    audio_data['array'] = extended_audio
-    example['audio'] = audio_data
+    
+    # Create a new audio dictionary instead of modifying the AudioDecoder object
+    example['audio'] = {
+        "path": audio_data.get("path", None),
+        "array": extended_audio,
+        "sampling_rate": sampling_rate
+    }
     
     return example
 
