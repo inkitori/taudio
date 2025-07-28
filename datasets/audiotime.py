@@ -75,7 +75,12 @@ def extend_audio_with_noise(example, min_duration=5.0, max_duration=15.0):
     print('noise', noise.shape)
     print('extended_audio', extended_audio.shape)
     
-    setattr(example['audio'], 'array', extended_audio)
+    # Properly update the audio data by modifying the example dictionary
+    example['audio'] = {
+        'path': getattr(example['audio'], 'path', None),
+        'array': extended_audio,
+        'sampling_rate': sampling_rate
+    }
     print('final shape', example['audio']['array'].shape)
 
     return example
