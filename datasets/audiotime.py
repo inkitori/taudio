@@ -229,7 +229,13 @@ def create_audiotime_dataset(
         train_dataset = train_dataset.cast_column("audio", Audio(sampling_rate=target_sampling_rate))
         # Extend audio with random noise (5-15 seconds)
         logger.info("Extending train audio with random noise...")
-        train_dataset = train_dataset.map(extend_audio_with_noise, desc="Extending audio")
+        train_dataset = train_dataset.map(
+            extend_audio_with_noise, 
+            batched=False, 
+            desc="Extending audio", 
+            num_proc=1,
+            writer_batch_size=100,
+        )
         dataset_dict["train"] = train_dataset
         logger.info(f"Created train split with {len(train_examples)} examples")
     else:
@@ -247,7 +253,13 @@ def create_audiotime_dataset(
             test_dataset = test_dataset.cast_column("audio", Audio(sampling_rate=target_sampling_rate))
             # Extend audio with random noise (5-15 seconds)
             logger.info("Extending test audio with random noise...")
-            test_dataset = test_dataset.map(extend_audio_with_noise, desc="Extending audio")
+            test_dataset = test_dataset.map(
+                extend_audio_with_noise, 
+                batched=False, 
+                desc="Extending audio", 
+                num_proc=1,
+                writer_batch_size=100,
+            )
             dataset_dict["test"] = test_dataset
             logger.info(f"Created test split with {len(test_examples)} examples")
         else:
