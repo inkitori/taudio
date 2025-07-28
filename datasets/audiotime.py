@@ -71,13 +71,7 @@ def extend_audio_with_noise(example, min_duration=5.0, max_duration=15.0):
     
     # Concatenate original audio with noise
     extended_audio = np.concatenate([audio_array, noise])
-    
-    # Update the audio data
-    example["audio"] = {
-        "path": audio_data["path"],
-        "array": extended_audio,
-        "sampling_rate": sampling_rate
-    }
+    example['audio']['array'] = extended_audio
     
     return example
 
