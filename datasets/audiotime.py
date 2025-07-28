@@ -230,7 +230,6 @@ def create_audiotime_dataset(
             batched=False, 
             desc="Extending audio", 
             num_proc=1,
-            writer_batch_size=100,
         )
         dataset_dict["train"] = train_dataset
         logger.info(f"Created train split with {len(train_examples)} examples")
@@ -255,7 +254,6 @@ def create_audiotime_dataset(
                 batched=False, 
                 desc="Extending audio", 
                 num_proc=1,
-                writer_batch_size=100,
             )
             dataset_dict["test"] = test_dataset
             logger.info(f"Created test split with {len(test_examples)} examples")
