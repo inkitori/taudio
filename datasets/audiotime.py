@@ -74,7 +74,7 @@ def extend_audio_with_noise(example, min_duration=5.0, max_duration=15.0):
     
     # Create a new audio dictionary instead of modifying the AudioDecoder object
     example['audio'] = {
-        "path": audio_data.get("path", None),
+        "path": audio_data['path'],
         "array": extended_audio,
         "sampling_rate": sampling_rate
     }
