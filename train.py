@@ -10,7 +10,7 @@ from taudio import TAudio
 import bitsandbytes as bnb
 import argparse
 from pathlib import Path
-
+from utils import get_dataset_length
 from dataset import get_ds, collate_fn
 from config_utils import ConfigManager, flatten_config, create_wandb_run_name
 
@@ -96,9 +96,10 @@ def main():
         pin_memory=True
     )
     
+    dataset_length = get_dataset_length(dataset_config['repository'], dataset_config['split'])
     # Setup optimizer and scheduler
     # TODO: get rid of this magic number
-    total_optimizer_steps = (28_500 * training_config['epochs']) // training_config['grad_accumulation_steps']
+    total_optimizer_steps = (dataset_length * training_config['epochs']) // training_config['grad_accumulation_steps']
     
     if training_config['optim_8bit']:
         optim = bnb.optim.AdamW8bit(model.parameters(), lr=training_config['learning_rate'])
