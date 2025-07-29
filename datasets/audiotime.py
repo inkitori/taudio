@@ -2,7 +2,6 @@ import json
 import os
 import librosa
 import numpy as np
-import random
 from datasets import Dataset, DatasetDict, Audio
 from typing import Dict, List, Any, Optional
 import logging
@@ -42,48 +41,6 @@ def load_audio_file(audio_path: str, target_sampling_rate: int = 16000) -> Dict[
     except Exception as e:
         logger.error(f"Error loading audio file {audio_path}: {e}")
         return None
-
-
-def extend_audio_with_noise(example, min_duration=5.0, max_duration=15.0):
-    """
-    Extend audio with random white noise for 5-15 seconds.
-    
-    Args:
-        example: Dataset example containing audio data
-        min_duration: Minimum duration to add in seconds
-        max_duration: Maximum duration to add in seconds
-        
-    Returns:
-        Modified example with extended audio
-    """
-    # Get audio data
-    audio_data = example["audio"]
-    audio_array = audio_data["array"]
-    sampling_rate = audio_data["sampling_rate"]
-    
-    # Randomly choose extension duration between min_duration and max_duration
-    extension_duration = random.uniform(min_duration, max_duration)
-    extension_samples = int(extension_duration * sampling_rate)
-    
-    # Generate white noise with same amplitude range as original audio
-    audio_std = np.std(audio_array) if len(audio_array) > 0 else 0.1
-    noise = np.random.normal(0, audio_std * 0.1, extension_samples).astype(np.float32)
-    
-    # Concatenate original audio with noise
-    extended_audio = np.concatenate([audio_array, noise])
-    print('audio_array', audio_array.shape)
-    print('noise', noise.shape)
-    print('extended_audio', extended_audio.shape)
-    
-    # Properly update the audio data by modifying the example dictionary
-    example['audio'] = {
-        'path': getattr(example['audio'], 'path', None),
-        'array': extended_audio,
-        'sampling_rate': sampling_rate
-    }
-    print('final shape', example['audio']['array'].shape)
-
-    return example
 
 
 def parse_timestamp_events(events: Dict[str, List[List[float]]]) -> List[Dict[str, Any]]:
@@ -167,6 +124,11 @@ def parse_audiotime_split(split_dir: str, target_sampling_rate: int = 16000, max
             
             audio_path = os.path.join(audio_dir, audio_filename)
             
+            # Load audio data
+            # audio_data = load_audio_file(audio_path, target_sampling_rate)
+            audio_data = audio_path
+            if audio_data is None:
+                continue
             
             # Parse timestamp events
             caption_info = captions_data[audio_key]
@@ -175,7 +137,7 @@ def parse_audiotime_split(split_dir: str, target_sampling_rate: int = 16000, max
             
             # Create example
             example = {
-                "audio": load_audio_file(audio_path),
+                "audio": audio_data,
                 "words": words,
                 "caption": caption_info.get("caption", ""),
                 "audio_id": audio_key,
@@ -222,16 +184,7 @@ def create_audiotime_dataset(
     if train_examples:
         train_dataset = Dataset.from_list(train_examples)
         # Cast audio column to Audio feature for proper handling
-        # train_dataset = train_dataset.cast_column("audio", Audio(sampling_rate=target_sampling_rate))
-        # Extend audio with random noise (5-15 seconds)
-        logger.info("Extending train audio with random noise...")
-        train_dataset.set_format("pt")
-        # train_dataset = train_dataset.map(
-        #     extend_audio_with_noise, 
-        #     batched=False, 
-        #     desc="Extending audio", 
-        #     num_proc=1,
-        # )
+        train_dataset = train_dataset.cast_column("audio", Audio(sampling_rate=target_sampling_rate))
         dataset_dict["train"] = train_dataset
         logger.info(f"Created train split with {len(train_examples)} examples")
     else:
@@ -246,16 +199,7 @@ def create_audiotime_dataset(
         if test_examples:
             test_dataset = Dataset.from_list(test_examples)
             # Cast audio column to Audio feature for proper handling
-            # test_dataset = test_dataset.cast_column("audio", Audio(sampling_rate=target_sampling_rate))
-            # Extend audio with random noise (5-15 seconds)
-            logger.info("Extending test audio with random noise...")
-            test_dataset.set_format("pt")
-            # test_dataset = test_dataset.map(
-            #     extend_audio_with_noise, 
-            #     batched=False, 
-            #     desc="Extending audio", 
-            #     num_proc=1,
-            # )
+            test_dataset = test_dataset.cast_column("audio", Audio(sampling_rate=target_sampling_rate))
             dataset_dict["test"] = test_dataset
             logger.info(f"Created test split with {len(test_examples)} examples")
         else:
@@ -283,7 +227,7 @@ def main():
     Example usage of the parsing functions.
     """
     # Configuration
-    data_dir = "/anvil/projects/ai250124/x-pkeung/anjo0/taudio/data/AudioTime"  # Path to your AudioTime dataset
+    data_dir = "/anvil/projects/ai250124/x-pkeung/anjo0/taudio/data/AudioTimeExtended"  # Path to your AudioTime dataset
     output_dir = "audiotime_hf_dataset"  # Output directory for processed dataset
     target_sampling_rate = 16000  # Target sampling rate
     max_examples = None  # Maximum number of examples per split (None for unlimited)
