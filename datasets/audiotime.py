@@ -175,7 +175,7 @@ def parse_audiotime_split(split_dir: str, target_sampling_rate: int = 16000, max
             
             # Create example
             example = {
-                "audio": audio_path,
+                "audio": load_audio_file(audio_path),
                 "words": words,
                 "caption": caption_info.get("caption", ""),
                 "audio_id": audio_key,
@@ -226,12 +226,12 @@ def create_audiotime_dataset(
         # Extend audio with random noise (5-15 seconds)
         logger.info("Extending train audio with random noise...")
         train_dataset.set_format("pt")
-        train_dataset = train_dataset.map(
-            extend_audio_with_noise, 
-            batched=False, 
-            desc="Extending audio", 
-            num_proc=1,
-        )
+        # train_dataset = train_dataset.map(
+        #     extend_audio_with_noise, 
+        #     batched=False, 
+        #     desc="Extending audio", 
+        #     num_proc=1,
+        # )
         dataset_dict["train"] = train_dataset
         logger.info(f"Created train split with {len(train_examples)} examples")
     else:
@@ -250,12 +250,12 @@ def create_audiotime_dataset(
             # Extend audio with random noise (5-15 seconds)
             logger.info("Extending test audio with random noise...")
             test_dataset.set_format("pt")
-            test_dataset = test_dataset.map(
-                extend_audio_with_noise, 
-                batched=False, 
-                desc="Extending audio", 
-                num_proc=1,
-            )
+            # test_dataset = test_dataset.map(
+            #     extend_audio_with_noise, 
+            #     batched=False, 
+            #     desc="Extending audio", 
+            #     num_proc=1,
+            # )
             dataset_dict["test"] = test_dataset
             logger.info(f"Created test split with {len(test_examples)} examples")
         else:
