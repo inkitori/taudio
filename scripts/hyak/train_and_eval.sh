@@ -1,8 +1,8 @@
 #!/bin/bash
-#SBATCH --partition=gpu-l40s
-#SBATCH --account=cse
+#SBATCH --partition=gpu-l40
+#SBATCH --account=ark
 #SBATCH --mem-per-gpu=128G
-#SBATCH --cpus-per-gpu=10
+#SBATCH --cpus-per-gpu=20
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:1
 #SBATCH --time=5:00:00
