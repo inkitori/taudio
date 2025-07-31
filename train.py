@@ -121,6 +121,10 @@ def main():
         accumulated_deviation = 0.0
         
         for step, batch in enumerate(progress_bar):
+            if batch['input_ids'].shape[1] > 5 * 16000:
+                print(f"Skipping batch: audio longer than 5 seconds detected.")
+                continue
+
             batch = {k: v.to(device) for k, v in batch.items()}
             
             output = model(**batch)

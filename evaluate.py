@@ -134,6 +134,11 @@ def main():
     model.base_model.eval()
 
     for example in base_ds:
+        print("Shape", example['audio']['array'].shape)
+        if example['audio']['array'].shape[0] < 10 * 16000:
+            print(f"Skipping example: audio shorter than 10 seconds detected.")
+            continue
+
         candidates = {}
 
         for word in example['words']:
