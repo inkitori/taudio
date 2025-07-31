@@ -13,7 +13,7 @@ model:
 
 # Training configuration
 training:
-  epochs: 1
+  epochs: 5
   batch_size: 1
   grad_accumulation_steps: 8
   learning_rate: 5.0e-6

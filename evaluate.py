@@ -84,7 +84,7 @@ def main():
     run = wandb.init(
         entity=config['wandb']['entity'],
         project="Eval",
-        name=f"{experiment_dir.name}[{args.split}]",
+        name=f"{experiment_dir.name}[{args.split}][epoch_{args.epoch}]",
         config={
             "experiment_name": config['experiment_name'],
             "checkpoint_path": str(checkpoint_path),
