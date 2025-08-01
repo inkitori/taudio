@@ -6,10 +6,11 @@ from taudio import TAudio
 import bitsandbytes as bnb
 import argparse
 from pathlib import Path
-from utils import get_dataset_length
+from utils import get_dataset_length, patch_dataset_length
 from dataset import get_ds, collate_fn
 from config_utils import ConfigManager, flatten_config, create_wandb_run_name
 import logging
+from metrics import Metrics
 
 def main():
     logging.getLogger().setLevel(logging.INFO)
@@ -19,6 +20,8 @@ def main():
                        help='Name of the config file (without .yaml extension)')
     parser.add_argument('--no-timestamp', action='store_true',
                        help='Don\'t add timestamp to output directory name')
+    parser.add_argument('--debug', action='store_true',
+                       help='Don\'t log to wandb or experiment directory, and don\'t save model checkpoints')
     args = parser.parse_args()
 
     # Initialize config manager
@@ -31,34 +34,40 @@ def main():
     random.seed(config['system']['seed'])
     torch.manual_seed(config['system']['seed'])
     
-    # Create experiment directory
-    experiment_dir = config_manager.create_experiment_dir(
-        config['experiment_name'], 
-        timestamp=not args.no_timestamp
-    )
+    experiment_dir = None
+
+    if not args.debug:
+        # Create experiment directory
+        experiment_dir = config_manager.create_experiment_dir(
+            config['experiment_name'], 
+            timestamp=not args.no_timestamp
+        )
     
-    # Save config to experiment directory
-    config_manager.save_config(config, experiment_dir)
+        # Save config to experiment directory
+        config_manager.save_config(config, experiment_dir)
     
+    logging.info(f"Output directory: {experiment_dir}")
     logging.info(f"Starting experiment: {config['experiment_name']}")
     logging.info(f"Description: {config['description']}")
-    logging.info(f"Output directory: {experiment_dir}")
+    logging.info(f"Config: {config}")
     
     # Device setup
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     logging.info(f"Using device: {device}")
     
-    # Initialize wandb
-    wandb_run_name = create_wandb_run_name(config)
-    flattened_config = flatten_config(config)
     
-    run = wandb.init(
-        entity=config['wandb']['entity'],
-        project=config['wandb']['project'],
-        name=wandb_run_name,
-        config=flattened_config,
-        tags=config['wandb']['tags'],
-    )
+    if not args.debug:
+        # Initialize wandb
+        wandb_run_name = create_wandb_run_name(config)
+        flattened_config = flatten_config(config)
+
+        run = wandb.init(
+            entity=config['wandb']['entity'],
+            project=config['wandb']['project'],
+            name=wandb_run_name,
+            config=flattened_config,
+            tags=config['wandb']['tags'],
+        )
     
     # Create model
     model_config = config['model']
@@ -73,6 +82,7 @@ def main():
     
     # Create dataset
     dataset_config = config['dataset']
+
     ds = get_ds(
         model_id=model_config['model_id'],
         repository=dataset_config['repository'],
@@ -86,6 +96,9 @@ def main():
     training_config = config['training']
     system_config = config['system']
     
+    dataset_length = get_dataset_length(dataset_config['repository'], dataset_config['split'])
+    patch_dataset_length(ds, dataset_length)
+    
     dataloader = torch.utils.data.DataLoader(
         ds,
         collate_fn=collate_fn,
@@ -93,8 +106,7 @@ def main():
         num_workers=system_config['dataloader_num_workers'],
         pin_memory=True
     )
-    
-    dataset_length = get_dataset_length(dataset_config['repository'], dataset_config['split'])
+
     # Setup optimizer and scheduler
     total_optimizer_steps = (dataset_length * training_config['epochs']) // training_config['grad_accumulation_steps']
     
@@ -113,12 +125,14 @@ def main():
     for epoch in range(training_config['epochs']):
         progress_bar = tqdm(dataloader, desc=f"Epoch {epoch + 1}")
 
-        metrics = {
-            "loss": 0.0,
-            "token_loss": 0.0,
-            "surrogate_loss": 0.0,
-            "deviation": 0.0
-        }
+        metrics = Metrics()
+
+        metrics.add("loss")
+        metrics.add("token_loss")
+        metrics.add("surrogate_loss")
+        metrics.add("deviation")
+
+        metrics.set_scale_factor(training_config['grad_accumulation_steps'])
         
         for step, batch in enumerate(progress_bar):
             batch = {k: v.to(device) for k, v in batch.items()}
@@ -134,56 +148,53 @@ def main():
 
             deviation = (pred_top_idx.float() - gt_top_idx.float()).abs().item()
             
-            scaled_loss = loss / training_config['grad_accumulation_steps']
-            scaled_loss.backward()
-            
-            metrics["loss"] += loss.item()
-            metrics["token_loss"] += token_loss.item()
-            metrics["surrogate_loss"] += surrogate_loss.item()
-            metrics["deviation"] += deviation
+            metrics.update("loss", loss.item())
+            metrics.update("token_loss", token_loss.item())
+            metrics.update("surrogate_loss", surrogate_loss.item())
+            metrics.update("deviation", deviation)
             
             logging.info(f"PRED\t{pred_top_idx}\t{pred_top_val}")
             logging.info(f"GT\t{gt_top_idx}\t{gt_top_val}")
             logging.info(f"Deviation: {deviation}")
+
+            scaled_loss = loss / training_config['grad_accumulation_steps']
+            scaled_loss.backward()
             
-            if (step + 1) % training_config['grad_accumulation_steps'] == 0:
+            if (step + 1) % training_config['grad_accumulation_steps'] == 0 or step == len(dataloader) - 1:
                 optim.step()
                 optim.zero_grad()
                 scheduler.step()
                 
-                avg_loss = metrics["loss"] / training_config['grad_accumulation_steps']
-                avg_token_loss = metrics["token_loss"] / training_config['grad_accumulation_steps']
-                avg_surrogate_loss = metrics["surrogate_loss"] / training_config['grad_accumulation_steps']
-                avg_deviation = metrics["deviation"] / training_config['grad_accumulation_steps']
+                logging.info(f"Step {step + 1}, Average Loss: {metrics.get_scaled('loss'):.4f}")
                 
-                logging.info(f"Step {step + 1}, Average Loss: {avg_loss:.4f}")
-                
-                run.log({
-                    "loss": avg_loss,
-                    "token_loss": avg_token_loss,
-                    "surrogate_loss": avg_surrogate_loss,
-                    "deviation": avg_deviation,
-                    "epoch": epoch + 1,
-                    "step": step + 1,
-                    "learning_rate": scheduler.get_last_lr()[0],
-                })
+                if not args.debug:
+                    run.log({
+                        "loss": metrics.get_scaled("loss"),
+                        "token_loss": metrics.get_scaled("token_loss"),
+                        "surrogate_loss": metrics.get_scaled("surrogate_loss"),
+                        "deviation": metrics.get_scaled("deviation"),
 
-                for key in metrics.keys():
-                    metrics[key] = 0.0
+                        "step": step + 1,
+                        "epoch": epoch + 1,
+                        "learning_rate": scheduler.get_last_lr()[0],
+                    })
+
+                metrics.reset()
                 
-            progress_bar.set_description(f"Epoch {epoch + 1}, Loss: {loss.item():.4f}")
+            progress_bar.set_description(f"Epoch {epoch + 1}, Loss: {metrics.get_scaled('loss'):.4f}")
         
         logging.info(f"Epoch {epoch + 1} completed.")
         
         # Save checkpoint
-        checkpoint_path = experiment_dir / f"model_epoch{epoch + 1}.pt"
-        torch.save(model.state_dict(), checkpoint_path)
-        logging.info(f"Model saved to {checkpoint_path}")
+        if not args.debug:
+            checkpoint_path = experiment_dir / f"model_epoch{epoch + 1}.pt"
+            torch.save(model.state_dict(), checkpoint_path)
+            logging.info(f"Model saved to {checkpoint_path}")
     
     # Log final experiment directory to wandb
-    run.log({"experiment_directory": str(experiment_dir)})
-    
-    run.finish()
+    if not args.debug:
+        run.log({"experiment_directory": str(experiment_dir)})
+        run.finish()
     
     logging.info(f"Training completed. All outputs saved to: {experiment_dir}")
 

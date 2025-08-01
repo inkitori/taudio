@@ -1,5 +1,6 @@
 import numpy as np
 from datasets import load_dataset
+from datasets import IterableDataset
 
 def clamp(n, smallest, largest): return max(smallest, min(n, largest))
 
@@ -25,3 +26,11 @@ def get_dataset_length(repository: str, split: str):
     dataset_length = len(dataset)
     
     return dataset_length
+
+def patch_dataset_length(dataset, length):
+    # crazy hack to add __len__ to IterableDataset
+    # https://stackoverflow.com/a/1647794
+    def make_method(inst, _cls, meth, lm):
+        inst.__class__ = type(_cls.__name__, (_cls,), {meth: lm})
+
+    make_method(dataset, IterableDataset, "__len__", lambda self: length)

@@ -22,6 +22,8 @@ training:
 dataset:
   split: "train_clean_100"
   key: "end"  # or "end"
+  repository: "gilkeyio/librispeech-alignments"
+  padding: 0
   
 # Loss configuration
 loss:
