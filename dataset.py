@@ -6,6 +6,7 @@ from typing import Any, Dict, Optional
 import nltk
 from nltk.corpus import stopwords
 import numpy as np
+import logging
 
 from utils import clamp, pad_audio
 
@@ -73,20 +74,24 @@ def get_ds(
         audio = example['audio']
         words = example['words']
 
-        candidate_words = [word['word'] for word in words if word['word']
-                           != UNK_TOKEN and word['word'] not in STOPS]
+        # Get unique words that meet our criteria: not UNK_TOKEN, not stopwords, and occur before 5 seconds
+        candidate_words = list(set(word['word'] for word in words if word['word'] != UNK_TOKEN 
+                                  and word['word'] not in STOPS
+                                  and word[key] < 5.0))
+
         if len(candidate_words) > 0:
             target_word = random.choice(candidate_words)
+            # Find the first occurrence of the selected word
+            for word in words:
+                if word['word'] == target_word:
+                    first_occurence = word
+                    break
         else:
-            target_word = words[0]['word']
+            # Fallback to first word if no candidates meet criteria
+            first_occurence = words[0]
+            target_word = first_occurence['word']
 
-        print('')
-        print(f"Selected Word: {target_word}")
-
-        for word in words:
-            if word['word'] == target_word:
-                first_occurence = word
-                break
+        logging.info(f"Selected Word: {target_word}, {first_occurence[key]}")
 
         prompt = _build_conversation(
             processor=processor,
@@ -150,7 +155,7 @@ def get_ds(
             # 'audio_features': audio_features.to('cpu'),
         }
 
-    print(f"Loading processor for {model_id}")
+    logging.info(f"Loading processor for {model_id}")
     processor = Qwen2_5OmniProcessor.from_pretrained(model_id)
 
     base_ds = load_dataset(repository, split=split, streaming=True)

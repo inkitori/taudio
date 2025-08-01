@@ -1,8 +1,8 @@
 #!/bin/bash
-#SBATCH --partition=gpu-l40
+#SBATCH --partition=gpu-l40s
 #SBATCH --account=ark
 #SBATCH --mem-per-gpu=128G
-#SBATCH --cpus-per-gpu=5
+#SBATCH --cpus-per-gpu=10
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:1
 #SBATCH --time=4:00:00
@@ -27,4 +27,4 @@ fi
 
 cd /gscratch/ark/anjo0/taudio
 conda activate taudio
-python eval.py --checkpoint_path $1 --config_path $2
+python evaluate.py --experiment $1 --split $2

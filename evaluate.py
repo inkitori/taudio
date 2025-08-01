@@ -5,6 +5,7 @@ Evaluation script for TAudio model with clean configuration management.
 import random
 import torch
 import datasets
+from helpers import infer_timestamps
 from taudio import TAudio
 from transformers import Qwen2_5OmniProcessor
 import json
@@ -14,12 +15,15 @@ from pathlib import Path
 from utils import pad_audio, get_audio_bounds
 from config_utils import ConfigManager
 from dataset import _build_conversation, SECONDS_TO_EMBEDDING
+import logging
 
 BEGIN_AUDIO_ID = 151647
 END_AUDIO_ID = 151648
 
 
 def main():
+    logging.getLogger().setLevel(logging.INFO)
+
     print("--------------------------------DONT FORGET TO PATCH THE CAUSAL MASK--------------------------------")
     parser = argparse.ArgumentParser(description="Evaluate TAudio model.")
     parser.add_argument('--experiment', type=str, required=True,
@@ -137,13 +141,15 @@ def main():
         candidates = {}
 
         for word in example['words']:
-            if word['word'] != "<unk>" and word['word'] not in candidates:
+            if word['word'] != "<unk>" and word['word'] not in candidates and word[key] > 10.0:
                 candidates[word['word']] = word
 
         if not candidates:
             continue
 
         word = random.choice(list(candidates.values()))
+
+        print(f"Selected Word: {word['word']}, {word[key]}")
 
         text = _build_conversation(
             processor, config['dataset']['repository'], word, key, eval=True)
@@ -204,7 +210,10 @@ def main():
                 audio_hidden_states = hidden_states[inputs['input_ids'] == model.get_audio_token_id(
                 )]
                 logits = model.linear(audio_hidden_states).squeeze()
-                _, aux_pred_top_idx = torch.max(logits, dim=0)
+                if model.poisson_loss:
+                    aux_pred_top_idx = infer_timestamps(1, logits.cpu().float().numpy())
+                else:
+                    _, aux_pred_top_idx = torch.max(logits, dim=0)
 
             if config['dataset']['padding'] > 0:
                 aux_pred = float(

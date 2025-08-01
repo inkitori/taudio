@@ -121,15 +121,8 @@ def create_wandb_run_name(config: Dict[str, Any]) -> str:
     # Add key parameters to the run name
     parts = [experiment_name]
     
-    if 'dataset' in config and 'key' in config['dataset']:
-        parts.append(f"key-{config['dataset']['key']}")
-    
     if 'training' in config and 'learning_rate' in config['training']:
         lr = config['training']['learning_rate']
         parts.append(f"lr-{lr}")
-    
-    if 'model' in config and 'freeze_text_model' in config['model']:
-        if config['model']['freeze_text_model']:
-            parts.append("frozen")
-    
+
     return "_".join(parts) 

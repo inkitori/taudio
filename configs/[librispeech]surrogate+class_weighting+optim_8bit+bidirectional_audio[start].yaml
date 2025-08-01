@@ -32,6 +32,7 @@ loss:
   surrogate_loss: true
   token_loss: false
   surrogate_loss_weight: 1.0
+  poisson_loss: false
 
 # System configuration
 system:

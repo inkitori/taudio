@@ -1,5 +1,6 @@
 import types
 import torch
+import logging
 
 
 def patch_causal_mask_zero_region(model, start=None, end=None):
@@ -55,7 +56,7 @@ def patch_causal_mask_zero_region(model, start=None, end=None):
                 # causal_mask shape is typically (batch_size, 1, query_length, key_value_length)
                 causal_mask[0, 0, start_idx:end_idx+1, start_idx:end_idx+1] = 0
 
-                print(f"Zeroed out causal mask region [{start_idx}:{
+                logging.info(f"Zeroed out causal mask region [{start_idx}:{
                       end_idx+1}, {start_idx}:{end_idx+1}]")
 
         return causal_mask
@@ -64,7 +65,7 @@ def patch_causal_mask_zero_region(model, start=None, end=None):
     model._update_causal_mask = types.MethodType(
         patched_update_causal_mask, model)
 
-    print(f"Patched _update_causal_mask on {type(model).__name__}")
+    logging.info(f"Patched _update_causal_mask on {type(model).__name__}")
 
 
 def unpatch_causal_mask(model):
@@ -86,4 +87,4 @@ def unpatch_causal_mask(model):
     if hasattr(model, 'mask_end'):
         delattr(model, 'mask_end')
 
-    print(f"Unpatched _update_causal_mask on {type(model).__name__}")
+    logging.info(f"Unpatched _update_causal_mask on {type(model).__name__}")

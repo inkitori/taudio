@@ -10,6 +10,7 @@ from typing import Optional
 
 from utils import get_audio_bounds
 from helpers import poisson_loss
+import logging
 
 Output = namedtuple(
     'Output', ['loss', 'token_loss', 'surrogate_loss', 'pred', 'gt'])
@@ -56,7 +57,7 @@ class TAudio(nn.Module):
 
         if linear_bias is not None:
             with torch.no_grad(): 
-                print(f"Filling linear bias with {linear_bias}")
+                logging.info(f"Filling linear bias with {linear_bias}")
                 self.linear.bias.fill_(linear_bias)
 
         self.audio_layer = audio_layer
