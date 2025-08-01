@@ -1,3 +1,5 @@
+# this file only works for Qwen2.5 Omni
+
 import torch
 from datasets import load_dataset, Dataset
 from transformers import Qwen2_5OmniProcessor
@@ -10,20 +12,19 @@ import logging
 
 from utils import clamp, pad_audio
 
-# 40 milliseconds per embedding (from technical report)
-SECONDS_TO_EMBEDDING = (1000) * (1 / 40)
+# 40 milliseconds per embedding (from technical report) THIS ONLY APPLIES TO QWEN2.5 OMNI
 # For example, 10 seconds of audio would be 10 * 1000 = 10000 milliseconds, which would be 10000 / 40 = 250 embeddings.
-
+SECONDS_TO_EMBEDDING = (1000) * (1 / 40)
+ASSISTANT_ID = 77091
 STOPS = set(stopwords.words('english'))
 UNK_TOKEN = "<unk>"
-ASSISTANT_ID = 77091
 
 
-def _build_conversation(processor: Qwen2_5OmniProcessor, repository: str, word: Dict[str, any], key: str, eval: bool) -> str:
+def build_conversation(processor: Qwen2_5OmniProcessor, repository: str, word: Dict[str, any], key: str, eval: bool) -> str:
     if repository == "gilkeyio/librispeech-alignments":
         prompt = f"What is the first occurence of the word '{word['word']}'?"
     elif repository == "enyoukai/audiotime-timestamps":
-        prompt = f"When does the '{word['word']}' occur?"
+        prompt = f"What is the first occurence of '{word['word']}'?" # we call these "words" but they're just general events
     else:
         raise ValueError(f"Invalid repository: {repository}")
 
@@ -38,8 +39,7 @@ def _build_conversation(processor: Qwen2_5OmniProcessor, repository: str, word: 
             "role": "user",
             "content": [
                 {"type": "text", "text": prompt},
-                # we will manually fill in the audio
-                {"type": "audio", "audio": "PLACEHOLDER AUDIO"},
+                {"type": "audio", "audio": "PLACEHOLDER AUDIO"}, # we will manually fill in the audio
             ],
         },
     ]
@@ -93,7 +93,7 @@ def get_ds(
 
         logging.info(f"Selected Word: {target_word}, {first_occurence[key]}")
 
-        prompt = _build_conversation(
+        prompt = build_conversation(
             processor=processor,
             repository=repository,
             word=first_occurence,

@@ -14,7 +14,7 @@ import argparse
 from pathlib import Path
 from utils import pad_audio, get_audio_bounds
 from config_utils import ConfigManager
-from dataset import _build_conversation, SECONDS_TO_EMBEDDING
+from dataset import build_conversation, SECONDS_TO_EMBEDDING
 import logging
 
 BEGIN_AUDIO_ID = 151647
@@ -151,7 +151,7 @@ def main():
 
         print(f"Selected Word: {word['word']}, {word[key]}")
 
-        text = _build_conversation(
+        text = build_conversation(
             processor, config['dataset']['repository'], word, key, eval=True)
 
         audio_frames = example['audio']['array']
