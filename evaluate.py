@@ -134,19 +134,22 @@ def main():
     model.base_model.eval()
 
     for example in base_ds:
-        candidates = {}
+        candidates = []
+        seen = set()
 
         for word in example['words']:
             if (word['word'] != "<unk>" 
-                and word['word'] not in candidates 
+                and word['word'] not in seen
                 and (args.min_time is None or word[key] > args.min_time)):
-                candidates[word['word']] = word
+                candidates.append(word)
+
+            seen.add(word['word'])
 
         if not candidates:
             logging.info(f"No candidates met criteria, skipping example")
             continue
 
-        word = random.choice(list(candidates.values()))
+        word = random.choice(candidates)
 
         logging.info(f"Selected Word: {word['word']}, {word[key]}")
 

@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --partition=gpu-l40s
+#SBATCH --partition=gpu-l40
 #SBATCH --account=ark
 #SBATCH --mem-per-gpu=128G
 #SBATCH --cpus-per-gpu=10
@@ -28,4 +28,8 @@ fi
 cd /gscratch/ark/anjo0/taudio
 conda activate taudio
 python train.py --config $1
-python evaluate.py --experiment $1 --split $2
+if [ -z "$3" ]; then
+    python evaluate.py --experiment $1 --split $2
+else
+    python evaluate.py --experiment $1 --split $2 --min-time $3
+fi

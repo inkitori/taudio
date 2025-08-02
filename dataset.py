@@ -72,29 +72,26 @@ def get_ds(
         words = example['words']
 
         # Get unique words that meet our criteria: not UNK_TOKEN, not stopwords, and occur before max_time seconds
-        candidate_words = list(set(word['word'] for word in words if word['word'] != UNK_TOKEN 
-                                  and word['word'] not in STOPS
-                                  and (max_time is None or word[key] < max_time)))
+        seen = set()
+        candidate_words = []
+        for word in words:
+            if word['word'] != UNK_TOKEN and word['word'] not in STOPS and (max_time is None or word[key] < max_time) and word['word'] not in seen:
+                candidate_words.append(word)
+                seen.add(word['word'])
 
         if len(candidate_words) > 0:
-            target_word = random.choice(candidate_words)
-            # Find the first occurrence of the selected word
-            for word in words:
-                if word['word'] == target_word:
-                    first_occurence = word
-                    break
+            word = random.choice(candidate_words)
         else:
             # Fallback to first word if no candidates meet criteria
-            first_occurence = words[0]
-            target_word = first_occurence['word']
-            logging.info(f"No candidates met criteria, using first word: {target_word}, {first_occurence[key]}")
+            word = words[0]
+            logging.info(f"No candidates met criteria, using first word: {word['word']}, {word[key]}")
 
-        logging.info(f"Selected Word: {target_word}, {first_occurence[key]}")
+        logging.info(f"Selected Word: {word['word']}, {word[key]}")
 
         prompt = build_conversation(
             processor=processor,
             repository=repository,
-            word=first_occurence,
+            word=word,
             key=key,
             eval=False,
         )
@@ -120,7 +117,7 @@ def get_ds(
         labels_size = (input_ids == audio_token_id).sum().item()
         labels = torch.zeros(labels_size)
 
-        idx = clamp(int(first_occurence[key] * SECONDS_TO_EMBEDDING), 0, labels_size - 1)
+        idx = clamp(int(word[key] * SECONDS_TO_EMBEDDING), 0, labels_size - 1)
 
         labels[idx] = 1.0
 

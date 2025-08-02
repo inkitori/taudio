@@ -1,9 +1,7 @@
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 from contextlib import contextmanager, nullcontext
-
-from transformers import Qwen2_5OmniThinkerForConditionalGeneration, BitsAndBytesConfig
+from transformers import Qwen2_5OmniThinkerForConditionalGeneration
 from causal_mask_patch import patch_causal_mask_zero_region, unpatch_causal_mask
 
 from collections import namedtuple
@@ -73,12 +71,10 @@ class TAudio(nn.Module):
         self,
         input_ids: torch.Tensor,  # (batch_size, seq_len)
         attention_mask: torch.Tensor,  # (batch_size, seq_len)
-        # (batch_size, embedding_dim, audio_context_len)
-        input_features: torch.Tensor,
-        # (batch_size, audio_context_len)
-        feature_attention_mask: torch.Tensor,
+        input_features: torch.Tensor, # (batch_size, embedding_dim, audio_context_len)
+        feature_attention_mask: torch.Tensor, # (batch_size, audio_context_len)
         labels: torch.Tensor,  # (num_audio_tokens)
-        label_ids: torch.Tensor
+        label_ids: torch.Tensor # (batch_size, seq_len)
     ) -> torch.Tensor:
         with self.bidirectional_audio_context(input_ids) if self.bidirectional_audio else nullcontext():
             outputs = self.base_model(
@@ -129,7 +125,7 @@ class TAudio(nn.Module):
             token_loss = torch.tensor(
                 0.0, device=logits.device, dtype=logits.dtype)
 
-        loss = self.surrogate_loss_weight * surrogate_loss + token_loss
+        loss = token_loss + self.surrogate_loss_weight * surrogate_loss 
 
         output = Output(loss=loss, surrogate_loss=surrogate_loss, token_loss=token_loss, pred=(
             pred_top_val, pred_top_idx), gt=(gt_top_val, gt_top_idx))
