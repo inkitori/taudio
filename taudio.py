@@ -155,6 +155,11 @@ class TAudio(nn.Module):
             start_audio_index, end_audio_index = get_audio_bounds(
                 input_ids, BEGIN_AUDIO_ID, END_AUDIO_ID)
             patch_causal_mask_zero_region(self.base_text_model, start_audio_index, end_audio_index)
+
+            logging.debug(f"Start: {start_audio_index}, End: {end_audio_index}")
+            logging.debug(f"Patched: {input_ids[0, start_audio_index:end_audio_index + 1]}")
+            logging.debug(f"Unpatched: {input_ids[0, :start_audio_index]} {input_ids[0, end_audio_index + 1:]}")
+
             logging.info(f"Enabled bidirectional audio processing for region [{start_audio_index}:{end_audio_index}]")
             
             yield

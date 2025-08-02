@@ -138,9 +138,7 @@ def main():
         seen = set()
 
         for word in example['words']:
-            if (word['word'] != "<unk>" 
-                and word['word'] not in seen
-                and (args.min_time is None or word[key] > args.min_time)):
+            if (word['word'] != "<unk>" and word['word'] not in seen and (args.min_time is None or word[key] > args.min_time)):
                 candidates.append(word)
 
             seen.add(word['word'])

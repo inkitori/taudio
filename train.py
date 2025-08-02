@@ -55,7 +55,6 @@ def main():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     logging.info(f"Using device: {device}")
     
-    
     if not args.debug:
         # Initialize wandb
         wandb_run_name = create_wandb_run_name(config)
@@ -104,7 +103,8 @@ def main():
         collate_fn=collate_fn,
         batch_size=training_config['batch_size'],
         num_workers=system_config['dataloader_num_workers'],
-        pin_memory=True
+        pin_memory=True,
+        drop_last=True
     )
 
     # Setup optimizer and scheduler

@@ -16,7 +16,6 @@ from qwen2_5_omni_constants import ASSISTANT_ID, SECONDS_TO_EMBEDDING
 STOPS = set(stopwords.words('english'))
 UNK_TOKEN = "<unk>" # this only applies to librispeech
 
-
 def build_conversation(processor: Qwen2_5OmniProcessor, repository: str, word: Dict[str, any], key: str, eval: bool) -> str:
     if repository == "gilkeyio/librispeech-alignments":
         prompt = f"What is the first occurence of the word '{word['word']}'?"
@@ -77,7 +76,8 @@ def get_ds(
         for word in words:
             if word['word'] != UNK_TOKEN and word['word'] not in STOPS and (max_time is None or word[key] < max_time) and word['word'] not in seen:
                 candidate_words.append(word)
-                seen.add(word['word'])
+
+            seen.add(word['word'])
 
         if len(candidate_words) > 0:
             word = random.choice(candidate_words)
