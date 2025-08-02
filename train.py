@@ -89,7 +89,7 @@ def main():
         audio_token_id=model.get_audio_token_id(),
         split=dataset_config['split'],
         key=dataset_config['key'],
-        padding=dataset_config['padding']
+        max_time=dataset_config.get('max_time', None),
     )
     
     # Create dataloader

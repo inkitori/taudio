@@ -10,14 +10,11 @@ from nltk.corpus import stopwords
 import numpy as np
 import logging
 
-from utils import clamp, pad_audio
+from utils import clamp
+from qwen2_5_omni_constants import ASSISTANT_ID, SECONDS_TO_EMBEDDING
 
-# 40 milliseconds per embedding (from technical report) THIS ONLY APPLIES TO QWEN2.5 OMNI
-# For example, 10 seconds of audio would be 10 * 1000 = 10000 milliseconds, which would be 10000 / 40 = 250 embeddings.
-SECONDS_TO_EMBEDDING = (1000) * (1 / 40)
-ASSISTANT_ID = 77091
 STOPS = set(stopwords.words('english'))
-UNK_TOKEN = "<unk>"
+UNK_TOKEN = "<unk>" # this only applies to librispeech
 
 
 def build_conversation(processor: Qwen2_5OmniProcessor, repository: str, word: Dict[str, any], key: str, eval: bool) -> str:
@@ -68,16 +65,16 @@ def get_ds(
     split: str,
     key: str,
     repository: str = "gilkeyio/librispeech-alignments",
-    padding: int = 0
+    max_time: Optional[float] = None,
 ) -> Dataset:
     def preprocess_fn(example: Dict[str, Any]) -> Dict[str, Any]:
         audio = example['audio']
         words = example['words']
 
-        # Get unique words that meet our criteria: not UNK_TOKEN, not stopwords, and occur before 5 seconds
+        # Get unique words that meet our criteria: not UNK_TOKEN, not stopwords, and occur before max_time seconds
         candidate_words = list(set(word['word'] for word in words if word['word'] != UNK_TOKEN 
                                   and word['word'] not in STOPS
-                                  and word[key] < 5.0))
+                                  and (max_time is None or word[key] < max_time)))
 
         if len(candidate_words) > 0:
             target_word = random.choice(candidate_words)
@@ -90,6 +87,7 @@ def get_ds(
             # Fallback to first word if no candidates meet criteria
             first_occurence = words[0]
             target_word = first_occurence['word']
+            logging.info(f"No candidates met criteria, using first word: {target_word}, {first_occurence[key]}")
 
         logging.info(f"Selected Word: {target_word}, {first_occurence[key]}")
 
@@ -100,11 +98,9 @@ def get_ds(
             key=key,
             eval=False,
         )
-        audio_frames = audio['array']  # 16 khz
 
-        # Right pad audio_frames by 16 (16 frames per ms) * 40 (40 ms per embedding) * padding zeros
-        if padding > 0:
-            audio_frames = pad_audio(audio_frames, padding)
+        audio_frames = audio['array']  # 16 khz
+        assert audio['sampling_rate'] == 16000
 
         inputs = processor(
             text=prompt,
@@ -114,23 +110,17 @@ def get_ds(
         )
 
         input_ids = inputs['input_ids']  # (batch_size, seq_len)
-        # print(processor.tokenizer.batch_decode(input_ids)[0])
         attention_mask = inputs['attention_mask']  # (batch_size, seq_len)
 
         # input_features comes in milliseconds. audio_context_len is 30,000 for 30 seconds of audio.
-        # (batch_size, embedding_dim, audio_context_len)
-        input_features = inputs['input_features']
-        # (batch_size, audio_context_len)
-        feature_attention_mask = inputs['feature_attention_mask']
+        input_features = inputs['input_features'] # (batch_size, audio_context_len)
+        feature_attention_mask = inputs['feature_attention_mask'] # (batch_size, audio_context_len)
 
         # <AUDIO> tokens in input_ids correspond to audio embeddings (40 ms per embedding)
         labels_size = (input_ids == audio_token_id).sum().item()
         labels = torch.zeros(labels_size)
 
-        # Left pad labels with zeros if padding was applied
-        label_idx_offset = padding if padding > 0 else 0
-        idx = clamp(int(first_occurence[key] * SECONDS_TO_EMBEDDING) +
-                    label_idx_offset, label_idx_offset, labels_size - 1)
+        idx = clamp(int(first_occurence[key] * SECONDS_TO_EMBEDDING), 0, labels_size - 1)
 
         labels[idx] = 1.0
 
@@ -149,10 +139,6 @@ def get_ds(
 
             'labels': labels,
             'label_ids': label_ids[0],
-
-            # 'prompt': prompt,
-            # 'audio_frames': audio_frames,
-            # 'audio_features': audio_features.to('cpu'),
         }
 
     logging.info(f"Loading processor for {model_id}")

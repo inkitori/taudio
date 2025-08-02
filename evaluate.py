@@ -12,19 +12,13 @@ import json
 import wandb
 import argparse
 from pathlib import Path
-from utils import pad_audio, get_audio_bounds
 from config_utils import ConfigManager
 from dataset import build_conversation, SECONDS_TO_EMBEDDING
 import logging
 
-BEGIN_AUDIO_ID = 151647
-END_AUDIO_ID = 151648
-
-
 def main():
     logging.getLogger().setLevel(logging.INFO)
 
-    print("--------------------------------DONT FORGET TO PATCH THE CAUSAL MASK--------------------------------")
     parser = argparse.ArgumentParser(description="Evaluate TAudio model.")
     parser.add_argument('--experiment', type=str, required=True,
                         help='Name of the experiment directory to evaluate')
@@ -34,6 +28,8 @@ def main():
                         help='Dataset split to evaluate on')
     parser.add_argument('--error-bound', type=float, default=0.1,
                         help='Error bound for considering predictions correct')
+    parser.add_argument('--min-time', type=float, default=None,
+                        help='Minimum time for considering predictions correct')
     args = parser.parse_args()
 
     # Initialize config manager
@@ -141,23 +137,23 @@ def main():
         candidates = {}
 
         for word in example['words']:
-            if word['word'] != "<unk>" and word['word'] not in candidates and word[key] > 10.0:
+            if (word['word'] != "<unk>" 
+                and word['word'] not in candidates 
+                and (args.min_time is None or word[key] > args.min_time)):
                 candidates[word['word']] = word
 
         if not candidates:
+            logging.info(f"No candidates met criteria, skipping example")
             continue
 
         word = random.choice(list(candidates.values()))
 
-        print(f"Selected Word: {word['word']}, {word[key]}")
+        logging.info(f"Selected Word: {word['word']}, {word[key]}")
 
         text = build_conversation(
             processor, config['dataset']['repository'], word, key, eval=True)
 
         audio_frames = example['audio']['array']
-        if config['dataset']['padding'] > 0:    # Pad the audio by the padding configuration
-            audio_frames = pad_audio(
-                audio_frames, config['dataset']['padding'])
 
         inputs = processor(
             text=text,
@@ -165,13 +161,6 @@ def main():
             return_tensors='pt',
             padding=True,
         ).to(device)
-
-        start_audio_index, end_audio_index = get_audio_bounds(
-            inputs['input_ids'], BEGIN_AUDIO_ID, END_AUDIO_ID)
-
-        if model.bidirectional_audio:
-            model.base_text_model.mask_start = start_audio_index
-            model.base_text_model.mask_end = end_audio_index
 
         gt = word[key]
         total += 1
@@ -182,7 +171,7 @@ def main():
         if args.token_output:
             try:
                 with torch.no_grad():
-                    tokens = model.base_model.generate(
+                    tokens = model.generate(
                         **inputs,
                         eos_token_id=processor.tokenizer.eos_token_id,
                     )
@@ -215,11 +204,7 @@ def main():
                 else:
                     _, aux_pred_top_idx = torch.max(logits, dim=0)
 
-            if config['dataset']['padding'] > 0:
-                aux_pred = float(
-                    aux_pred_top_idx - config['dataset']['padding']) / SECONDS_TO_EMBEDDING
-            else:
-                aux_pred = float(aux_pred_top_idx) / SECONDS_TO_EMBEDDING
+            aux_pred = float(aux_pred_top_idx) / SECONDS_TO_EMBEDDING
 
             # Track absolute error for MAD calculation
             aux_abs_error = abs(aux_pred - gt)
