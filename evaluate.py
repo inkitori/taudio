@@ -5,7 +5,7 @@ Evaluation script for TAudio model with clean configuration management.
 import random
 import torch
 import datasets
-from helpers import infer_timestamps
+from poisson import infer_timestamps
 from taudio import TAudio
 from transformers import Qwen2_5OmniProcessor
 import json

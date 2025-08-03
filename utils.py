@@ -24,3 +24,6 @@ def patch_dataset_length(dataset, length):
         inst.__class__ = type(_cls.__name__, (_cls,), {meth: lm})
 
     make_method(dataset, IterableDataset, "__len__", lambda self: length)
+
+def better_round(n):
+    return int(n + 0.5)

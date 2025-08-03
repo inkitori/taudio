@@ -9,7 +9,7 @@ from typing import Optional
 
 from qwen2_5_omni_constants import BEGIN_AUDIO_ID, END_AUDIO_ID
 from utils import get_audio_bounds
-from helpers import poisson_loss
+from poisson import poisson_loss
 import logging
 
 Output = namedtuple(

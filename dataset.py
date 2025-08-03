@@ -5,12 +5,10 @@ from datasets import load_dataset, Dataset
 from transformers import Qwen2_5OmniProcessor
 import random
 from typing import Any, Dict, Optional
-import nltk
 from nltk.corpus import stopwords
-import numpy as np
 import logging
 
-from utils import clamp
+from utils import clamp, better_round
 from qwen2_5_omni_constants import ASSISTANT_ID, SECONDS_TO_EMBEDDING
 
 STOPS = set(stopwords.words('english'))
@@ -110,21 +108,19 @@ def get_ds(
         attention_mask = inputs['attention_mask']  # (batch_size, seq_len)
 
         # input_features comes in milliseconds. audio_context_len is 30,000 for 30 seconds of audio.
-        input_features = inputs['input_features'] # (batch_size, audio_context_len)
+        input_features = inputs['input_features'] # (batch_size, embedding_dim, audio_context_len)
         feature_attention_mask = inputs['feature_attention_mask'] # (batch_size, audio_context_len)
 
         # <AUDIO> tokens in input_ids correspond to audio embeddings (40 ms per embedding)
         labels_size = (input_ids == audio_token_id).sum().item()
         labels = torch.zeros(labels_size)
 
-        idx = clamp(int(word[key] * SECONDS_TO_EMBEDDING), 0, labels_size - 1)
-
-        labels[idx] = 1.0
+        event_idx = clamp(better_round(word[key] * SECONDS_TO_EMBEDDING), 0, labels_size - 1)
+        labels[event_idx] = 1.0
 
         # mask out everything up to and including the assistant token
         label_ids = input_ids.clone()
-        assistant_idx = (input_ids == ASSISTANT_ID).nonzero(as_tuple=True)[
-            1][0] if (input_ids == ASSISTANT_ID).any() else 0
+        assistant_idx = (input_ids == ASSISTANT_ID).nonzero(as_tuple=True)[1][0] # first occurence of assistant token
         label_ids[0, :assistant_idx + 1] = -100
 
         return {
