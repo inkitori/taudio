@@ -7,18 +7,27 @@ import random
 from typing import Any, Dict, Optional
 from nltk.corpus import stopwords
 import logging
+from enum import Enum
 
-from utils import clamp, better_round
-from qwen2_5_omni_constants import ASSISTANT_ID, SECONDS_TO_EMBEDDING
+from utils.utils import clamp, better_round
+from utils.qwen2_5_omni_constants import ASSISTANT_ID, SECONDS_TO_EMBEDDING
 
 STOPS = set(stopwords.words('english'))
-UNK_TOKEN = "<unk>" # this only applies to librispeech
+UNK_TOKEN = "<unk>"  # this only applies to librispeech
+
+
+class TaskType(Enum):
+    SINGLE_WORD_TIMESTAMP = "SINGLE_WORD_TIMESTAMP"
+    MULTI_WORD_TIMESTAMP = "MULTI_WORD_TIMESTAMP"
+    SPEAKER_COUNTING = "SPEAKER_COUNTING"
+
 
 def build_conversation(processor: Qwen2_5OmniProcessor, repository: str, word: Dict[str, any], key: str, eval: bool) -> str:
     if repository == "gilkeyio/librispeech-alignments":
         prompt = f"What is the first occurence of the word '{word['word']}'?"
     elif repository == "enyoukai/audiotime-timestamps":
-        prompt = f"What is the first occurence of '{word['word']}'?" # we call these "words" but they're just general events
+        # we call these "words" but they're just general events
+        prompt = f"What is the first occurence of '{word['word']}'?"
     else:
         raise ValueError(f"Invalid repository: {repository}")
 
@@ -33,7 +42,8 @@ def build_conversation(processor: Qwen2_5OmniProcessor, repository: str, word: D
             "role": "user",
             "content": [
                 {"type": "text", "text": prompt},
-                {"type": "audio", "audio": "PLACEHOLDER AUDIO"}, # we will manually fill in the audio
+                # we will manually fill in the audio
+                {"type": "audio", "audio": "PLACEHOLDER AUDIO"},
             ],
         },
     ]
@@ -82,7 +92,8 @@ def get_ds(
         else:
             # Fallback to first word if no candidates meet criteria
             word = words[0]
-            logging.info(f"No candidates met criteria, using first word: {word['word']}, {word[key]}")
+            logging.info(f"No candidates met criteria, using first word: {
+                         word['word']}, {word[key]}")
 
         logging.info(f"Selected Word: {word['word']}, {word[key]}")
 
@@ -108,19 +119,23 @@ def get_ds(
         attention_mask = inputs['attention_mask']  # (batch_size, seq_len)
 
         # input_features comes in milliseconds. audio_context_len is 30,000 for 30 seconds of audio.
-        input_features = inputs['input_features'] # (batch_size, embedding_dim, audio_context_len)
-        feature_attention_mask = inputs['feature_attention_mask'] # (batch_size, audio_context_len)
+        # (batch_size, embedding_dim, audio_context_len)
+        input_features = inputs['input_features']
+        # (batch_size, audio_context_len)
+        feature_attention_mask = inputs['feature_attention_mask']
 
         # <AUDIO> tokens in input_ids correspond to audio embeddings (40 ms per embedding)
         labels_size = (input_ids == audio_token_id).sum().item()
         labels = torch.zeros(labels_size)
 
-        event_idx = clamp(better_round(word[key] * SECONDS_TO_EMBEDDING), 0, labels_size - 1)
+        event_idx = clamp(better_round(
+            word[key] * SECONDS_TO_EMBEDDING), 0, labels_size - 1)
         labels[event_idx] = 1.0
 
         # mask out everything up to and including the assistant token
         label_ids = input_ids.clone()
-        assistant_idx = (input_ids == ASSISTANT_ID).nonzero(as_tuple=True)[1][0] # first occurence of assistant token
+        assistant_idx = (input_ids == ASSISTANT_ID).nonzero(as_tuple=True)[
+            1][0]  # first occurence of assistant token
         label_ids[0, :assistant_idx + 1] = -100
 
         return {

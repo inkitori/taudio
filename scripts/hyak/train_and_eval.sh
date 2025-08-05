@@ -28,8 +28,15 @@ fi
 cd /gscratch/ark/anjo0/taudio
 conda activate taudio
 python train.py --config $1
-if [ -z "$3" ]; then
-    python evaluate.py --experiment $1 --split $2
-else
-    python evaluate.py --experiment $1 --split $2 --min-time $3
+# Build the evaluate command with optional arguments
+eval_cmd="python evaluate.py --experiment $1 --split $2"
+
+if [ -n "$3" ]; then
+    eval_cmd="$eval_cmd --min-time $3"
 fi
+
+if [ -n "$4" ]; then
+    eval_cmd="$eval_cmd --max-time $4"
+fi
+
+$eval_cmd

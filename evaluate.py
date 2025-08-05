@@ -5,14 +5,14 @@ Evaluation script for TAudio model with clean configuration management.
 import random
 import torch
 import datasets
-from poisson import infer_timestamps
+from utils.poisson import infer_timestamps
 from taudio import TAudio
 from transformers import Qwen2_5OmniProcessor
 import json
 import wandb
 import argparse
 from pathlib import Path
-from config_utils import ConfigManager
+from utils.config_utils import ConfigManager
 from dataset import build_conversation, SECONDS_TO_EMBEDDING
 import logging
 
@@ -30,6 +30,8 @@ def main():
                         help='Error bound for considering predictions correct')
     parser.add_argument('--min-time', type=float, default=None,
                         help='Minimum time for considering predictions correct')
+    parser.add_argument('--max-time', type=float, default=None,
+                        help='Maximum time for considering predictions correct')
     args = parser.parse_args()
 
     # Initialize config manager
@@ -92,6 +94,8 @@ def main():
             "aux_output": args.aux_output,
             "token_output": args.token_output,
             "error_bound": args.error_bound,
+            "min_time": args.min_time,
+            "max_time": args.max_time,
             **config
         }
     )
@@ -138,7 +142,10 @@ def main():
         seen = set()
 
         for word in example['words']:
-            if (word['word'] != "<unk>" and word['word'] not in seen and (args.min_time is None or word[key] > args.min_time)):
+            if (word['word'] != "<unk>" 
+            and word['word'] not in seen 
+            and (args.min_time is None or word[key] > args.min_time) 
+            and (args.max_time is None or word[key] < args.max_time)):
                 candidates.append(word)
 
             seen.add(word['word'])

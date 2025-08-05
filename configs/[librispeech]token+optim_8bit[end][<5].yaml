@@ -1,6 +1,6 @@
 # Base experiment configuration
-experiment_name: "[librispeech]token+optim_8bit[end][<10]"
-description: "Token loss, 8-bit optimizer, end key, max time < 10"
+experiment_name: "[librispeech]token+optim_8bit[end][<5]"
+description: "Token loss, 8-bit optimizer, end key, max time < 5"
 
 # Model configuration
 model:
@@ -22,7 +22,7 @@ training:
 dataset:
   split: "train_clean_100"
   key: "end"
-  max_time: 10
+  max_time: 5
   repository: "gilkeyio/librispeech-alignments"
   
 # Loss configuration
@@ -41,4 +41,4 @@ system:
 wandb:
   entity: "taudio"
   project: "Train"
-  tags: ["token", "optim_8bit", "end", "<10"] 
+  tags: ["token", "optim_8bit", "end", "<5"] 
