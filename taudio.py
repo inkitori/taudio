@@ -1,17 +1,14 @@
 import torch
 import torch.nn as nn
 from contextlib import contextmanager, nullcontext
-from transformers import Qwen2_5OmniThinkerForConditionalGeneration
-from utils.causal_mask_patch import patch_causal_mask_zero_region, unpatch_causal_mask
 
 from collections import namedtuple
 from typing import Optional
 
-from utils.qwen2_5_omni_constants import BEGIN_AUDIO_ID, END_AUDIO_ID
-from utils.utils import get_audio_bounds
 from utils.poisson import poisson_loss, poisson_count_loss
 import logging
 from dataset import TaskType
+from models import create_adapter
 
 Output = namedtuple(
     'Output', ['loss', 'token_loss', 'surrogate_loss', 'pred', 'gt'])
@@ -19,38 +16,34 @@ Output = namedtuple(
 
 class TAudio(nn.Module):
     def __init__(
-            self,
-            model_id: str,
-            freeze_text_model: bool,
-            load_in_8bit: bool,
-            audio_layer: int,
-            class_weighting: bool,
-            surrogate_loss: bool,
-            token_loss: bool,
-            surrogate_loss_weight: float,
-            bidirectional_audio: bool = False,
-            poisson_loss: bool = False,
-            linear_bias: Optional[float] = None,
-            task_type: TaskType = TaskType.SINGLE_WORD_TIMESTAMP
+        self,
+        model_id: str,
+        freeze_text_model: bool,
+        load_in_8bit: bool,
+        audio_layer: int,
+        class_weighting: bool,
+        surrogate_loss: bool,
+        token_loss: bool,
+        surrogate_loss_weight: float,
+        bidirectional_audio: bool = False,
+        poisson_loss: bool = False,
+        linear_bias: Optional[float] = None,
+        task_type: TaskType = TaskType.SINGLE_WORD_TIMESTAMP,
+        backend: str = "qwen2_5_omni",
     ) -> None:
         super(TAudio, self).__init__()
 
-        self.base_model = Qwen2_5OmniThinkerForConditionalGeneration.from_pretrained(
-            model_id,
-            torch_dtype="auto",
-            load_in_8bit=load_in_8bit,
-        )
-        self.base_audio_encoder = self.base_model.audio_tower
-        self.base_text_model = self.base_model.model
+        # Adapter-based backend
+        self.adapter = create_adapter(
+            backend=backend, model_id=model_id, load_in_8bit=load_in_8bit)
 
-        self.hidden_dim = self.base_model.config.audio_config.output_dim
+        self.hidden_dim = self.adapter.hidden_dim
 
         if freeze_text_model:
-            for param in self.base_text_model.parameters():
+            for param in self.adapter.text_model.parameters():
                 param.requires_grad = False
 
-        self.linear = nn.Linear(
-            self.hidden_dim, 1, dtype=self.base_model.dtype)
+        self.linear = nn.Linear(self.hidden_dim, 1, dtype=self.adapter.dtype)
 
         if linear_bias is not None:
             with torch.no_grad():
@@ -69,7 +62,7 @@ class TAudio(nn.Module):
         self.task_type = task_type
 
     def get_audio_token_id(self) -> int:
-        return self.base_model.config.audio_token_index
+        return self.adapter.audio_token_index
 
     def forward(
         self,
@@ -82,8 +75,8 @@ class TAudio(nn.Module):
         labels: torch.Tensor,  # (num_audio_tokens)
         label_ids: torch.Tensor  # (batch_size, seq_len)
     ) -> torch.Tensor:
-        with self.bidirectional_audio_context(input_ids) if self.bidirectional_audio else nullcontext():
-            outputs = self.base_model(
+        with self.adapter.bidirectional_audio_context(input_ids) if self.bidirectional_audio else nullcontext():
+            outputs = self.adapter(
                 input_ids=input_ids,
                 attention_mask=attention_mask,
                 input_features=input_features,
@@ -127,45 +120,8 @@ class TAudio(nn.Module):
         return output
 
     def generate(self, **kwargs):
-        with self.bidirectional_audio_context(kwargs['input_ids']) if self.bidirectional_audio else nullcontext():
-            return self.base_model.generate(**kwargs)
-
-    @contextmanager
-    def bidirectional_audio_context(self, input_ids: torch.Tensor):
-        """
-        Context manager that temporarily patches the causal mask to enable bidirectional audio processing
-        for the specified audio token range.
-
-        Args:
-            start_audio_index: Start index for the audio region to make bidirectional
-            end_audio_index: End index for the audio region to make bidirectional
-
-        Usage:
-            with model.bidirectional_audio(start_idx, end_idx):
-                # Code that runs with bidirectional audio processing
-                outputs = model(...)
-        """
-        try:
-            start_audio_index, end_audio_index = get_audio_bounds(
-                input_ids, BEGIN_AUDIO_ID, END_AUDIO_ID)
-            patch_causal_mask_zero_region(
-                self.base_text_model, start_audio_index, end_audio_index)
-
-            logging.debug(f"Start: {start_audio_index}, End: {
-                          end_audio_index}")
-            logging.debug(
-                f"Patched: {input_ids[0, start_audio_index:end_audio_index + 1]}")
-            logging.debug(f"Unpatched: {input_ids[0, :start_audio_index]} {
-                          input_ids[0, end_audio_index + 1:]}")
-
-            logging.info(f"Enabled bidirectional audio processing for region [{
-                         start_audio_index}:{end_audio_index}]")
-
-            yield
-
-        finally:
-            unpatch_causal_mask(self.base_text_model)
-            logging.info(f"Restored original causal mask settings")
+        with self.adapter.bidirectional_audio_context(kwargs['input_ids']) if self.bidirectional_audio else nullcontext():
+            return self.adapter.generate(**kwargs)
 
     def surrogate_loss_handler(self, logits, labels):
         if self.task_type == TaskType.SINGLE_WORD_TIMESTAMP:
