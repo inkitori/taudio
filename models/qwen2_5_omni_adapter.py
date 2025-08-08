@@ -4,7 +4,7 @@ from typing import Any
 
 import torch
 import torch.nn as nn
-from transformers import Qwen2_5OmniThinkerForConditionalGeneration
+from transformers import Qwen2_5OmniProcessor, Qwen2_5OmniThinkerForConditionalGeneration
 from utils.utils import get_audio_bounds
 from utils.qwen2_5_omni_constants import ASSISTANT_ID, BEGIN_AUDIO_ID, END_AUDIO_ID
 from contextlib import contextmanager
@@ -26,6 +26,8 @@ class Qwen2_5OmniAdapter(BaseAudioTextAdapter):
         self._audio_tower = self.base_model.audio_tower
         self._text_model = self.base_model.model
 
+        self.processor = Qwen2_5OmniProcessor.from_pretrained(model_id)
+
     # Properties required by TAudio
     @property
     def hidden_dim(self) -> int:
@@ -46,6 +48,10 @@ class Qwen2_5OmniAdapter(BaseAudioTextAdapter):
     @property
     def text_model(self) -> nn.Module:
         return self._text_model
+
+    @property
+    def processor(self) -> Qwen2_5OmniProcessor:
+        return self.processor
 
     # Pass-throughs
     def forward(

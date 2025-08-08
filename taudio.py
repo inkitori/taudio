@@ -7,7 +7,7 @@ from typing import Optional
 
 from utils.poisson import poisson_loss, poisson_count_loss
 import logging
-from dataset import TaskType
+from tasks.types import TaskType
 from models import create_adapter
 
 Output = namedtuple(

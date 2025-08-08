@@ -29,6 +29,10 @@ class BaseAudioTextAdapter(nn.Module):
     def assistant_id(self) -> int:
         raise NotImplementedError
 
+    @property
+    def processor(self) -> Any:
+        raise NotImplementedError
+        # Core calls
     # Core calls
     def forward(
         self,
