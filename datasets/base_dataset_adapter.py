@@ -1,0 +1,49 @@
+from abc import ABC, abstractmethod
+from typing import Any, Dict, Iterable, List, Optional
+
+from tasks.types import TaskType
+
+
+class BaseDatasetAdapter(ABC):
+    """Abstract interface for dataset-specific adaptation.
+
+    Responsibilities:
+    - Load a streaming dataset for a repository and split
+    - Extract audio arrays and sampling rates from raw example
+    - Produce a list of candidate events for a given task
+    - Convert an event to a label target (seconds or index)
+    - Build a prompt suitable for the current model
+    """
+
+    repository: str
+
+    def __init__(self, repository: str) -> None:
+        self.repository = repository
+
+    @abstractmethod
+    def load_streaming_split(self, split: str):
+        """Return an iterable/streaming dataset for this repository and split."""
+
+    @abstractmethod
+    def get_audio(self, example: Dict[str, Any]) -> Dict[str, Any]:
+        """Return dict with keys: array (1D float32) and sampling_rate (int)."""
+
+    @abstractmethod
+    def get_events(self, example: Dict[str, Any]) -> Iterable[Dict[str, Any]]:
+        """Yield event dicts with at least keys: 'word' (or name) and 'start'/'end' or target fields per task."""
+
+    @abstractmethod
+    def event_name(self, event: Dict[str, Any]) -> str:
+        """Return display/name string for an event."""
+
+    @abstractmethod
+    def get_target_seconds(self, event: Dict[str, Any], key: str) -> float:
+        """Return ground-truth target in seconds for a given event and key (e.g., 'start', 'end')."""
+
+    @abstractmethod
+    def build_prompt(self, model_processor: Any, event: Dict[str, Any], task: TaskType, eval_mode: bool, key: Optional[str]) -> str:
+        """Build a conversation/prompt string given an event and task, using the model processor."""
+
+    @abstractmethod
+    def unknown_events(self) -> List[str]:
+        """Return list of strings that should be ignored as events."""

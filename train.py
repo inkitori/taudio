@@ -5,12 +5,13 @@ from tqdm.auto import tqdm
 from taudio import TAudio
 import bitsandbytes as bnb
 import argparse
-from pathlib import Path
 from utils.utils import get_dataset_length, patch_dataset_length
 from dataset import get_ds, collate_fn
 from utils.config_utils import ConfigManager, flatten_config, create_wandb_run_name
 import logging
 from utils.metrics import Metrics
+from tasks.types import TaskType
+
 
 def main():
     logging.getLogger().setLevel(logging.INFO)
@@ -83,12 +84,12 @@ def main():
     dataset_config = config['dataset']
 
     ds = get_ds(
-        model_id=model_config['model_id'],
+        model_adapter=model.adapter,
         repository=dataset_config['repository'],
-        audio_id=model.adapter.audio_id,
-        assistant_id=model.adapter.assistant_id,
         split=dataset_config['split'],
-        key=dataset_config['key'],
+        task=TaskType(dataset_config.get(
+            'task', TaskType.SINGLE_WORD_TIMESTAMP)),
+        key=dataset_config.get('key', None),
         max_time=dataset_config.get('max_time', None),
     )
 

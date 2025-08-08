@@ -4,7 +4,7 @@ Evaluation script for TAudio model with clean configuration management.
 
 import random
 import torch
-import datasets
+from datasets import create_adapter, infer_adapter_from_repository
 from utils.poisson import infer_timestamps
 from taudio import TAudio
 from transformers import Qwen2_5OmniProcessor
@@ -13,8 +13,9 @@ import wandb
 import argparse
 from pathlib import Path
 from utils.config_utils import ConfigManager
-from dataset import build_conversation, SECONDS_TO_EMBEDDING
 import logging
+from tasks.types import TaskType
+
 
 def main():
     logging.getLogger().setLevel(logging.INFO)
@@ -116,8 +117,9 @@ def main():
     model.eval()
 
     # Load dataset
-    base_ds = datasets.load_dataset(
-        config['dataset']['repository'], split=args.split, streaming=True)
+    adapter = create_adapter(infer_adapter_from_repository(
+        config['dataset']['repository']))
+    base_ds = adapter.load_streaming_split(args.split)
 
     # Evaluation loop
     aux_correct = 0
@@ -135,20 +137,20 @@ def main():
 
     print(f"Evaluating on {args.split} split, predicting '{key}' times")
 
-    model.base_model.eval()
+    model.eval()
 
     for example in base_ds:
         candidates = []
         seen = set()
 
-        for word in example['words']:
-            if (word['word'] != "<unk>" 
-            and word['word'] not in seen 
-            and (args.min_time is None or word[key] > args.min_time) 
-            and (args.max_time is None or word[key] < args.max_time)):
+        for word in adapter.get_events(example):
+            if (adapter.event_name(word) not in adapter.unknown_events()
+                and adapter.event_name(word) not in seen
+                and (args.min_time is None or adapter.get_target_seconds(word, key) > args.min_time)
+                    and (args.max_time is None or adapter.get_target_seconds(word, key) < args.max_time)):
                 candidates.append(word)
 
-            seen.add(word['word'])
+            seen.add(adapter.event_name(word))
 
         if not candidates:
             logging.info(f"No candidates met criteria, skipping example")
@@ -156,12 +158,13 @@ def main():
 
         word = random.choice(candidates)
 
-        logging.info(f"Selected Word: {word['word']}, {word[key]}")
+        logging.info(f"Selected Word: {adapter.event_name(word)}, {
+                     adapter.get_target_seconds(word, key)}")
 
-        text = build_conversation(
-            processor, config['dataset']['repository'], word, key, eval=True)
+        text = adapter.build_prompt(
+            processor, word, TaskType.SINGLE_WORD_TIMESTAMP, True, key)
 
-        audio_frames = example['audio']['array']
+        audio_frames = adapter.get_audio(example)['array']
 
         inputs = processor(
             text=text,
@@ -170,10 +173,10 @@ def main():
             padding=True,
         ).to(device)
 
-        gt = word[key]
+        gt = adapter.get_target_seconds(word, key)
         total += 1
 
-        print(f"\nWord: {word['word']}")
+        print(f"\nWord: {adapter.event_name(word)}")
         print(f"GT: {gt}")
 
         if args.token_output:
@@ -186,7 +189,8 @@ def main():
 
                 generated_tokens = tokens[0][inputs['input_ids'].shape[1]:-1]
                 generated_string = processor.tokenizer.decode(generated_tokens)
-                token_pred = json.loads(generated_string)[word['word']]
+                token_pred = json.loads(generated_string)[
+                    adapter.event_name(word)]
 
                 # Track absolute error for MAD calculation
                 token_abs_error = abs(token_pred - gt)
@@ -204,14 +208,17 @@ def main():
             with torch.no_grad():
                 outputs = model.base_model(**inputs, output_hidden_states=True)
                 hidden_states = outputs.hidden_states[audio_layer]
-                audio_hidden_states = hidden_states[inputs['input_ids'] == model.adapter.audio_id]
+                audio_hidden_states = hidden_states[inputs['input_ids']
+                                                    == model.adapter.audio_id]
                 logits = model.linear(audio_hidden_states).squeeze()
                 if model.poisson_loss:
-                    aux_pred_top_idx = infer_timestamps(1, logits.cpu().float().numpy())
+                    aux_pred_top_idx = infer_timestamps(
+                        1, logits.cpu().float().numpy())
                 else:
                     _, aux_pred_top_idx = torch.max(logits, dim=0)
 
-            aux_pred = float(aux_pred_top_idx) / SECONDS_TO_EMBEDDING
+            aux_pred = float(aux_pred_top_idx) / \
+                model.adapter.seconds_to_embedding
 
             # Track absolute error for MAD calculation
             aux_abs_error = abs(aux_pred - gt)

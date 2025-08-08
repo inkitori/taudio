@@ -6,14 +6,14 @@ import torch
 import torch.nn as nn
 from transformers import Qwen2_5OmniProcessor, Qwen2_5OmniThinkerForConditionalGeneration
 from utils.utils import get_audio_bounds
-from utils.qwen2_5_omni_constants import ASSISTANT_ID, BEGIN_AUDIO_ID, END_AUDIO_ID
+from utils.qwen2_5_omni_constants import ASSISTANT_ID, BEGIN_AUDIO_ID, END_AUDIO_ID, SECONDS_TO_EMBEDDING
 from contextlib import contextmanager
 import types
 import logging
-from models.base_adapter import BaseAudioTextAdapter
+from models.base_model_adapter import BaseModelAdapter
 
 
-class Qwen2_5OmniAdapter(BaseAudioTextAdapter):
+class Qwen2_5OmniAdapter(BaseModelAdapter):
     def __init__(self, model_id: str, load_in_8bit: bool) -> None:
         super().__init__()
         self.base_model = Qwen2_5OmniThinkerForConditionalGeneration.from_pretrained(
@@ -26,7 +26,7 @@ class Qwen2_5OmniAdapter(BaseAudioTextAdapter):
         self._audio_tower = self.base_model.audio_tower
         self._text_model = self.base_model.model
 
-        self.processor = Qwen2_5OmniProcessor.from_pretrained(model_id)
+        self._processor = Qwen2_5OmniProcessor.from_pretrained(model_id)
 
     # Properties required by TAudio
     @property
@@ -51,7 +51,7 @@ class Qwen2_5OmniAdapter(BaseAudioTextAdapter):
 
     @property
     def processor(self) -> Qwen2_5OmniProcessor:
-        return self.processor
+        return self._processor
 
     # Pass-throughs
     def forward(
@@ -78,6 +78,10 @@ class Qwen2_5OmniAdapter(BaseAudioTextAdapter):
 
     def get_audio_bounds(self, input_ids: torch.Tensor) -> tuple[int, int]:
         return get_audio_bounds(input_ids, BEGIN_AUDIO_ID, END_AUDIO_ID)
+
+    @property
+    def seconds_to_embedding(self) -> int:
+        return SECONDS_TO_EMBEDDING
 
     # --- Bidirectional audio mask patching (Qwen-specific) ---
     def _patch_causal_mask_zero_region(self, start: int, end: int):

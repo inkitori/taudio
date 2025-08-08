@@ -1,115 +1,103 @@
-# this file only works for Qwen2.5 Omni
-
 import torch
-from datasets import load_dataset, Dataset
-from transformers import Qwen2_5OmniProcessor
+from datasets import Dataset
 import random
 from typing import Any, Dict, Optional
 from nltk.corpus import stopwords
 import logging
-from enum import Enum
 
 from utils.utils import clamp, better_round
-from utils.qwen2_5_omni_constants import SECONDS_TO_EMBEDDING
+
+from datasets import create_adapter, infer_adapter_from_repository
+from models.base_model_adapter import BaseModelAdapter
+from tasks.types import TaskType
 
 STOPS = set(stopwords.words('english'))
-UNK_TOKEN = "<unk>"  # this only applies to librispeech
-
-
-class TaskType(Enum):
-    SINGLE_WORD_TIMESTAMP = "SINGLE_WORD_TIMESTAMP"
-    MULTI_WORD_TIMESTAMP = "MULTI_WORD_TIMESTAMP"
-    SPEAKER_COUNTING = "SPEAKER_COUNTING"
-
-
-def build_conversation(processor: Qwen2_5OmniProcessor, repository: str, word: Dict[str, any], key: str, eval: bool) -> str:
-    if repository == "gilkeyio/librispeech-alignments":
-        prompt = f"What is the first occurence of the word '{word['word']}'?"
-    elif repository == "enyoukai/audiotime-timestamps":
-        # we call these "words" but they're just general events
-        prompt = f"What is the first occurence of '{word['word']}'?"
-    else:
-        raise ValueError(f"Invalid repository: {repository}")
-
-    conversation = [
-        {
-            "role": "system",
-            "content": [
-                {"type": "text", "text": "You are Qwen, a virtual human developed by the Qwen Team, Alibaba Group, capable of perceiving auditory and visual inputs, as well as generating text and speech."}
-            ],
-        },
-        {
-            "role": "user",
-            "content": [
-                {"type": "text", "text": prompt},
-                # we will manually fill in the audio
-                {"type": "audio", "audio": "PLACEHOLDER AUDIO"},
-            ],
-        },
-    ]
-
-    if not eval:
-        word_json = '{"%s": %s}' % (word['word'], word[key])
-        conversation.append({
-            "role": "assistant",
-            "content": [
-                    {"type": "text", "text": f"{word_json}"},
-            ],
-        })
-
-    text = processor.apply_chat_template(
-        conversation,
-        tokenize=False,
-        add_generation_prompt=eval,
-    )
-
-    return text
 
 
 def get_ds(
-    model_id: str,
-    audio_id: int,
-    assistant_id: int,
+    model_adapter: BaseModelAdapter,
+    repository: str,
     split: str,
-    key: str,
-    repository: str = "gilkeyio/librispeech-alignments",
+    task: TaskType,
+    key: Optional[str] = None,
+    max_time: Optional[float] = None,
+    max_count: Optional[int] = None,
+) -> Dataset:
+    if task == TaskType.SINGLE_WORD_TIMESTAMP:
+        return get_single_word_timestamp_task(
+            model_adapter, repository, split, task, key, max_time)
+    elif task == TaskType.MULTI_WORD_TIMESTAMP:
+        raise ValueError(f"Task type {task} not supported")
+    elif task == TaskType.SPEAKER_COUNTING:
+        return get_speaker_counting_task(
+            model_adapter, repository, split, task, max_count)
+    else:
+        raise ValueError(f"Unknown task type: {task}")
+
+
+def get_speaker_counting_task(
+    model_adapter: BaseModelAdapter,
+    repository: str,
+    split: str,
+    task: TaskType,
+    max_count: Optional[int] = None,
+) -> Dataset:
+    pass
+
+
+def get_single_word_timestamp_task(
+    model_adapter: BaseModelAdapter,
+    repository: str,
+    split: str,
+    task: TaskType,
+    key: Optional[str] = None,
     max_time: Optional[float] = None,
 ) -> Dataset:
+    audio_id = model_adapter.audio_id
+    assistant_id = model_adapter.assistant_id
+
+    ds_adapter = create_adapter(infer_adapter_from_repository(repository))
+
     def preprocess_fn(example: Dict[str, Any]) -> Dict[str, Any]:
-        audio = example['audio']
-        words = example['words']
+        audio = ds_adapter.get_audio(example)
+        events = ds_adapter.get_events(example)
 
         # Get unique words that meet our criteria: not UNK_TOKEN, not stopwords, and occur before max_time seconds
         seen = set()
-        candidate_words = []
-        for word in words:
-            if word['word'] != UNK_TOKEN and word['word'] not in STOPS and (max_time is None or word[key] < max_time) and word['word'] not in seen:
-                candidate_words.append(word)
+        candidate_events = []
+        for event in events:
+            if (
+                ds_adapter.event_name(event) not in ds_adapter.unknown_events()
+                and ds_adapter.event_name(event) not in STOPS
+                and (max_time is None or ds_adapter.get_target_seconds(event, key) < max_time)
+                and ds_adapter.event_name(event) not in seen
+            ):
+                candidate_events.append(event)
+            seen.add(ds_adapter.event_name(event))
 
-            seen.add(word['word'])
-
-        if len(candidate_words) > 0:
-            word = random.choice(candidate_words)
+        if len(candidate_events) > 0:
+            event = random.choice(candidate_events)
         else:
             # Fallback to first word if no candidates meet criteria
-            word = words[0]
+            event = events[0]
             logging.info(f"No candidates met criteria, using first word: {
-                         word['word']}, {word[key]}")
+                         ds_adapter.event_name(event)}, {ds_adapter.get_target_seconds(event, key)}")
 
-        logging.info(f"Selected Word: {word['word']}, {word[key]}")
+        logging.info(f"Selected Word: {ds_adapter.event_name(event)}, {
+                     ds_adapter.get_target_seconds(event, key)}")
 
-        prompt = build_conversation(
-            processor=processor,
-            repository=repository,
-            word=word,
+        prompt = ds_adapter.build_prompt(
+            processor=model_adapter.processor,
+            event=event,
+            task=task,
+            eval_mode=False,
             key=key,
-            eval=False,
         )
 
         audio_frames = audio['array']  # 16 khz
         assert audio['sampling_rate'] == 16000
 
-        inputs = processor(
+        inputs = model_adapter.processor(
             text=prompt,
             audio=audio_frames,
             return_tensors='pt',
@@ -130,7 +118,7 @@ def get_ds(
         labels = torch.zeros(labels_size)
 
         event_idx = clamp(better_round(
-            word[key] * SECONDS_TO_EMBEDDING), 0, labels_size - 1)
+            ds_adapter.get_target_seconds(event, key) * model_adapter.seconds_to_embedding), 0, labels_size - 1)
         labels[event_idx] = 1.0
 
         # mask out everything up to and including the assistant token
@@ -150,10 +138,7 @@ def get_ds(
             'label_ids': label_ids[0],
         }
 
-    logging.info(f"Loading processor for {model_id}")
-    processor = Qwen2_5OmniProcessor.from_pretrained(model_id)
-
-    base_ds = load_dataset(repository, split=split, streaming=True)
+    base_ds = ds_adapter.load_streaming_split(split)
 
     ds = base_ds.map(preprocess_fn, remove_columns=base_ds.column_names)
 

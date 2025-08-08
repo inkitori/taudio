@@ -4,7 +4,7 @@ from contextlib import contextmanager
 from typing import Any
 
 
-class BaseAudioTextAdapter(nn.Module):
+class BaseModelAdapter(nn.Module):
     """
     Minimal interface that TAudio relies on, implemented by concrete backends.
     """
@@ -32,8 +32,13 @@ class BaseAudioTextAdapter(nn.Module):
     @property
     def processor(self) -> Any:
         raise NotImplementedError
+
+    @property
+    def seconds_to_embedding(self) -> int:
+        raise NotImplementedError
         # Core calls
     # Core calls
+
     def forward(
         self,
         *,
