@@ -61,9 +61,6 @@ class TAudio(nn.Module):
         self.poisson_loss = poisson_loss
         self.task_type = task_type
 
-    def get_audio_token_id(self) -> int:
-        return self.adapter.audio_token_index
-
     def forward(
         self,
         input_ids: torch.Tensor,  # (batch_size, seq_len)
@@ -90,7 +87,7 @@ class TAudio(nn.Module):
 
         # (num_audio_tokens, hidden_dim)
         audio_hidden_states = hidden_states[input_ids ==
-                                            self.get_audio_token_id()]
+                                            self.adapter.audio_id]
 
         # (num_audio_tokens across batch)
         logits = self.linear(audio_hidden_states).squeeze()

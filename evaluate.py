@@ -204,8 +204,7 @@ def main():
             with torch.no_grad():
                 outputs = model.base_model(**inputs, output_hidden_states=True)
                 hidden_states = outputs.hidden_states[audio_layer]
-                audio_hidden_states = hidden_states[inputs['input_ids'] == model.get_audio_token_id(
-                )]
+                audio_hidden_states = hidden_states[inputs['input_ids'] == model.adapter.audio_id]
                 logits = model.linear(audio_hidden_states).squeeze()
                 if model.poisson_loss:
                     aux_pred_top_idx = infer_timestamps(1, logits.cpu().float().numpy())

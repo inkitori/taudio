@@ -12,7 +12,6 @@ from utils.config_utils import ConfigManager, flatten_config, create_wandb_run_n
 import logging
 from utils.metrics import Metrics
 
-
 def main():
     logging.getLogger().setLevel(logging.INFO)
 
@@ -86,7 +85,8 @@ def main():
     ds = get_ds(
         model_id=model_config['model_id'],
         repository=dataset_config['repository'],
-        audio_token_id=model.get_audio_token_id(),
+        audio_id=model.adapter.audio_id,
+        assistant_id=model.adapter.assistant_id,
         split=dataset_config['split'],
         key=dataset_config['key'],
         max_time=dataset_config.get('max_time', None),

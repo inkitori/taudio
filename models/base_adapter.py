@@ -22,12 +22,11 @@ class BaseAudioTextAdapter(nn.Module):
         raise NotImplementedError
 
     @property
-    def audio_token_index(self) -> int:
+    def audio_id(self) -> int:
         raise NotImplementedError
 
     @property
-    def text_model(self) -> nn.Module:
-        """Return the text model module whose attention mask is to be patched."""
+    def assistant_id(self) -> int:
         raise NotImplementedError
 
     # Core calls

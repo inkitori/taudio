@@ -6,7 +6,7 @@ import torch
 import torch.nn as nn
 from transformers import Qwen2_5OmniThinkerForConditionalGeneration
 from utils.utils import get_audio_bounds
-from utils.qwen2_5_omni_constants import BEGIN_AUDIO_ID, END_AUDIO_ID
+from utils.qwen2_5_omni_constants import ASSISTANT_ID, BEGIN_AUDIO_ID, END_AUDIO_ID
 from contextlib import contextmanager
 import types
 import logging
@@ -36,8 +36,12 @@ class Qwen2_5OmniAdapter(BaseAudioTextAdapter):
         return self.base_model.dtype
 
     @property
-    def audio_token_index(self) -> int:
+    def audio_id(self) -> int:
         return self.base_model.config.audio_token_index
+
+    @property
+    def assistant_id(self) -> int:
+        return ASSISTANT_ID
 
     @property
     def text_model(self) -> nn.Module:

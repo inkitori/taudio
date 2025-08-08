@@ -10,7 +10,7 @@ import logging
 from enum import Enum
 
 from utils.utils import clamp, better_round
-from utils.qwen2_5_omni_constants import ASSISTANT_ID, SECONDS_TO_EMBEDDING
+from utils.qwen2_5_omni_constants import SECONDS_TO_EMBEDDING
 
 STOPS = set(stopwords.words('english'))
 UNK_TOKEN = "<unk>"  # this only applies to librispeech
@@ -68,7 +68,8 @@ def build_conversation(processor: Qwen2_5OmniProcessor, repository: str, word: D
 
 def get_ds(
     model_id: str,
-    audio_token_id: int,
+    audio_id: int,
+    assistant_id: int,
     split: str,
     key: str,
     repository: str = "gilkeyio/librispeech-alignments",
@@ -125,7 +126,7 @@ def get_ds(
         feature_attention_mask = inputs['feature_attention_mask']
 
         # <AUDIO> tokens in input_ids correspond to audio embeddings (40 ms per embedding)
-        labels_size = (input_ids == audio_token_id).sum().item()
+        labels_size = (input_ids == audio_id).sum().item()
         labels = torch.zeros(labels_size)
 
         event_idx = clamp(better_round(
@@ -134,7 +135,7 @@ def get_ds(
 
         # mask out everything up to and including the assistant token
         label_ids = input_ids.clone()
-        assistant_idx = (input_ids == ASSISTANT_ID).nonzero(as_tuple=True)[
+        assistant_idx = (input_ids == assistant_id).nonzero(as_tuple=True)[
             1][0]  # first occurence of assistant token
         label_ids[0, :assistant_idx + 1] = -100
 
