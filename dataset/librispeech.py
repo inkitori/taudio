@@ -24,14 +24,7 @@ class LibriSpeechAdapter(BaseDatasetAdapter):
         return float(event[key])
 
     def get_num_speakers(self, example: Dict[str, Any]) -> int:
-        # LibriSpeech split is typically single-speaker, but some versions may include speaker ids
-        speakers = set()
-        for ev in self.get_events(example):
-            spk = ev.get("speaker", None)
-            if spk is not None:
-                speakers.add(spk)
-        # Fallback: if no speaker metadata, assume 1 speaker
-        return len(speakers) if len(speakers) > 0 else 1
+        raise NotImplementedError
 
     def unknown_events(self) -> List[str]:
         return ["<unk>"]

@@ -36,7 +36,7 @@ class TAudio(nn.Module):
 
         # Adapter-based backend
         self.adapter = create_adapter(
-            backend=backend, model_id=model_id, load_in_8bit=load_in_8bit)
+            backend=backend, model_id=model_id, load_in_8bit=load_in_8bit, bidirectional_audio=bidirectional_audio)
 
         self.hidden_dim = self.adapter.hidden_dim
 
@@ -54,7 +54,6 @@ class TAudio(nn.Module):
         self.audio_layer = audio_layer
 
         self.class_weighting = class_weighting
-        self.bidirectional_audio = bidirectional_audio
 
         self.surrogate_loss = surrogate_loss
         self.token_loss = token_loss
@@ -73,15 +72,14 @@ class TAudio(nn.Module):
         labels: torch.Tensor,  # (num_audio_tokens)
         label_ids: torch.Tensor  # (batch_size, seq_len)
     ) -> torch.Tensor:
-        with self.adapter.bidirectional_audio_context(input_ids) if self.bidirectional_audio else nullcontext():
-            outputs = self.adapter(
-                input_ids=input_ids,
-                attention_mask=attention_mask,
-                input_features=input_features,
-                feature_attention_mask=feature_attention_mask,
-                output_hidden_states=True,
-                labels=label_ids,
-            )
+        outputs = self.adapter(
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            input_features=input_features,
+            feature_attention_mask=feature_attention_mask,
+            output_hidden_states=True,
+            labels=label_ids,
+        )
 
         # (batch_size, seq_len, hidden_dim)
         hidden_states = outputs.hidden_states[self.audio_layer]
@@ -119,5 +117,4 @@ class TAudio(nn.Module):
         return output
 
     def generate(self, **kwargs):
-        with self.adapter.bidirectional_audio_context(kwargs['input_ids']) if self.bidirectional_audio else nullcontext():
-            return self.adapter.generate(**kwargs)
+        return self.adapter.generate(**kwargs)

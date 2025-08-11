@@ -209,7 +209,7 @@ class SingleTimestampTask(BaseTask):
         try:
             token_pred = json.loads(generated_string)[name]
         except Exception:
-            token_pred = None
+            return {"token_correct": 0.0}
 
         # Metric increments
         abs_err = abs(float(token_pred) - float(gt))
@@ -245,17 +245,23 @@ class SingleTimestampTask(BaseTask):
         inputs = inputs.to(next(model.parameters()).device)
 
         with torch.no_grad():
-            outputs = model.base_model(**inputs, output_hidden_states=True)
+            outputs = model.adapter(
+                **inputs, output_hidden_states=True)
+
             hidden_states = outputs.hidden_states[model.audio_layer]
+
             audio_hidden_states = hidden_states[inputs["input_ids"]
                                                 == model.adapter.audio_id]
+
             logits = model.linear(audio_hidden_states).squeeze()
-            if model.poisson_loss:
-                aux_pred_top_idx = infer_timestamps(
-                    1, logits.cpu().float().numpy())
-            else:
-                _, aux_pred_top_idx = torch.max(logits, dim=0)
+            # if model.poisson_loss:
+            #     aux_pred_top_idx = infer_timestamps(
+            #         1, logits.cpu().float().numpy())
+            # else:
+            _, aux_pred_top_idx = torch.max(logits, dim=0)
         aux_pred = float(aux_pred_top_idx) / model.adapter.seconds_to_embedding
+
+        logging.info(f"Auxiliary prediction: {aux_pred}, GT: {gt}")
 
         # Metric increments
         abs_err = abs(float(aux_pred) - float(gt))

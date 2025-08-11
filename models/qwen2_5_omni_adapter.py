@@ -11,10 +11,11 @@ from contextlib import contextmanager
 import types
 import logging
 from models.base_model_adapter import BaseModelAdapter
+from contextlib import nullcontext
 
 
 class Qwen2_5OmniAdapter(BaseModelAdapter):
-    def __init__(self, model_id: str, load_in_8bit: bool) -> None:
+    def __init__(self, model_id: str, load_in_8bit: bool, bidirectional_audio: bool) -> None:
         super().__init__()
         self.base_model = Qwen2_5OmniThinkerForConditionalGeneration.from_pretrained(
             model_id,
@@ -27,6 +28,7 @@ class Qwen2_5OmniAdapter(BaseModelAdapter):
         self._text_model = self.base_model.model
 
         self._processor = Qwen2_5OmniProcessor.from_pretrained(model_id)
+        self.bidirectional_audio = bidirectional_audio
 
     # Properties required by TAudio
     @property
@@ -56,28 +58,20 @@ class Qwen2_5OmniAdapter(BaseModelAdapter):
     # Pass-throughs
     def forward(
         self,
-        *,
-        input_ids: torch.Tensor,
-        attention_mask: torch.Tensor,
-        input_features: torch.Tensor,
-        feature_attention_mask: torch.Tensor,
-        labels: torch.Tensor,
-        output_hidden_states: bool,
+        **kwargs,
     ) -> Any:
-        return self.base_model(
-            input_ids=input_ids,
-            attention_mask=attention_mask,
-            input_features=input_features,
-            feature_attention_mask=feature_attention_mask,
-            output_hidden_states=output_hidden_states,
-            labels=labels,
-        )
+        with self.bidirectional_audio_context(kwargs["input_ids"]) if self.bidirectional_audio else nullcontext():
+            logging.info(f"Using bidirectional audio context: {
+                         self.bidirectional_audio}")
+            return self.base_model(
+                **kwargs,
+            )
 
     def generate(self, **kwargs):
-        return self.base_model.generate(**kwargs)
-
-    def get_audio_bounds(self, input_ids: torch.Tensor) -> tuple[int, int]:
-        return get_audio_bounds(input_ids, BEGIN_AUDIO_ID, END_AUDIO_ID)
+        with self.bidirectional_audio_context(kwargs["input_ids"]) if self.bidirectional_audio else nullcontext():
+            logging.info(f"Using bidirectional audio context: {
+                         self.bidirectional_audio}")
+            return self.base_model.generate(**kwargs)
 
     @property
     def seconds_to_embedding(self) -> int:
@@ -133,7 +127,8 @@ class Qwen2_5OmniAdapter(BaseModelAdapter):
 
     @contextmanager
     def bidirectional_audio_context(self, input_ids: torch.Tensor):
-        start_audio_index, end_audio_index = self.get_audio_bounds(input_ids)
+        start_audio_index, end_audio_index = get_audio_bounds(
+            input_ids, BEGIN_AUDIO_ID, END_AUDIO_ID)
         self._patch_causal_mask_zero_region(start_audio_index, end_audio_index)
         logging.info(f"Enabled bidirectional audio processing for region [{
                      start_audio_index}:{end_audio_index}]")

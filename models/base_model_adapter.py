@@ -39,26 +39,17 @@ class BaseModelAdapter(nn.Module):
         # Core calls
     # Core calls
 
-    def forward(
-        self,
-        *,
-        input_ids: torch.Tensor,
-        attention_mask: torch.Tensor,
-        input_features: torch.Tensor,
-        feature_attention_mask: torch.Tensor,
-        labels: torch.Tensor,
-        output_hidden_states: bool,
-    ) -> Any:
+    @property
+    def text_model(self) -> nn.Module:
+        raise NotImplementedError
+
+    def forward(self, **kwargs) -> Any:
         raise NotImplementedError
 
     def generate(self, **kwargs):
         raise NotImplementedError
 
     # Model-specific helpers
-    def get_audio_bounds(self, input_ids: torch.Tensor) -> tuple[int, int]:
-        """Return [start_index, end_index] for the audio span in input_ids."""
-        raise NotImplementedError
-
     @contextmanager
     def bidirectional_audio_context(self, input_ids: torch.Tensor):
         """Default no-op context; adapters override to implement model-specific patching."""

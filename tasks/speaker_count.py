@@ -163,7 +163,7 @@ class SpeakerCountTask(BaseTask):
         inputs = inputs.to(next(model.parameters()).device)
 
         with torch.no_grad():
-            outputs = model.base_model(**inputs, output_hidden_states=True)
+            outputs = model.adapter(**inputs, output_hidden_states=True)
             hidden_states = outputs.hidden_states[model.audio_layer]
             audio_hidden_states = hidden_states[inputs["input_ids"]
                                                 == model.adapter.audio_id]
