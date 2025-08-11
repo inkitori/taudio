@@ -12,7 +12,6 @@ import logging
 from utils.metrics import AverageMetrics
 from tasks.types import TaskType
 
-
 def main():
     logging.getLogger().setLevel(logging.INFO)
 

@@ -11,7 +11,7 @@ from dataset import create_adapter, infer_adapter_from_repository
 from models.base_model_adapter import BaseModelAdapter
 from tasks.types import TaskType
 from tasks.timestamp_single import SingleTimestampTask
-from tasks.speaker_count import SpeakerCountingTask
+from tasks.speaker_count import SpeakerCountTask
 
 STOPS = set(stopwords.words('english'))
 
@@ -36,7 +36,7 @@ def get_ds(
     if task == TaskType.SINGLE_WORD_TIMESTAMP:
         task_impl = SingleTimestampTask(key=key or "start", max_time=max_time)
     else:  # TaskType.SPEAKER_COUNTING
-        task_impl = SpeakerCountingTask()
+        task_impl = SpeakerCountTask()
 
     def preprocess_fn(example: Dict[str, Any]) -> Dict[str, Any]:
         return task_impl.build_labels(

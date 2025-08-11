@@ -82,7 +82,7 @@ class SpeakerCountTask(BaseTask):
 
         # Labels aligned to <AUDIO> embeddings (40 ms per embedding for Qwen2.5 Omni)
         labels_size = int((input_ids == model_adapter.audio_id).sum().item())
-        labels = torch.zeros(labels_size)
+        labels = torch.zeros(labels_size, device=input_ids.device)
 
         # this will be 0 for all but the first speaker_count tokens
         labels[:speaker_count] = 1.0

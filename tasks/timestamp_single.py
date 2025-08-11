@@ -66,7 +66,7 @@ class SingleTimestampTask(BaseTask):
         elif "audiotime" in repo:
             prompt = f"What is the first occurence of '{name}'?"
         else:
-            prompt = f"When does '{name}' first occur?"
+            raise ValueError(f"Unknown repository: {repo}")
 
         conversation = [
             {
@@ -151,7 +151,7 @@ class SingleTimestampTask(BaseTask):
 
         # Labels aligned to <AUDIO> embeddings (40 ms per embedding for Qwen2.5 Omni)
         labels_size = int((input_ids == model_adapter.audio_id).sum().item())
-        labels = torch.zeros(labels_size)
+        labels = torch.zeros(labels_size, device=input_ids.device)
 
         event_idx = clamp(better_round(
             t_sec * (model_adapter.seconds_to_embedding)), 0, labels_size - 1)
@@ -232,7 +232,6 @@ class SingleTimestampTask(BaseTask):
         if event is None:
             events = list(ds_adapter.get_events(example))
             event = self._choose_event(events=events, ds_adapter=ds_adapter)
-        name = ds_adapter.event_name(event)
         gt = ds_adapter.get_target_seconds(event, self.key)
 
         # Build evaluation inputs via build_labels to mirror evaluate.py behavior

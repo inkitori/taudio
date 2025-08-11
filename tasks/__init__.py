@@ -2,12 +2,12 @@ from typing import Dict, Type
 
 from .base import BaseTask
 from .timestamp_single import SingleTimestampTask
-from .speaker_count import SpeakerCountingTask
+from .speaker_count import SpeakerCountTask
 
 
 _TASKS: Dict[str, Type[BaseTask]] = {
     "single_word_timestamp": SingleTimestampTask,
-    "speaker_count": SpeakerCountingTask,
+    "speaker_count": SpeakerCountTask,
 }
 
 
