@@ -1,6 +1,8 @@
 from abc import ABC, abstractmethod
 from typing import Any, Dict, Iterable, Optional
 
+import torch
+
 from models.base_model_adapter import BaseModelAdapter
 from dataset.base_dataset_adapter import BaseDatasetAdapter
 
@@ -31,3 +33,7 @@ class BaseTask(ABC):
                                    ds_adapter: BaseDatasetAdapter,
                                    model: Any) -> Any:
         """Evaluate the auxiliary outputs of the model."""
+
+    @abstractmethod
+    def calculate_loss(self, logits, labels, poisson_loss: bool) -> torch.Tensor:
+        """Calculate the loss for the task."""

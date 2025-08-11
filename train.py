@@ -83,12 +83,14 @@ def main():
     # Create dataset
     dataset_config = config['dataset']
 
+    task = TaskType(dataset_config.get(
+        'task', TaskType.SINGLE_WORD_TIMESTAMP))
+
     ds = get_ds(
         model_adapter=model.adapter,
         repository=dataset_config['repository'],
         split=dataset_config['split'],
-        task=TaskType(dataset_config.get(
-            'task', TaskType.SINGLE_WORD_TIMESTAMP)),
+        task=task,
         key=dataset_config.get('key', None),
         max_time=dataset_config.get('max_time', None),
     )

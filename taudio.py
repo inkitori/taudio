@@ -1,14 +1,15 @@
-import torch
-import torch.nn as nn
-from contextlib import contextmanager, nullcontext
-
 from collections import namedtuple
 from typing import Optional
 
-from utils.poisson import poisson_loss, poisson_count_loss
+import torch
+import torch.nn as nn
+
+from contextlib import nullcontext
+
 import logging
-from tasks.types import TaskType
 from models import create_adapter
+from tasks.timestamp_single import SingleTimestampTask
+from tasks.base import BaseTask
 
 Output = namedtuple(
     'Output', ['loss', 'token_loss', 'surrogate_loss', 'pred', 'gt'])
@@ -28,7 +29,7 @@ class TAudio(nn.Module):
         bidirectional_audio: bool = False,
         poisson_loss: bool = False,
         linear_bias: Optional[float] = None,
-        task_type: TaskType = TaskType.SINGLE_WORD_TIMESTAMP,
+        task: BaseTask = SingleTimestampTask(),
         backend: str = "qwen2_5_omni",
     ) -> None:
         super(TAudio, self).__init__()
@@ -59,7 +60,7 @@ class TAudio(nn.Module):
         self.token_loss = token_loss
         self.surrogate_loss_weight = surrogate_loss_weight
         self.poisson_loss = poisson_loss
-        self.task_type = task_type
+        self.task = task
 
     def forward(
         self,
@@ -98,7 +99,8 @@ class TAudio(nn.Module):
         gt_top_val, gt_top_idx = torch.max(labels, dim=0)
 
         if self.surrogate_loss:
-            surrogate_loss = self.surrogate_loss_handler(logits, labels)
+            surrogate_loss = self.task.calculate_loss(
+                logits, labels, self.poisson_loss)
         else:
             surrogate_loss = torch.tensor(
                 0.0, device=logits.device, dtype=logits.dtype)
@@ -119,37 +121,3 @@ class TAudio(nn.Module):
     def generate(self, **kwargs):
         with self.adapter.bidirectional_audio_context(kwargs['input_ids']) if self.bidirectional_audio else nullcontext():
             return self.adapter.generate(**kwargs)
-
-    def surrogate_loss_handler(self, logits, labels):
-        if self.task_type == TaskType.SINGLE_WORD_TIMESTAMP:
-            return self.single_word_timestamp_surrogate_loss(logits, labels)
-        elif self.task_type == TaskType.SPEAKER_COUNTING:
-            return self.speaker_counting_surrogate_loss(logits, labels)
-        else:
-            raise ValueError(f"Task type {self.task_type} not supported")
-
-    def single_word_timestamp_surrogate_loss(self, logits, labels):
-        if self.poisson_loss:
-            return poisson_loss(logits.unsqueeze(
-                0), labels.unsqueeze(0), torch.ones_like(logits.unsqueeze(0)))
-        else:
-            if self.class_weighting:
-                num_ones = (labels == 1).sum()
-                num_zeros = (labels == 0).sum()
-                pos_weight = (
-                    num_zeros / num_ones) if num_ones > 0 else 1.0
-
-                criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
-            else:
-                criterion = nn.BCEWithLogitsLoss()
-
-            return criterion(logits, labels)
-
-    def speaker_counting_surrogate_loss(self, logits, labels):
-        if self.poisson_loss:
-            ground_truth_count = labels.sum()
-            return poisson_count_loss(logits.unsqueeze(
-                0), ground_truth_count.unsqueeze(0), torch.ones_like(logits.unsqueeze(0)))
-        else:
-            raise ValueError(
-                "Only Poisson loss is supported for speaker counting")

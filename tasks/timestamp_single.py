@@ -4,13 +4,14 @@ import logging
 import torch
 from nltk.corpus import stopwords
 import json
+import torch.nn as nn
 
 from dataset.base_dataset_adapter import BaseDatasetAdapter
 from models.base_model_adapter import BaseModelAdapter
 
 from .base import BaseTask
 from utils.utils import clamp, better_round
-from utils.qwen2_5_omni_constants import SECONDS_TO_EMBEDDING
+from utils.poisson import poisson_loss, infer_timestamps
 
 
 STOPS = set(stopwords.words("english"))
@@ -211,17 +212,11 @@ class SingleTimestampTask(BaseTask):
             token_pred = None
 
         # Metric increments
+        abs_err = abs(float(token_pred) - float(gt))
         metrics: Dict[str, float] = {
-            "token_correct": 0.0,
-            "token_abs_error_sum": 0.0,
+            "token_abs_error_sum": abs_err,
+            "token_correct": 1.0 if abs_err <= float(error_bound) else 0.0,
         }
-        if token_pred is not None:
-            abs_err = abs(float(token_pred) - float(gt))
-            metrics["token_valid_count"] = 1.0
-            metrics["token_abs_error_sum"] = abs_err
-            if abs_err <= float(error_bound):
-                metrics["token_correct"] = 1.0
-
         return metrics
 
     def evaluate_auxiliary_outputs(
@@ -257,7 +252,6 @@ class SingleTimestampTask(BaseTask):
                                                 == model.adapter.audio_id]
             logits = model.linear(audio_hidden_states).squeeze()
             if model.poisson_loss:
-                from utils.poisson import infer_timestamps
                 aux_pred_top_idx = infer_timestamps(
                     1, logits.cpu().float().numpy())
             else:
@@ -272,23 +266,18 @@ class SingleTimestampTask(BaseTask):
         }
         return metrics
 
-    # Unified prompt builder exposed via BaseTask
-    def build_prompt(
-        self,
-        *,
-        model_processor: Any,
-        adapter: BaseDatasetAdapter,
-        example: Dict[str, Any],
-        event: Optional[Dict[str, Any]],
-        eval_mode: bool,
-        key: Optional[str] = None,
-    ) -> str:
-        if event is None:
-            events = list(adapter.get_events(example))
-            event = self._choose_event(events=events, ds_adapter=adapter)
-        return self._build_conversation_text(
-            model_processor=model_processor,
-            ds_adapter=adapter,
-            event=event,
-            eval_mode=eval_mode,
-        )
+    def calculate_loss(self, logits, labels, use_poisson_loss: bool) -> torch.Tensor:
+        if use_poisson_loss:
+            return poisson_loss(logits.unsqueeze(0), labels.unsqueeze(0), torch.ones_like(logits.unsqueeze(0)))
+        else:
+            if self.class_weighting:
+                num_ones = (labels == 1).sum()
+                num_zeros = (labels == 0).sum()
+                pos_weight = (
+                    num_zeros / num_ones) if num_ones > 0 else 1.0
+
+                criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
+            else:
+                criterion = nn.BCEWithLogitsLoss()
+
+            return criterion(logits, labels)
