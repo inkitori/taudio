@@ -7,7 +7,7 @@ import logging
 
 from utils.utils import clamp, better_round
 
-from datasets import create_adapter, infer_adapter_from_repository
+from dataset import create_adapter, infer_adapter_from_repository
 from models.base_model_adapter import BaseModelAdapter
 from tasks.types import TaskType
 from tasks.timestamp_single import SingleTimestampTask
@@ -43,6 +43,7 @@ def get_ds(
             example=example,
             ds_adapter=ds_adapter,
             model_adapter=model_adapter,
+            eval_mode=False,
         )
 
     base_ds = ds_adapter.load_streaming_split(split)

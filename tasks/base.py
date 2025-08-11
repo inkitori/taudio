@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 from typing import Any, Dict, Iterable, Optional
 
 from models.base_model_adapter import BaseModelAdapter
-from datasets.base_dataset_adapter import BaseDatasetAdapter
+from dataset.base_dataset_adapter import BaseDatasetAdapter
 
 
 class BaseTask(ABC):

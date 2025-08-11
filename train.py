@@ -6,7 +6,7 @@ from taudio import TAudio
 import bitsandbytes as bnb
 import argparse
 from utils.utils import get_dataset_length, patch_dataset_length
-from dataset import get_ds, collate_fn
+from dataset.dataset import get_ds, collate_fn
 from utils.config_utils import ConfigManager, flatten_config, create_wandb_run_name
 import logging
 from utils.metrics import AverageMetrics
@@ -157,7 +157,6 @@ def main():
             })
 
             logging.info(f"PRED\t{pred_top_idx}\t{pred_top_val}")
-            logging.info(f"GT\t{gt_top_idx}\t{gt_top_val}")
             logging.info(f"Deviation: {deviation}")
 
             scaled_loss = loss / training_config['grad_accumulation_steps']

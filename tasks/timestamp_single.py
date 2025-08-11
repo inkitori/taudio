@@ -5,7 +5,7 @@ import torch
 from nltk.corpus import stopwords
 import json
 
-from datasets.base_dataset_adapter import BaseDatasetAdapter
+from dataset.base_dataset_adapter import BaseDatasetAdapter
 from models.base_model_adapter import BaseModelAdapter
 
 from .base import BaseTask
@@ -18,8 +18,10 @@ STOPS = set(stopwords.words("english"))
 
 class SingleTimestampTask(BaseTask):
     def __init__(self, key: str = "start", max_time: Optional[float] = None, min_time: Optional[float] = None):
-        super().__init__(name="single_word_timestamp",
-                         key=key, max_time=max_time, min_time=min_time)
+        super().__init__()
+        self.key = key
+        self.max_time = max_time
+        self.min_time = min_time
 
     def _choose_event(self, *, events: Iterable[Dict[str, Any]], ds_adapter: BaseDatasetAdapter) -> Dict[str, Any]:
         seen_names = set()

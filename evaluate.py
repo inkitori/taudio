@@ -4,7 +4,7 @@ Evaluation script for TAudio model with clean configuration management.
 
 import random
 import torch
-from datasets import create_adapter, infer_adapter_from_repository
+from dataset import create_adapter, infer_adapter_from_repository
 from taudio import TAudio
 import wandb
 import argparse
