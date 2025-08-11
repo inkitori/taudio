@@ -1,8 +1,6 @@
 from abc import ABC, abstractmethod
 from typing import Any, Dict, Iterable, List, Optional
 
-from tasks.types import TaskType
-
 
 class BaseDatasetAdapter(ABC):
     """Abstract interface for dataset-specific adaptation.
@@ -15,9 +13,9 @@ class BaseDatasetAdapter(ABC):
     - Build a prompt suitable for the current model
     """
 
-    repository: str
+    repository: Optional[str]
 
-    def __init__(self, repository: str) -> None:
+    def __init__(self, repository: Optional[str] = None) -> None:
         self.repository = repository
 
     @abstractmethod
@@ -41,8 +39,8 @@ class BaseDatasetAdapter(ABC):
         """Return ground-truth target in seconds for a given event and key (e.g., 'start', 'end')."""
 
     @abstractmethod
-    def build_prompt(self, model_processor: Any, event: Dict[str, Any], task: TaskType, eval_mode: bool, key: Optional[str]) -> str:
-        """Build a conversation/prompt string given an event and task, using the model processor."""
+    def get_num_speakers(self, example: Dict[str, Any]) -> int:
+        """Return the number of distinct speakers for the given example."""
 
     @abstractmethod
     def unknown_events(self) -> List[str]:

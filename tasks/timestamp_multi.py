@@ -49,3 +49,37 @@ class MultiTimestampTask(BaseTask):
             "label_ids": label_ids[0],
         }
 
+    def build_prompt(self,
+                     *,
+                     model_processor: Any,
+                     adapter,
+                     example: Dict[str, Any],
+                     event: Optional[Dict[str, Any]],
+                     eval_mode: bool,
+                     key: Optional[str] = None) -> str:
+        name = (event or {}).get("word", "")
+        prompt = f"When do occurrences of the word '{name}' happen?"
+
+        conversation = [
+            {
+                "role": "system",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": "You are Qwen, a virtual human developed by the Qwen Team, Alibaba Group, capable of perceiving auditory and visual inputs, as well as generating text and speech.",
+                    }
+                ],
+            },
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": prompt},
+                    {"type": "audio", "audio": "PLACEHOLDER AUDIO"},
+                ],
+            },
+        ]
+
+        # For multi timestamps we typically wouldn't add supervision in prompt
+        return model_processor.apply_chat_template(
+            conversation, tokenize=False, add_generation_prompt=eval_mode
+        )

@@ -5,16 +5,14 @@ Evaluation script for TAudio model with clean configuration management.
 import random
 import torch
 from datasets import create_adapter, infer_adapter_from_repository
-from utils.poisson import infer_timestamps
 from taudio import TAudio
-from transformers import Qwen2_5OmniProcessor
-import json
 import wandb
 import argparse
 from pathlib import Path
 from utils.config_utils import ConfigManager
 import logging
-from tasks.types import TaskType
+from tasks.timestamp_single import SingleTimestampTask
+from utils.metrics import AverageMetrics
 
 
 def main():
@@ -105,8 +103,6 @@ def main():
     model_config = config['model']
     loss_config = config['loss']
 
-    processor = Qwen2_5OmniProcessor.from_pretrained(model_config['model_id'])
-
     taudio_config = {
         **model_config,
         **loss_config
@@ -117,144 +113,47 @@ def main():
     model.eval()
 
     # Load dataset
-    adapter = create_adapter(infer_adapter_from_repository(
-        config['dataset']['repository']))
+    adapter = create_adapter(
+        infer_adapter_from_repository(config['dataset']['repository']),
+        repository=config['dataset']['repository'],
+    )
     base_ds = adapter.load_streaming_split(args.split)
 
-    # Evaluation loop
-    aux_correct = 0
-    token_correct = 0
-    total = 0
-
-    # Variables for mean absolute deviation tracking
-    token_abs_error_sum = 0.0
-    aux_abs_error_sum = 0.0
-    token_valid_count = 0
-    aux_valid_count = 0
+    # Metrics aggregator (running averages)
+    metrics = AverageMetrics()
 
     key = config['dataset']['key']
-    audio_layer = model_config['audio_layer']
 
     print(f"Evaluating on {args.split} split, predicting '{key}' times")
 
     model.eval()
 
+    task = SingleTimestampTask(
+        key=key, min_time=args.min_time, max_time=args.max_time)
+
     for example in base_ds:
-        candidates = []
-        seen = set()
-
-        for word in adapter.get_events(example):
-            if (adapter.event_name(word) not in adapter.unknown_events()
-                and adapter.event_name(word) not in seen
-                and (args.min_time is None or adapter.get_target_seconds(word, key) > args.min_time)
-                    and (args.max_time is None or adapter.get_target_seconds(word, key) < args.max_time)):
-                candidates.append(word)
-
-            seen.add(adapter.event_name(word))
-
-        if not candidates:
-            logging.info(f"No candidates met criteria, skipping example")
-            continue
-
-        word = random.choice(candidates)
-
-        logging.info(f"Selected Word: {adapter.event_name(word)}, {
-                     adapter.get_target_seconds(word, key)}")
-
-        text = adapter.build_prompt(
-            processor, word, TaskType.SINGLE_WORD_TIMESTAMP, True, key)
-
-        audio_frames = adapter.get_audio(example)['array']
-
-        inputs = processor(
-            text=text,
-            audio=audio_frames,
-            return_tensors='pt',
-            padding=True,
-        ).to(device)
-
-        gt = adapter.get_target_seconds(word, key)
-        total += 1
-
-        print(f"\nWord: {adapter.event_name(word)}")
-        print(f"GT: {gt}")
-
+        # Token-based evaluation
         if args.token_output:
-            try:
-                with torch.no_grad():
-                    tokens = model.generate(
-                        **inputs,
-                        eos_token_id=processor.tokenizer.eos_token_id,
-                    )
+            token_metrics = task.evaluate_tokens(
+                example=example,
+                ds_adapter=adapter,
+                model=model,
+                error_bound=args.error_bound,
+            )
+            metrics.update_dict(token_metrics)
 
-                generated_tokens = tokens[0][inputs['input_ids'].shape[1]:-1]
-                generated_string = processor.tokenizer.decode(generated_tokens)
-                token_pred = json.loads(generated_string)[
-                    adapter.event_name(word)]
-
-                # Track absolute error for MAD calculation
-                token_abs_error = abs(token_pred - gt)
-                token_abs_error_sum += token_abs_error
-                token_valid_count += 1
-
-                if token_abs_error <= args.error_bound:
-                    token_correct += 1
-
-                print(f"TOKEN_PRED: {token_pred}")
-            except Exception as e:
-                print(f"Token prediction failed: {e}")
-
+        # Auxiliary-head evaluation
         if args.aux_output:
-            with torch.no_grad():
-                outputs = model.base_model(**inputs, output_hidden_states=True)
-                hidden_states = outputs.hidden_states[audio_layer]
-                audio_hidden_states = hidden_states[inputs['input_ids']
-                                                    == model.adapter.audio_id]
-                logits = model.linear(audio_hidden_states).squeeze()
-                if model.poisson_loss:
-                    aux_pred_top_idx = infer_timestamps(
-                        1, logits.cpu().float().numpy())
-                else:
-                    _, aux_pred_top_idx = torch.max(logits, dim=0)
+            aux_metrics = task.evaluate_auxiliary_outputs(
+                example=example,
+                ds_adapter=adapter,
+                model=model,
+                error_bound=args.error_bound,
+            )
+            # Accuracy over all aux examples
+            metrics.update_dict(aux_metrics)
 
-            aux_pred = float(aux_pred_top_idx) / \
-                model.adapter.seconds_to_embedding
-
-            # Track absolute error for MAD calculation
-            aux_abs_error = abs(aux_pred - gt)
-            aux_abs_error_sum += aux_abs_error
-            aux_valid_count += 1
-
-            if aux_abs_error <= args.error_bound:
-                aux_correct += 1
-
-            print(f"AUX_PRED: {aux_pred}")
-
-        # Log metrics
-        metrics = {}
-        if args.token_output and token_valid_count > 0:
-            metrics["token_accuracy"] = token_correct / total
-            metrics["token_mad"] = token_abs_error_sum / token_valid_count
-        if args.aux_output and aux_valid_count > 0:
-            metrics["auxiliary_accuracy"] = aux_correct / total
-            metrics["auxiliary_mad"] = aux_abs_error_sum / aux_valid_count
-
-        run.log(metrics)
-
-    # Final results
-    print(f"\nEvaluation completed on {total} examples:")
-    if args.token_output:
-        print(f"Token accuracy: {token_correct /
-              total:.4f} ({token_correct}/{total})")
-        if token_valid_count > 0:
-            print(f"Token MAD: {
-                  token_abs_error_sum/token_valid_count:.4f} ({token_valid_count} valid predictions)")
-    if args.aux_output:
-        print(f"Auxiliary accuracy: {
-              aux_correct/total:.4f} ({aux_correct}/{total})")
-        if aux_valid_count > 0:
-            print(f"Auxiliary MAD: {
-                  aux_abs_error_sum/aux_valid_count:.4f} ({aux_valid_count} valid predictions)")
+        run.log(metrics.to_dict())
 
     run.finish()
 

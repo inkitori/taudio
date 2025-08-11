@@ -9,7 +9,7 @@ from utils.utils import get_dataset_length, patch_dataset_length
 from dataset import get_ds, collate_fn
 from utils.config_utils import ConfigManager, flatten_config, create_wandb_run_name
 import logging
-from utils.metrics import Metrics
+from utils.metrics import AverageMetrics
 from tasks.types import TaskType
 
 
@@ -132,14 +132,7 @@ def main():
     for epoch in range(training_config['epochs']):
         progress_bar = tqdm(dataloader, desc=f"Epoch {epoch + 1}")
 
-        metrics = Metrics()
-
-        metrics.add("loss")
-        metrics.add("token_loss")
-        metrics.add("surrogate_loss")
-        metrics.add("deviation")
-
-        metrics.set_scale_factor(training_config['grad_accumulation_steps'])
+        metrics = AverageMetrics()
 
         for step, batch in enumerate(progress_bar):
             batch = {k: v.to(device) for k, v in batch.items()}
@@ -156,10 +149,12 @@ def main():
             deviation = (pred_top_idx.float() -
                          gt_top_idx.float()).abs().item()
 
-            metrics.update("loss", loss.item())
-            metrics.update("token_loss", token_loss.item())
-            metrics.update("surrogate_loss", surrogate_loss.item())
-            metrics.update("deviation", deviation)
+            metrics.update_dict({
+                "loss": loss.item(),
+                "token_loss": token_loss.item(),
+                "surrogate_loss": surrogate_loss.item(),
+                "deviation": deviation,
+            })
 
             logging.info(f"PRED\t{pred_top_idx}\t{pred_top_val}")
             logging.info(f"GT\t{gt_top_idx}\t{gt_top_val}")
@@ -174,15 +169,11 @@ def main():
                 scheduler.step()
 
                 logging.info(
-                    f"Step {step + 1}, Average Loss: {metrics.get_scaled('loss'):.4f}")
+                    f"Step {step + 1}, Average Loss: {metrics.get('loss'):.4f}")
 
                 if not args.debug:
                     run.log({
-                        "loss": metrics.get_scaled("loss"),
-                        "token_loss": metrics.get_scaled("token_loss"),
-                        "surrogate_loss": metrics.get_scaled("surrogate_loss"),
-                        "deviation": metrics.get_scaled("deviation"),
-
+                        **metrics.to_dict(),
                         "step": step + 1,
                         "epoch": epoch + 1,
                         "learning_rate": scheduler.get_last_lr()[0],
@@ -191,7 +182,7 @@ def main():
                 metrics.reset()
 
             progress_bar.set_description(
-                f"Epoch {epoch + 1}, Loss: {metrics.get_scaled('loss'):.4f}")
+                f"Epoch {epoch + 1}, Loss: {metrics.get('loss'):.4f}")
 
         logging.info(f"Epoch {epoch + 1} completed.")
 

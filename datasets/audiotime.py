@@ -1,7 +1,5 @@
-from typing import Any, Dict, Iterable, Optional, List
+from typing import Any, Dict, Iterable, List
 from datasets import load_dataset
-
-from tasks.types import TaskType
 
 from .base_dataset_adapter import BaseDatasetAdapter
 
@@ -23,46 +21,21 @@ class AudioTimeAdapter(BaseDatasetAdapter):
     def get_target_seconds(self, event: Dict[str, Any], key: str) -> float:
         return float(event[key])
 
-    def build_prompt(self, model_processor: Any, event: Dict[str, Any], task: TaskType, eval_mode: bool, key: Optional[str]) -> str:
-        name = event.get("word", "")
-        if task == TaskType.SINGLE_WORD_TIMESTAMP:
-            prompt = f"What is the first occurence of '{name}'?"
-        elif task == TaskType.MULTI_WORD_TIMESTAMP:
-            prompt = f"When do occurrences of '{name}' happen?"
-        elif task == TaskType.EVENT_COUNTING:
-            prompt = f"How many times does '{name}' occur?"
+    def get_num_speakers(self, example: Dict[str, Any]) -> int:
+        speakers = set()
+        # Common structure: example may have 'speaker' at top-level or per event
+        if 'speaker' in example:
+            val = example['speaker']
+            if isinstance(val, list):
+                speakers.update(val)
+            else:
+                speakers.add(val)
         else:
-            prompt = f"Task: {task}. Event: {name}"
-
-        conversation = [
-            {
-                "role": "system",
-                "content": [
-                    {
-                        "type": "text",
-                        "text": "You are Qwen, a virtual human developed by the Qwen Team, Alibaba Group, capable of perceiving auditory and visual inputs, as well as generating text and speech.",
-                    }
-                ],
-            },
-            {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": prompt},
-                    {"type": "audio", "audio": "PLACEHOLDER AUDIO"},
-                ],
-            },
-        ]
-
-        if not eval_mode and key is not None and task.endswith("timestamp"):
-            word_json = '{"%s": %s}' % (name, event[key])
-            conversation.append(
-                {"role": "assistant", "content": [
-                    {"type": "text", "text": f"{word_json}"}]}
-            )
-
-        return model_processor.apply_chat_template(
-            conversation, tokenize=False, add_generation_prompt=eval_mode
-        )
+            for ev in self.get_events(example):
+                spk = ev.get("speaker", None)
+                if spk is not None:
+                    speakers.add(spk)
+        return len(speakers) if len(speakers) > 0 else 1
 
     def unknown_events(self) -> List[str]:
         return []
