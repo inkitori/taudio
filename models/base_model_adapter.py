@@ -44,9 +44,11 @@ class BaseModelAdapter(nn.Module):
         raise NotImplementedError
 
     def forward(self, **kwargs) -> Any:
+        # must call bidirectional_audio_context if bidirectional_audio is True
         raise NotImplementedError
 
     def generate(self, **kwargs):
+        # must call bidirectional_audio_context if bidirectional_audio is True
         raise NotImplementedError
 
     # Model-specific helpers

@@ -254,11 +254,11 @@ class SingleTimestampTask(BaseTask):
                                                 == model.adapter.audio_id]
 
             logits = model.linear(audio_hidden_states).squeeze()
-            # if model.poisson_loss:
-            #     aux_pred_top_idx = infer_timestamps(
-            #         1, logits.cpu().float().numpy())
-            # else:
-            _, aux_pred_top_idx = torch.max(logits, dim=0)
+            if model.poisson_loss:
+                aux_pred_top_idx = infer_timestamps(
+                    1, logits.cpu().float().numpy())
+            else:
+                _, aux_pred_top_idx = torch.max(logits, dim=0)
         aux_pred = float(aux_pred_top_idx) / model.adapter.seconds_to_embedding
 
         logging.info(f"Auxiliary prediction: {aux_pred}, GT: {gt}")
