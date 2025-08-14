@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --partition=gpu-l40s
+#SBATCH --partition=gpu-l40
 #SBATCH --account=ark
 #SBATCH --mem-per-gpu=128G
 #SBATCH --cpus-per-gpu=10
@@ -27,4 +27,14 @@ fi
 
 cd /gscratch/ark/anjo0/taudio
 conda activate taudio
-python evaluate.py --experiment $1 --split $2
+eval_cmd="python evaluate.py --experiment $1 --split $2"
+
+if [ -n "$3" ]; then
+    eval_cmd="$eval_cmd --min-time $3"
+fi
+
+if [ -n "$4" ]; then
+    eval_cmd="$eval_cmd --max-time $4"
+fi
+
+$eval_cmd

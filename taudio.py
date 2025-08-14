@@ -98,7 +98,7 @@ class TAudio(nn.Module):
 
         if self.surrogate_loss:
             surrogate_loss = self.task.calculate_loss(
-                logits, labels, self.poisson_loss)
+                logits=logits, labels=labels, use_poisson_loss=self.poisson_loss, class_weighting=self.class_weighting)
         else:
             surrogate_loss = torch.tensor(
                 0.0, device=logits.device, dtype=logits.dtype)

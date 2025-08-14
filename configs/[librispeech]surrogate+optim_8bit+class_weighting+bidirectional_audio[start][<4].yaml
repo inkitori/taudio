@@ -1,6 +1,6 @@
 # Base experiment configuration
-experiment_name: "[librispeech]token+optim_8bit+bidirectional_audio[start][<20]"
-description: "Token loss, 8-bit optimizer, start key, bidirectional audio, max time 20 seconds"
+experiment_name: "[librispeech]surrogate+optim_8bit+class_weighting+bidirectional_audio[start][<4]"
+description: "Surrogate loss, 8-bit optimizer, class weighting, start key, bidirectional audio, max time 4 seconds"
 
 # Model configuration
 model:
@@ -25,14 +25,14 @@ dataset:
   key: "start"  
   repository: "gilkeyio/librispeech-alignments"
   padding: 0
-  max_time: 20
+  max_time: 4
   
 # Loss configuration
 loss:
-  token_loss: true
-  surrogate_loss: false
-  surrogate_loss_weight: 0.0
-  class_weighting: false
+  token_loss: false
+  surrogate_loss: true
+  surrogate_loss_weight: 1.0
+  class_weighting: true
   poisson_loss: false
 
 # System configuration
@@ -44,4 +44,4 @@ system:
 wandb:
   entity: "taudio"
   project: "Train"
-  tags: ["token", "optim_8bit", "bidirectional_audio", "start", "padding_0", "<20"] 
+  tags: ["surrogate", "optim_8bit", "class_weighting", "bidirectional_audio", "start", "padding_0", "<4"] 

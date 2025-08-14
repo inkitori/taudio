@@ -13,6 +13,11 @@ from utils.config_utils import ConfigManager
 import logging
 from tasks.timestamp_single import SingleTimestampTask
 from utils.metrics import AverageMetrics
+from huggingface_hub import whoami
+
+user_info = whoami()
+print("USER INFO:")
+print(user_info)
 
 
 def main():
@@ -140,6 +145,8 @@ def main():
                 model=model,
                 error_bound=args.error_bound,
             )
+            if token_metrics is None:
+                continue
             metrics.update_dict(token_metrics)
 
         # Auxiliary-head evaluation
@@ -150,6 +157,8 @@ def main():
                 model=model,
                 error_bound=args.error_bound,
             )
+            if aux_metrics is None:
+                continue
             # Accuracy over all aux examples
             metrics.update_dict(aux_metrics)
 

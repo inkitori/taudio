@@ -5,6 +5,7 @@ from .base import BaseTask
 from utils.poisson import poisson_count_loss, infer_count
 from dataset.base_dataset_adapter import BaseDatasetAdapter
 from models.base_model_adapter import BaseModelAdapter
+import logging
 
 
 class SpeakerCountTask(BaseTask):
@@ -111,6 +112,7 @@ class SpeakerCountTask(BaseTask):
         model: Any,
         error_bound: float = 0.1,
     ) -> Dict[str, Any]:
+        logging.info("DONT FORGET TO RETURN NONE IF IT DOESNT WORK")
         speaker_count = ds_adapter.get_num_speakers(example)
 
         # Build evaluation inputs via build_labels to mirror evaluate.py behavior

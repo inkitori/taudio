@@ -24,7 +24,7 @@ class SingleTimestampTask(BaseTask):
         self.max_time = max_time
         self.min_time = min_time
 
-    def _choose_event(self, *, events: Iterable[Dict[str, Any]], ds_adapter: BaseDatasetAdapter) -> Dict[str, Any]:
+    def _choose_event(self, *, events: Iterable[Dict[str, Any]], ds_adapter: BaseDatasetAdapter, apply_fallback: bool = True) -> Dict[str, Any]:
         seen_names = set()
         candidate_events: list[Dict[str, Any]] = []
         unknown = set(ds_adapter.unknown_events())
@@ -54,8 +54,11 @@ class SingleTimestampTask(BaseTask):
         if len(candidate_events) > 0:
             return random.choice(candidate_events)
 
-        # fallback to first event if no candidates
-        return next(iter(events))
+        if apply_fallback:
+            # fallback to first event if no candidates
+            return next(iter(events))
+        else:
+            return None
 
     def _build_conversation_text(self, *, model_processor: Any, ds_adapter: BaseDatasetAdapter, event: Dict[str, Any], eval_mode: bool) -> str:
         repo = (ds_adapter.repository or "").lower()
@@ -119,7 +122,8 @@ class SingleTimestampTask(BaseTask):
 
         # If an event is provided (e.g., during eval), use it to keep GT and inputs aligned
         if event is None:
-            event = self._choose_event(events=events, ds_adapter=ds_adapter)
+            event = self._choose_event(
+                events=events, ds_adapter=ds_adapter, apply_fallback=not eval_mode)
 
         # Logging for traceability
         name = ds_adapter.event_name(event)
@@ -185,7 +189,11 @@ class SingleTimestampTask(BaseTask):
         # Choose event if not provided so we can compute GT consistently
         if event is None:
             events = list(ds_adapter.get_events(example))
-            event = self._choose_event(events=events, ds_adapter=ds_adapter)
+            event = self._choose_event(
+                events=events, ds_adapter=ds_adapter, apply_fallback=False)
+            if event is None:
+                return None
+
         name = ds_adapter.event_name(event)
         gt = ds_adapter.get_target_seconds(event, self.key)
 
@@ -231,7 +239,11 @@ class SingleTimestampTask(BaseTask):
         # Choose event if not provided for consistent GT
         if event is None:
             events = list(ds_adapter.get_events(example))
-            event = self._choose_event(events=events, ds_adapter=ds_adapter)
+            event = self._choose_event(
+                events=events, ds_adapter=ds_adapter, apply_fallback=False)
+            if event is None:
+                return None
+
         gt = ds_adapter.get_target_seconds(event, self.key)
 
         # Build evaluation inputs via build_labels to mirror evaluate.py behavior
@@ -271,11 +283,11 @@ class SingleTimestampTask(BaseTask):
         }
         return metrics
 
-    def calculate_loss(self, logits, labels, use_poisson_loss: bool) -> torch.Tensor:
+    def calculate_loss(self, logits, labels, use_poisson_loss: bool = False, class_weighting: bool = False) -> torch.Tensor:
         if use_poisson_loss:
             return poisson_loss(logits.unsqueeze(0), labels.unsqueeze(0), torch.ones_like(logits.unsqueeze(0)))
         else:
-            if self.class_weighting:
+            if class_weighting:
                 num_ones = (labels == 1).sum()
                 num_zeros = (labels == 0).sum()
                 pos_weight = (
