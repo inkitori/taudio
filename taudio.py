@@ -31,6 +31,7 @@ class TAudio(nn.Module):
         linear_bias: Optional[float] = None,
         task: BaseTask = SingleTimestampTask(),
         backend: str = "qwen2_5_omni",
+        freeze_embeddings: bool = False,
     ) -> None:
         super(TAudio, self).__init__()
 
@@ -43,6 +44,10 @@ class TAudio(nn.Module):
         if freeze_text_model:
             for param in self.adapter.text_model.parameters():
                 param.requires_grad = False
+
+        if freeze_embeddings:
+            self.adapter.text_model.get_input_embeddings().requires_grad = False
+            self.adapter.text_model.get_output_embeddings().requires_grad = False
 
         self.linear = nn.Linear(self.hidden_dim, 1, dtype=self.adapter.dtype)
 
