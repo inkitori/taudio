@@ -15,8 +15,9 @@ class BaseDatasetAdapter(ABC):
 
     repository: Optional[str]
 
-    def __init__(self, repository: Optional[str] = None) -> None:
+    def __init__(self, sampling_rate: int, repository: Optional[str] = None) -> None:
         self.repository = repository
+        self.sampling_rate = sampling_rate
 
     @abstractmethod
     def load_streaming_split(self, split: str):
@@ -45,3 +46,11 @@ class BaseDatasetAdapter(ABC):
     @abstractmethod
     def unknown_events(self) -> List[str]:
         """Return list of strings that should be ignored as events."""
+    
+    @abstractmethod
+    def get_timestamp_single_prompt(self, event_name: str) -> str:
+        """Return the prompt for the timestamp single task."""
+
+    @abstractmethod
+    def get_speaker_count_prompt(self) -> str:
+        """Return the prompt for the speaker count task."""

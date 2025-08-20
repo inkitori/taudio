@@ -36,6 +36,10 @@ class Qwen2_5OmniAdapter(BaseModelAdapter):
         return self.base_model.config.audio_config.output_dim
 
     @property
+    def sampling_rate(self) -> int:
+        return 16000
+
+    @property
     def dtype(self) -> torch.dtype:
         return self.base_model.dtype
 

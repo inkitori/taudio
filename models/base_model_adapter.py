@@ -18,6 +18,10 @@ class BaseModelAdapter(nn.Module):
         raise NotImplementedError
 
     @property
+    def sampling_rate(self) -> int:
+        raise NotImplementedError
+
+    @property
     def dtype(self) -> torch.dtype:
         raise NotImplementedError
 

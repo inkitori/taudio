@@ -30,7 +30,7 @@ def get_ds(
         raise ValueError(f"Task type {task} not supported in dataset builder")
 
     ds_adapter = create_adapter(infer_adapter_from_repository(
-        repository), repository=repository)
+        repository), sampling_rate=model_adapter.sampling_rate, repository=repository)
 
     # Instantiate task
     if task == TaskType.SINGLE_WORD_TIMESTAMP:

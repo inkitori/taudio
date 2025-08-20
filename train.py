@@ -2,6 +2,7 @@ import random
 import torch
 import wandb
 from tqdm.auto import tqdm
+from tasks import create_task
 from taudio import TAudio
 import bitsandbytes as bnb
 import argparse
@@ -71,25 +72,26 @@ def main():
     # Create model
     model_config = config['model']
     loss_config = config['loss']
+    dataset_config = config['dataset']
+
+    task_name = dataset_config['task']
+    task_type = TaskType(task_name)
+    task = create_task(task_type)
 
     taudio_config = {
         **model_config,
-        **loss_config
+        **loss_config,
+        "task": task
     }
 
     model = TAudio(**taudio_config).to(device)
 
     # Create dataset
-    dataset_config = config['dataset']
-
-    task = TaskType(dataset_config.get(
-        'task', TaskType.SINGLE_WORD_TIMESTAMP))
-
     ds = get_ds(
         model_adapter=model.adapter,
         repository=dataset_config['repository'],
         split=dataset_config['split'],
-        task=task,
+        task=task_type,
         key=dataset_config.get('key', None),
         max_time=dataset_config.get('max_time', None),
     )
@@ -136,29 +138,26 @@ def main():
         metrics = AverageMetrics()
 
         for step, batch in enumerate(progress_bar):
+            # TODO: this is only because audioset seems to be broken for some samples above 15000
+            # if step > 15000:
+            #     logging.info(f"EARLY STOPPING AT STEP {step}")
+            #     break
+
             batch = {k: v.to(device) for k, v in batch.items()}
 
-            output = model(**batch)
+            output, auxiliary_deviation = model(**batch)
 
             loss = output.loss
             token_loss = output.token_loss
             surrogate_loss = output.surrogate_loss
-
-            pred_top_val, pred_top_idx = output.pred
-            gt_top_val, gt_top_idx = output.gt
-
-            deviation = (pred_top_idx.float() -
-                         gt_top_idx.float()).abs().item()
+            auxiliary_deviation = output.auxiliary_deviation
 
             metrics.update_dict({
                 "loss": loss.item(),
                 "token_loss": token_loss.item(),
                 "surrogate_loss": surrogate_loss.item(),
-                "deviation": deviation,
+                "auxiliary_deviation": auxiliary_deviation,
             })
-
-            logging.info(f"PRED\t{pred_top_idx}\t{pred_top_val}")
-            logging.info(f"Deviation: {deviation}")
 
             scaled_loss = loss / training_config['grad_accumulation_steps']
             scaled_loss.backward()
@@ -182,7 +181,7 @@ def main():
                 metrics.reset()
 
             progress_bar.set_description(
-                f"Epoch {epoch + 1}, Loss: {metrics.get('loss'):.4f}")
+                f"Epoch {epoch + 1}, Loss: {loss.item():.4f}")
 
         logging.info(f"Epoch {epoch + 1} completed.")
 

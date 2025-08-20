@@ -61,15 +61,8 @@ class SingleTimestampTask(BaseTask):
             return None
 
     def _build_conversation_text(self, *, model_processor: Any, ds_adapter: BaseDatasetAdapter, event: Dict[str, Any], eval_mode: bool) -> str:
-        repo = (ds_adapter.repository or "").lower()
         name = ds_adapter.event_name(event)
-        # repository-specific phrasing
-        if "librispeech" in repo:
-            prompt = f"What is the first occurence of the word '{name}'?"
-        elif "audiotime" in repo:
-            prompt = f"What is the first occurence of '{name}'?"
-        else:
-            raise ValueError(f"Unknown repository: {repo}")
+        prompt = ds_adapter.get_timestamp_single_prompt(name)
 
         conversation = [
             {
@@ -136,7 +129,7 @@ class SingleTimestampTask(BaseTask):
             model_processor=processor, ds_adapter=ds_adapter, event=event, eval_mode=eval_mode)
 
         audio_frames = audio["array"]
-        assert int(audio["sampling_rate"]) == 16000
+        assert int(audio["sampling_rate"]) == model_adapter.sampling_rate
 
         inputs = processor(
             text=prompt_text,
@@ -284,8 +277,13 @@ class SingleTimestampTask(BaseTask):
         return metrics
 
     def calculate_loss(self, logits, labels, use_poisson_loss: bool = False, class_weighting: bool = False) -> torch.Tensor:
+        gt_timestamp = torch.argmax(labels).item()
+        pred_timestamp = torch.argmax(logits).item() # technically not correct for poisson 
+
+        logging.info(f"Predicted Timestamp: {pred_timestamp}, GT Timestamp: {gt_timestamp}")
+
         if use_poisson_loss:
-            return poisson_loss(logits.unsqueeze(0), labels.unsqueeze(0), torch.ones_like(logits.unsqueeze(0)))
+            return poisson_loss(logits.unsqueeze(0), labels.unsqueeze(0), torch.ones_like(logits.unsqueeze(0))) 
         else:
             if class_weighting:
                 num_ones = (labels == 1).sum()
@@ -297,4 +295,4 @@ class SingleTimestampTask(BaseTask):
             else:
                 criterion = nn.BCEWithLogitsLoss()
 
-            return criterion(logits, labels)
+            return criterion(logits, labels), abs(pred_timestamp - gt_timestamp)

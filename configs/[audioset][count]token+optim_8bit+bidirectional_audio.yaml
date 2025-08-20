@@ -1,0 +1,45 @@
+# Base experiment configuration
+experiment_name: "[audioset][count]token+optim_8bit+bidirectional_audio"
+description: "Token loss, 8-bit optimizer, bidirectional audio"
+
+# Model configuration
+model:
+  model_id: "Qwen/Qwen2.5-Omni-3B"
+  load_in_8bit: false
+  freeze_text_model: false
+  audio_layer: -1
+  bidirectional_audio: true
+
+# Training configuration
+training:
+  epochs: 1
+  batch_size: 1
+  grad_accumulation_steps: 8
+  learning_rate: 5.0e-6
+  eta_min_scale: 0.1
+  optim_8bit: true
+  
+# Dataset configuration
+dataset:
+  split: "train"
+  repository: "agkphysics/AudioSet"
+  task: "SPEAKER_COUNTING"
+  padding: 0
+  
+# Loss configuration
+loss:
+  class_weighting: false
+  surrogate_loss: false
+  token_loss: true
+  surrogate_loss_weight: 0.0
+
+# System configuration
+system:
+  dataloader_num_workers: 1
+  seed: 80
+
+# Wandb configuration
+wandb:
+  entity: "taudio"
+  project: "Train"
+  tags: ["token", "optim_8bit", "bidirectional_audio", "speaker_counting", "padding_0"] 

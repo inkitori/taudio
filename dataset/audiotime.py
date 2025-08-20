@@ -1,12 +1,15 @@
 from typing import Any, Dict, Iterable, List
 from datasets import load_dataset
+from datasets.features import Audio
 
 from .base_dataset_adapter import BaseDatasetAdapter
 
 
 class AudioTimeAdapter(BaseDatasetAdapter):
     def load_streaming_split(self, split: str):
-        return load_dataset(self.repository, split=split, streaming=True)
+        ds = load_dataset(self.repository, split=split, streaming=True)
+        ds = ds.cast_column("audio", Audio(sampling_rate=self.sampling_rate))
+        return ds
 
     def get_audio(self, example: Dict[str, Any]) -> Dict[str, Any]:
         return example["audio"]

@@ -11,14 +11,9 @@ import argparse
 from pathlib import Path
 from utils.config_utils import ConfigManager
 import logging
-from tasks.timestamp_single import SingleTimestampTask
+from tasks import create_task
+from tasks.types import TaskType
 from utils.metrics import AverageMetrics
-from huggingface_hub import whoami
-
-user_info = whoami()
-print("USER INFO:")
-print(user_info)
-
 
 def main():
     logging.getLogger().setLevel(logging.INFO)
@@ -107,10 +102,16 @@ def main():
     # Load model
     model_config = config['model']
     loss_config = config['loss']
+    dataset_config = config['dataset']
+
+    task_name = dataset_config['task']
+    task_type = TaskType(task_name)
+    task = create_task(task_type, min_time=args.min_time, max_time=args.max_time)
 
     taudio_config = {
         **model_config,
-        **loss_config
+        **loss_config,
+        "task": task
     }
 
     model = TAudio(**taudio_config).to(device)
@@ -121,20 +122,16 @@ def main():
     adapter = create_adapter(
         infer_adapter_from_repository(config['dataset']['repository']),
         repository=config['dataset']['repository'],
+        sampling_rate=model.adapter.sampling_rate,
     )
     base_ds = adapter.load_streaming_split(args.split)
 
     # Metrics aggregator (running averages)
     metrics = AverageMetrics()
 
-    key = config['dataset']['key']
-
-    print(f"Evaluating on {args.split} split, predicting '{key}' times")
+    print(f"Evaluating on {args.split} split")
 
     model.eval()
-
-    task = SingleTimestampTask(
-        key=key, min_time=args.min_time, max_time=args.max_time)
 
     for example in base_ds:
         # Token-based evaluation

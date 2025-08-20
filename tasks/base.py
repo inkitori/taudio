@@ -35,5 +35,5 @@ class BaseTask(ABC):
         """Evaluate the auxiliary outputs of the model."""
 
     @abstractmethod
-    def calculate_loss(self, logits, labels, poisson_loss: bool) -> torch.Tensor:
+    def calculate_loss(self, logits, labels, poisson_loss: bool, class_weighting: bool) -> torch.Tensor:
         """Calculate the loss for the task."""

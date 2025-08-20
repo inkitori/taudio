@@ -8,11 +8,10 @@ from contextlib import nullcontext
 
 import logging
 from models import create_adapter
-from tasks.timestamp_single import SingleTimestampTask
 from tasks.base import BaseTask
 
 Output = namedtuple(
-    'Output', ['loss', 'token_loss', 'surrogate_loss', 'pred', 'gt'])
+    'Output', ['loss', 'token_loss', 'surrogate_loss', 'auxiliary_deviation'])
 
 
 class TAudio(nn.Module):
@@ -26,12 +25,11 @@ class TAudio(nn.Module):
         surrogate_loss: bool,
         token_loss: bool,
         surrogate_loss_weight: float,
+        task: BaseTask,
         bidirectional_audio: bool = False,
         poisson_loss: bool = False,
         linear_bias: Optional[float] = None,
-        task: BaseTask = SingleTimestampTask(),
         backend: str = "qwen2_5_omni",
-        freeze_embeddings: bool = False,
     ) -> None:
         super(TAudio, self).__init__()
 
@@ -44,10 +42,6 @@ class TAudio(nn.Module):
         if freeze_text_model:
             for param in self.adapter.text_model.parameters():
                 param.requires_grad = False
-
-        if freeze_embeddings:
-            self.adapter.text_model.get_input_embeddings().requires_grad = False
-            self.adapter.text_model.get_output_embeddings().requires_grad = False
 
         self.linear = nn.Linear(self.hidden_dim, 1, dtype=self.adapter.dtype)
 
@@ -97,15 +91,13 @@ class TAudio(nn.Module):
         logits = self.linear(audio_hidden_states).squeeze()
         labels = labels.to(logits.dtype)
 
-        # TODO: fix this code for batched inputs
-        pred_top_val, pred_top_idx = torch.max(logits, dim=0)
-        gt_top_val, gt_top_idx = torch.max(labels, dim=0)
-
         if self.surrogate_loss:
-            surrogate_loss = self.task.calculate_loss(
+            surrogate_loss, auxiliary_deviation = self.task.calculate_loss(
                 logits=logits, labels=labels, use_poisson_loss=self.poisson_loss, class_weighting=self.class_weighting)
         else:
             surrogate_loss = torch.tensor(
+                0.0, device=logits.device, dtype=logits.dtype)
+            auxiliary_deviation = torch.tensor(
                 0.0, device=logits.device, dtype=logits.dtype)
 
         if self.token_loss:
@@ -116,10 +108,9 @@ class TAudio(nn.Module):
 
         loss = token_loss + self.surrogate_loss_weight * surrogate_loss
 
-        output = Output(loss=loss, surrogate_loss=surrogate_loss, token_loss=token_loss, pred=(
-            pred_top_val, pred_top_idx), gt=(gt_top_val, gt_top_idx))
+        output = Output(loss=loss, surrogate_loss=surrogate_loss, token_loss=token_loss, auxiliary_deviation=auxiliary_deviation)
 
-        return output
+        return output, auxiliary_deviation
 
     def generate(self, **kwargs):
         return self.adapter.generate(**kwargs)

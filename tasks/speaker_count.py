@@ -9,11 +9,13 @@ import logging
 
 
 class SpeakerCountTask(BaseTask):
-    def __init__(self):
+    def __init__(self, *, min_time: Optional[float] = None, max_time: Optional[float] = None):
         super().__init__()
+        self.min_time = min_time
+        self.max_time = max_time
 
     def _build_conversation_text(self, *, model_processor: Any, ds_adapter: BaseDatasetAdapter, speaker_count: int, eval_mode: bool) -> str:
-        prompt = f"How many speakers are in the audio?"
+        prompt = ds_adapter.get_speaker_count_prompt()
 
         conversation = [
             {
@@ -64,7 +66,7 @@ class SpeakerCountTask(BaseTask):
             model_processor=processor, ds_adapter=ds_adapter, speaker_count=speaker_count, eval_mode=eval_mode)
 
         audio_frames = audio["array"]
-        assert int(audio["sampling_rate"]) == 16000
+        assert int(audio["sampling_rate"]) == model_adapter.sampling_rate
 
         inputs = processor(
             text=prompt_text,
@@ -134,7 +136,9 @@ class SpeakerCountTask(BaseTask):
         try:
             token_pred = int(generated_string)
         except Exception:
-            token_pred = None
+            return {"token_correct": 0.0}
+
+        logging.info(f"Token prediction: {token_pred}, GT: {speaker_count}")
 
         # Metric increments
         metrics: Dict[str, float] = {
@@ -160,7 +164,6 @@ class SpeakerCountTask(BaseTask):
             ds_adapter=ds_adapter,
             model_adapter=model.adapter,
             eval_mode=True,
-            event=event,
         )
         inputs = inputs.to(next(model.parameters()).device)
 
@@ -172,6 +175,9 @@ class SpeakerCountTask(BaseTask):
             logits = model.linear(audio_hidden_states).squeeze()
             aux_pred = infer_count(logits.unsqueeze(
                 0), torch.ones_like(logits.unsqueeze(0)))[0]
+
+        logging.info(f"Auxiliary prediction: {aux_pred}, GT: {speaker_count}")
+
         # Metric increments
         metrics: Dict[str, float] = {
             "aux_abs_error_sum": abs(aux_pred - speaker_count),
@@ -179,9 +185,21 @@ class SpeakerCountTask(BaseTask):
         }
         return metrics
 
-    def calculate_loss(self, logits, labels, use_poisson_loss: bool) -> torch.Tensor:
+    def calculate_loss(self, logits, labels, use_poisson_loss: bool, class_weighting: bool) -> torch.Tensor:
         if use_poisson_loss:
-            return poisson_count_loss(logits.unsqueeze(0), labels.unsqueeze(0), torch.ones_like(logits.unsqueeze(0)))
+            logits = logits.unsqueeze(0) # make it look batched
+            counts = labels.sum()
+            frame_mask = torch.ones_like(logits)
+
+            gt_count = counts.item()
+            pred_count = infer_count(logits, frame_mask).item()
+
+            logging.info(f"Labels Ground Truth: {gt_count}")
+            logging.info(f"Predicted Count: {pred_count}")
+
+            loss = poisson_count_loss(logits, counts, frame_mask)
+
+            return loss, abs(pred_count - gt_count)
         else:
             raise ValueError(
                 "Only Poisson loss is supported for speaker counting")
