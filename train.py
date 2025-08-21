@@ -140,11 +140,6 @@ def main():
         metrics = AverageMetrics()
 
         for step, batch in enumerate(progress_bar):
-            # TODO: this is only because audioset seems to be broken for some samples above 15000
-            # if step > 15000:
-            #     logging.info(f"EARLY STOPPING AT STEP {step}")
-            #     break
-
             batch = {k: v.to(device) for k, v in batch.items()}
 
             output = model(**batch)
