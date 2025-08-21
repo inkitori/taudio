@@ -110,7 +110,7 @@ class TAudio(nn.Module):
 
         output = Output(loss=loss, surrogate_loss=surrogate_loss, token_loss=token_loss, auxiliary_deviation=auxiliary_deviation)
 
-        return output, auxiliary_deviation
+        return output
 
     def generate(self, **kwargs):
         return self.adapter.generate(**kwargs)

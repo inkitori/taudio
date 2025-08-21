@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Any, Dict, Iterable, Optional
+from typing import Any, Dict, Iterable, Optional, Tuple
 
 import torch
 
@@ -35,5 +35,5 @@ class BaseTask(ABC):
         """Evaluate the auxiliary outputs of the model."""
 
     @abstractmethod
-    def calculate_loss(self, logits, labels, poisson_loss: bool, class_weighting: bool) -> torch.Tensor:
+    def calculate_loss(self, logits, labels, poisson_loss: bool, class_weighting: bool) -> Tuple[torch.Tensor, torch.Tensor]:
         """Calculate the loss for the task."""

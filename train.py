@@ -145,7 +145,7 @@ def main():
 
             batch = {k: v.to(device) for k, v in batch.items()}
 
-            output, auxiliary_deviation = model(**batch)
+            output = model(**batch)
 
             loss = output.loss
             token_loss = output.token_loss
