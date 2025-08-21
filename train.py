@@ -32,8 +32,9 @@ def main():
     config = config_manager.load_config(args.config)
 
     # Set random seed
-    random.seed(config['system']['seed'])
-    torch.manual_seed(config['system']['seed'])
+    system_config = config['system']
+    random.seed(system_config['seed'])
+    torch.manual_seed(system_config['seed'])
 
     experiment_dir = None
 
@@ -94,6 +95,7 @@ def main():
         task=task_type,
         key=dataset_config.get('key', None),
         max_time=dataset_config.get('max_time', None),
+        take_first=dataset_config.get('take_first', None),
     )
 
     # Create dataloader
@@ -186,7 +188,7 @@ def main():
         logging.info(f"Epoch {epoch + 1} completed.")
 
         # Save checkpoint
-        if not args.debug:
+        if not args.debug and system_config.get('save_checkpoints', True):
             checkpoint_path = experiment_dir / f"model_epoch{epoch + 1}.pt"
             torch.save(model.state_dict(), checkpoint_path)
             logging.info(f"Model saved to {checkpoint_path}")

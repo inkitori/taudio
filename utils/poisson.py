@@ -1,7 +1,7 @@
 import numpy as np
 import torch
 from scipy.stats import beta
-
+import logging
 
 def beta_medians(n):
     # input: scalar n
@@ -64,6 +64,47 @@ def poisson_count_loss(log_hazard, counts, frame_mask):
     '''
     cumulative_hazard = torch.cumsum(torch.exp(log_hazard) * frame_mask, dim=1)[:, -1]
     return cumulative_hazard - torch.log(cumulative_hazard) * counts + torch.lgamma(counts + 1)
+
+    # '''
+    # A more numerically stable version of the Poisson count loss.
+
+    # log_hazard (batch, seq len): Raw outputs of the model (in log-space).
+    # counts (batch, ): The number of events that occurred in each sequence.
+    # frame_mask (batch, seq len): Boolean mask for the frame padding (True for valid frames).
+    # '''
+    # # Ensure frame_mask is a boolean tensor for masking
+    # logging.info(f"log_hazard: {log_hazard}")
+    # logging.info(f"counts: {counts}")
+    # logging.info(f"frame_mask: {frame_mask}")
+    # logging.info(f"log_hazard.dtype: {log_hazard.dtype}")
+    # logging.info(f"counts.dtype: {counts.dtype}")
+    # logging.info(f"frame_mask.dtype: {frame_mask.dtype}")
+    # frame_mask = frame_mask.bool()
+
+    # # To correctly use logsumexp with masking, we set the log_hazard of masked-out
+    # # frames to -inf. The exp of -inf is 0, so they don't contribute to the sum.
+    # masked_log_hazard = log_hazard.masked_fill(~frame_mask, -float('inf'))
+
+    # # Calculate the log of the cumulative hazard in a stable way using the
+    # # Log-Sum-Exp trick. This avoids intermediate overflow/underflow from exp().
+    # log_cumulative_hazard = torch.logsumexp(masked_log_hazard, dim=1)
+
+    # logging.info(f"log_cumulative_hazard: {log_cumulative_hazard}")
+
+    # # The Poisson negative log-likelihood is: cumulative_hazard - counts * log(cumulative_hazard) + log(k!)
+    # # We can rewrite this using our stably computed log_cumulative_hazard.
+    # # Note: torch.log(cumulative_hazard) is equivalent to log_cumulative_hazard.
+    # cumulative_hazard = torch.exp(log_cumulative_hazard)
+
+    # logging.info(f"cumulative_hazard: {cumulative_hazard}")
+
+    # # Final loss calculation using the stable components.
+    # # torch.lgamma(counts + 1) is a stable way to compute log(counts!)
+    # loss = cumulative_hazard - counts * log_cumulative_hazard + torch.lgamma(counts + 1)
+
+    # logging.info(f"loss: {loss}")
+
+    # return loss
 
 
 def infer_count(log_hazard, frame_mask):

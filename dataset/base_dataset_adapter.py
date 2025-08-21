@@ -15,9 +15,10 @@ class BaseDatasetAdapter(ABC):
 
     repository: Optional[str]
 
-    def __init__(self, sampling_rate: int, repository: Optional[str] = None) -> None:
+    def __init__(self, sampling_rate: int, repository: Optional[str] = None, take_first: Optional[int] = None) -> None:
         self.repository = repository
         self.sampling_rate = sampling_rate
+        self.take_first = take_first
 
     @abstractmethod
     def load_streaming_split(self, split: str):

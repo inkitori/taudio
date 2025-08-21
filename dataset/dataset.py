@@ -24,13 +24,14 @@ def get_ds(
     key: Optional[str] = None,
     max_time: Optional[float] = None,
     max_count: Optional[int] = None,
+    take_first: Optional[int] = None,
 ) -> Dataset:
     # Unified dataset construction that delegates prompt/label logic to task classes
     if task not in {TaskType.SINGLE_WORD_TIMESTAMP, TaskType.SPEAKER_COUNTING}:
         raise ValueError(f"Task type {task} not supported in dataset builder")
 
     ds_adapter = create_adapter(infer_adapter_from_repository(
-        repository), sampling_rate=model_adapter.sampling_rate, repository=repository)
+        repository), sampling_rate=model_adapter.sampling_rate, repository=repository, take_first=take_first)
 
     # Instantiate task
     if task == TaskType.SINGLE_WORD_TIMESTAMP:

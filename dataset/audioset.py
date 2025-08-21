@@ -10,6 +10,8 @@ class AudioSetAdapter(BaseDatasetAdapter):
         # streaming causes some weird utf-8 encoding issues
         ds = load_dataset(self.repository, split=split, streaming=True, trust_remote_code=True)
         ds = ds.cast_column("audio", Audio(sampling_rate=self.sampling_rate))
+        if self.take_first:
+            ds = ds.take(self.take_first)
         return ds
 
     def get_audio(self, example: Dict[str, Any]) -> Dict[str, Any]:
