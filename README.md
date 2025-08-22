@@ -2,34 +2,20 @@
 
 ## Environment Setup
 
-Create and activate the conda environment:
+1. First, modify the `prefix` argument in `environment.yaml` to point to your desired directory (or current directory):
+   ```yaml
+   prefix: /path/to/your/desired/environment/location
+   ```
 
-```bash
-conda create -n taudio python=3.12.11
-conda activate taudio
-```
+2. Create the environment from the YAML file:
+   ```bash
+   conda env create -f environment.yaml
+   ```
 
-## Install Dependencies
-
-```bash
-pip install -r requirements.txt
-```
-
-## Configure Hugging Face Cache
-
-```bash
-mkdir -p .cache/huggingface
-conda env config vars set HF_HOME=".cache/huggingface"
-# Note: You need to reactivate the environment after setting this variable
-conda deactivate
-conda activate taudio
-```
-
-## Install FFmpeg
-
-```bash
-conda install anaconda::ffmpeg
-```
+3. Activate the environment:
+   ```bash
+   conda activate ./env # or whatever you set prefix to
+   ```
 
 ## Download NLTK Data
 
