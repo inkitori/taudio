@@ -5,13 +5,9 @@ from typing import Any, Dict, Optional
 from nltk.corpus import stopwords
 import logging
 
-from utils.utils import clamp, better_round
-
 from dataset import create_adapter, infer_adapter_from_repository
 from models.base_model_adapter import BaseModelAdapter
-from tasks.types import TaskType
-from tasks.timestamp_single import SingleTimestampTask
-from tasks.speaker_count import SpeakerCountTask
+from tasks.base import BaseTask
 
 STOPS = set(stopwords.words('english'))
 
@@ -20,29 +16,15 @@ def get_ds(
     model_adapter: BaseModelAdapter,
     repository: str,
     split: str,
-    task: TaskType,
-    key: Optional[str] = None,
-    max_time: Optional[float] = None,
-    max_count: Optional[int] = None,
+    task: BaseTask,
     take_first: Optional[int] = None,
 ) -> Dataset:
     # Unified dataset construction that delegates prompt/label logic to task classes
-    if task not in {TaskType.SINGLE_WORD_TIMESTAMP, TaskType.SPEAKER_COUNTING}:
-        raise ValueError(f"Task type {task} not supported in dataset builder")
-
     ds_adapter = create_adapter(infer_adapter_from_repository(
         repository), sampling_rate=model_adapter.sampling_rate, repository=repository, take_first=take_first)
 
-    # Instantiate task
-    if task == TaskType.SINGLE_WORD_TIMESTAMP:
-        task_impl = SingleTimestampTask(key=key or "start", max_time=max_time)
-    elif task == TaskType.SPEAKER_COUNTING:
-        task_impl = SpeakerCountTask()
-    else:
-        raise ValueError(f"Task type {task} not supported in dataset builder")
-
     def preprocess_fn(example: Dict[str, Any]) -> Dict[str, Any]:
-        return task_impl.build_labels(
+        return task.build_labels(
             example=example,
             ds_adapter=ds_adapter,
             model_adapter=model_adapter,

@@ -77,7 +77,7 @@ def main():
 
     task_name = dataset_config['task']
     task_type = TaskType(task_name)
-    task = create_task(task_type)
+    task = create_task(task_type, key=dataset_config.get('key', None), max_time=dataset_config.get('max_time', None))
 
     taudio_config = {
         **model_config,
@@ -92,9 +92,7 @@ def main():
         model_adapter=model.adapter,
         repository=dataset_config['repository'],
         split=dataset_config['split'],
-        task=task_type,
-        key=dataset_config.get('key', None),
-        max_time=dataset_config.get('max_time', None),
+        task=task,
         take_first=dataset_config.get('take_first', None),
     )
 
