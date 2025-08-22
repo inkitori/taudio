@@ -18,7 +18,7 @@ STOPS = set(stopwords.words("english"))
 
 
 class SingleTimestampTask(BaseTask):
-    def __init__(self, key: str = "start", max_time: Optional[float] = None, min_time: Optional[float] = None):
+    def __init__(self, *, key: str = "start", max_time: Optional[float] = None, min_time: Optional[float] = None):
         super().__init__()
         self.key = key
         self.max_time = max_time

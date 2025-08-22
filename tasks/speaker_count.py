@@ -9,10 +9,10 @@ import logging
 
 
 class SpeakerCountTask(BaseTask):
-    def __init__(self, *, min_time: Optional[float] = None, max_time: Optional[float] = None):
+    def __init__(self, *, min_value: Optional[float] = None, max_value: Optional[float] = None):
         super().__init__()
-        self.min_time = min_time
-        self.max_time = max_time
+        self.min_value = min_value
+        self.max_value = max_value
 
     def _build_conversation_text(self, *, model_processor: Any, ds_adapter: BaseDatasetAdapter, speaker_count: int, eval_mode: bool) -> str:
         prompt = ds_adapter.get_speaker_count_prompt()

@@ -19,14 +19,17 @@ training:
   learning_rate: 5.0e-6
   eta_min_scale: 0.1
   optim_8bit: true
-  
+
 # Dataset configuration
 dataset:
   split: "train_clean_100"
   repository: "gilkeyio/librispeech-alignments"
-  task: "SPEAKER_COUNTING"
   padding: 0
   # take_first: 8
+
+# Task configuration
+task:
+  type: "SPEAKER_COUNTING"
   
 # Loss configuration
 loss:

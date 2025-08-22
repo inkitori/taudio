@@ -1,17 +1,17 @@
-import random
 import torch
 import wandb
+import random
 from tqdm.auto import tqdm
-from tasks import create_task
-from taudio import TAudio
 import bitsandbytes as bnb
 import argparse
+import logging
+
+from tasks import create_task
+from taudio import TAudio
+from utils.config_utils import ConfigManager, flatten_config, create_wandb_run_name
 from utils.utils import get_dataset_length, patch_dataset_length
 from dataset.dataset import get_ds, collate_fn
-from utils.config_utils import ConfigManager, flatten_config, create_wandb_run_name
-import logging
 from utils.metrics import AverageMetrics
-from tasks.types import TaskType
 
 def main():
     logging.getLogger().setLevel(logging.INFO)
@@ -74,10 +74,9 @@ def main():
     model_config = config['model']
     loss_config = config['loss']
     dataset_config = config['dataset']
+    task_config = config['task']
 
-    task_name = dataset_config['task']
-    task_type = TaskType(task_name)
-    task = create_task(task_type, key=dataset_config.get('key', None), max_time=dataset_config.get('max_time', None))
+    task = create_task(task_type=task_config['type'], **task_config.get('kwargs', {}))
 
     taudio_config = {
         **model_config,

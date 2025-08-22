@@ -12,7 +12,6 @@ from pathlib import Path
 from utils.config_utils import ConfigManager
 import logging
 from tasks import create_task
-from tasks.types import TaskType
 from utils.metrics import AverageMetrics
 
 def main():
@@ -103,10 +102,9 @@ def main():
     model_config = config['model']
     loss_config = config['loss']
     dataset_config = config['dataset']
+    task_config = config['task']
 
-    task_name = dataset_config['task']
-    task_type = TaskType(task_name)
-    task = create_task(task_type, min_time=args.min_time, max_time=args.max_time)
+    task = create_task(task_type=task_config['type'], **task_config.get('kwargs', {}))
 
     taudio_config = {
         **model_config,
@@ -120,8 +118,8 @@ def main():
 
     # Load dataset
     adapter = create_adapter(
-        infer_adapter_from_repository(config['dataset']['repository']),
-        repository=config['dataset']['repository'],
+        infer_adapter_from_repository(dataset_config['repository']),
+        repository=dataset_config['repository'],
         sampling_rate=model.adapter.sampling_rate,
     )
     base_ds = adapter.load_streaming_split(args.split)

@@ -7,3 +7,4 @@ wandb/
 *.out
 env/
 outputs/
+conda_pkgs/
