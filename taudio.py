@@ -26,16 +26,15 @@ class TAudio(nn.Module):
         token_loss: bool,
         surrogate_loss_weight: float,
         task: BaseTask,
-        bidirectional_audio: bool = False,
-        poisson_loss: bool = False,
-        linear_bias: Optional[float] = None,
-        backend: str = "qwen2_5_omni",
+        bidirectional_audio: bool,
+        poisson_loss: bool,
+        linear_bias: Optional[float],
     ) -> None:
         super(TAudio, self).__init__()
 
         # Adapter-based backend
         self.adapter = create_adapter(
-            backend=backend, model_id=model_id, load_in_8bit=load_in_8bit, bidirectional_audio=bidirectional_audio)
+            model_id=model_id, load_in_8bit=load_in_8bit, bidirectional_audio=bidirectional_audio)
 
         self.hidden_dim = self.adapter.hidden_dim
 

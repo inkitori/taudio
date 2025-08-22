@@ -36,8 +36,10 @@ def get_ds(
     # Instantiate task
     if task == TaskType.SINGLE_WORD_TIMESTAMP:
         task_impl = SingleTimestampTask(key=key or "start", max_time=max_time)
-    else:  # TaskType.SPEAKER_COUNTING
+    elif task == TaskType.SPEAKER_COUNTING:
         task_impl = SpeakerCountTask()
+    else:
+        raise ValueError(f"Task type {task} not supported in dataset builder")
 
     def preprocess_fn(example: Dict[str, Any]) -> Dict[str, Any]:
         return task_impl.build_labels(
