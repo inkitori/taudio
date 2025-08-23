@@ -13,7 +13,7 @@ model:
 
 # Training configuration
 training:
-  epochs: 100
+  epochs: 1
   batch_size: 1
   grad_accumulation_steps: 8
   learning_rate: 5.0e-6
@@ -25,7 +25,6 @@ dataset:
   split: "train_clean_100"
   repository: "gilkeyio/librispeech-alignments"
   padding: 0
-  # take_first: 8
 
 # Task configuration
 task:
@@ -35,15 +34,15 @@ task:
 loss:
   class_weighting: false
   surrogate_loss: true
-  token_loss: true
-  surrogate_loss_weight: 0.05
+  token_loss: false
+  surrogate_loss_weight: 1.0
   poisson_loss: true
 
 # System configuration
 system:
   dataloader_num_workers: 1
   seed: 80
-  save_checkpoints: false
+  save_checkpoints: true
 
 # Wandb configuration
 wandb:

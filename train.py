@@ -99,8 +99,8 @@ def main():
     training_config = config['training']
     system_config = config['system']
 
-    dataset_length = get_dataset_length(
-        dataset_config['repository'], dataset_config['split'])
+    dataset_length = dataset_config.get('take_first', get_dataset_length(
+        dataset_config['repository'], dataset_config['split']))
     patch_dataset_length(ds, dataset_length)
 
     dataloader = torch.utils.data.DataLoader(
