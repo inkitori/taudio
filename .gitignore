@@ -8,3 +8,5 @@ wandb/
 env/
 outputs/
 conda_pkgs/
+.temp_cache/
+temp_env/

@@ -15,7 +15,7 @@ model:
 training:
   epochs: 1
   batch_size: 1
-  grad_accumulation_steps: 8
+  grad_accumulation_steps: 32
   learning_rate: 5.0e-6
   eta_min_scale: 0.1
   optim_8bit: true

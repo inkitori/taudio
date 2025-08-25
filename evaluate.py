@@ -129,7 +129,6 @@ def main():
 
     print(f"Evaluating on {args.split} split")
 
-    model.eval()
 
     for example in base_ds:
         # Token-based evaluation

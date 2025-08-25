@@ -1,109 +1,118 @@
+#!/usr/bin/env python3
 """
-Script to resample agkphysics/AudioSet dataset to 16kHz and push to enyoukai/AudioSet
-"""
-import os
-import librosa
-import numpy as np
-from datasets import load_dataset, Dataset, DatasetDict, Audio
-from huggingface_hub import login
-import logging
+Script to pull AudioSet dataset from HuggingFace, remove specific indices, 
+and push to a new repository.
 
-# Setup logging
-logging.basicConfig(level=logging.INFO)
+This script:
+1. Downloads the agkphysics/AudioSet dataset
+2. Removes specified train indices (15,759 and 17,532) and test index (6,182)
+3. Pushes the modified dataset to enyoukai/AudioSet
+"""
+
+import os
+import logging
+from datasets import load_dataset, DatasetDict
+from huggingface_hub import login, HfApi
+from typing import List
+
+# Set up logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-def resample_audioset_dataset(original_repo="agkphysics/AudioSet", target_repo="enyoukai/AudioSet", target_sr=16000):
+def remove_indices_from_split(dataset, indices_to_remove: List[int], split_name: str):
     """
-    Load AudioSet dataset, resample all audio to target sampling rate, and push to new repo
+    Remove specific indices from a dataset split.
     
     Args:
-        original_repo: Source repository name
-        target_repo: Target repository name 
-        target_sr: Target sampling rate
+        dataset: The dataset split to modify
+        indices_to_remove: List of indices to remove
+        split_name: Name of the split (for logging)
+    
+    Returns:
+        Modified dataset with specified indices removed
     """
+    logger.info(f"Original {split_name} dataset size: {len(dataset)}")
     
-    logger.info(f"Loading dataset from {original_repo}")
-    
-    # Load the original dataset
-    dataset = load_dataset(original_repo, trust_remote_code=True)
-    logger.info(f"Loaded dataset with splits: {list(dataset.keys())}")
-    logger.info(f"Starting resampling to {target_sr} Hz")
-    
-    for split_name in dataset.keys():
-        logger.info(f"Resampling {split_name} split...")
-        
-        # Update the audio feature to specify the new sampling rate
-        dataset[split_name].cast_column(
-            "audio", 
-            Audio(sampling_rate=target_sr, mono=True, decode=True)
-        )
-        
-        logger.info(f"Finished resampling {split_name} split")
-    
-    
-    # Push to Hugging Face Hub
-    logger.info(f"Pushing resampled dataset to {target_repo}")
-    
-    dataset.push_to_hub(
-        target_repo,
-        commit_message=f"Resample all audio to {target_sr} Hz from {original_repo}",
-        private=False  # Set to True if you want a private dataset
+    return dataset.select(
+        (i for i in range(len(dataset)) if i not in indices_to_remove)
     )
-    
-    logger.info(f"Successfully pushed resampled dataset to {target_repo}")
 
 def main():
-    """
-    Main function to run the resampling process
-    """
-    import argparse
+    """Main function to process and upload the dataset."""
     
-    parser = argparse.ArgumentParser(description="Resample AudioSet dataset to 16kHz")
-    parser.add_argument("--original_repo", default="agkphysics/AudioSet", 
-                       help="Source repository (default: agkphysics/AudioSet)")
-    parser.add_argument("--target_repo", default="enyoukai/AudioSet",
-                       help="Target repository (default: enyoukai/AudioSet)")
-    parser.add_argument("--target_sr", type=int, default=16000,
-                       help="Target sampling rate (default: 16000)")
-    parser.add_argument("--hf_token", type=str, default=None,
-                       help="Hugging Face token for authentication")
+    # Configuration
+    source_dataset = "agkphysics/AudioSet"
+    target_dataset = "enyoukai/AudioSet"
     
-    args = parser.parse_args()
+    # Indices to remove
+    train_indices_to_remove = [15759, 17532]  # Note: using 0-based indexing
+    test_indices_to_remove = [6182]
     
-    # Login if token provided
-    if args.hf_token:
-        login(token=args.hf_token)
-        logger.info("Logged in to Hugging Face Hub with provided token")
-    
-    # Run the resampling
-    resample_audioset_dataset(
-        original_repo=args.original_repo,
-        target_repo=args.target_repo, 
-        target_sr=args.target_sr
-    )
+    try:
+        # Step 1: Load the original dataset
+        logger.info(f"Loading dataset from {source_dataset}...")
+        dataset = load_dataset(source_dataset, trust_remote_code=True)
+        logger.info(f"Dataset loaded successfully. Splits: {list(dataset.keys())}")
+        
+        # Log original sizes
+        for split_name in dataset.keys():
+            logger.info(f"Original {split_name} size: {len(dataset[split_name])}")
+        
+        # Step 2: Process each split
+        modified_dataset = {}
+        
+        # Process train split
+        if 'train' in dataset:
+            modified_dataset['train'] = remove_indices_from_split(
+                dataset['train'], 
+                train_indices_to_remove, 
+                'train'
+            )
+        
+        # Process test split
+        if 'test' in dataset:
+            modified_dataset['test'] = remove_indices_from_split(
+                dataset['test'], 
+                test_indices_to_remove, 
+                'test'
+            )
+        
+        # Copy other splits without modification
+        for split_name in dataset.keys():
+            if split_name not in ['train', 'test']:
+                logger.info(f"Copying {split_name} split without modification")
+                modified_dataset[split_name] = dataset[split_name]
+        
+        # Create DatasetDict
+        final_dataset = DatasetDict(modified_dataset)
+        
+        # # Step 3: Login to Hugging Face (requires token)
+        # logger.info("Logging in to Hugging Face...")
+        # try:
+        #     login()  # This will use the token from environment or prompt for it
+        # except Exception as e:
+        #     logger.error(f"Failed to login to Hugging Face: {e}")
+        #     logger.info("Please make sure you have a valid HF token set via 'huggingface-cli login' or HF_TOKEN environment variable")
+        #     return
+        
+        # Step 4: Push to new repository
+        logger.info(f"Pushing modified dataset to {target_dataset}...")
+        final_dataset.push_to_hub(
+            target_dataset,
+            private=False,  # Set to True if you want a private repository
+            commit_message=f"Modified AudioSet: removed train indices {train_indices_to_remove} and test indices {test_indices_to_remove}"
+        )
+        
+        logger.info("Dataset upload completed successfully!")
+        
+        # Log final statistics
+        logger.info("Final dataset statistics:")
+        for split_name, split_data in final_dataset.items():
+            logger.info(f"  {split_name}: {len(split_data)} samples")
+            
+    except Exception as e:
+        logger.error(f"An error occurred: {e}")
+        raise
 
 if __name__ == "__main__":
-    # USAGE EXAMPLES:
-    # 
-    # 1. Basic usage (requires prior login with `huggingface-cli login`):
-    #    python utils/audioset_resampled.py
-    #
-    # 2. With custom parameters:
-    #    python utils/audioset_resampled.py --target_sr 22050 --target_repo "username/AudioSet-22k"
-    #
-    # 3. With token authentication:
-    #    python utils/audioset_resampled.py --hf_token "your_hf_token_here"
-    #
-    # PREREQUISITES:
-    # - All required dependencies are already in requirements.txt:
-    #   librosa, datasets, huggingface-hub, numpy
-    # - Hugging Face authentication (either via `huggingface-cli login` or --hf_token)
-    # - Write access to the target repository
-    #
-    # The script will:
-    # 1. Load the agkphysics/AudioSet dataset (both train and test splits)
-    # 2. Resample all audio to 16kHz (or specified target_sr)
-    # 3. Push the resampled dataset to enyoukai/AudioSet (or specified target_repo)
-    # 4. Save a local backup in case of upload issues
-    
     main()

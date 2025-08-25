@@ -29,12 +29,13 @@ class TAudio(nn.Module):
         bidirectional_audio: bool,
         poisson_loss: bool,
         linear_bias: Optional[float],
+        dtype: str,
     ) -> None:
         super(TAudio, self).__init__()
 
         # Adapter-based backend
         self.adapter = create_adapter(
-            model_id=model_id, load_in_8bit=load_in_8bit, bidirectional_audio=bidirectional_audio)
+            model_id=model_id, load_in_8bit=load_in_8bit, bidirectional_audio=bidirectional_audio, dtype=dtype)
 
         self.hidden_dim = self.adapter.hidden_dim
 

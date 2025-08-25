@@ -15,11 +15,11 @@ from contextlib import nullcontext
 
 
 class Qwen2_5OmniAdapter(BaseModelAdapter):
-    def __init__(self, model_id: str, load_in_8bit: bool, bidirectional_audio: bool) -> None:
+    def __init__(self, model_id: str, load_in_8bit: bool, bidirectional_audio: bool, dtype: str) -> None:
         super().__init__()
         self.base_model = Qwen2_5OmniThinkerForConditionalGeneration.from_pretrained(
             model_id,
-            torch_dtype="auto",
+            torch_dtype=dtype,
             load_in_8bit=load_in_8bit,
         )
 

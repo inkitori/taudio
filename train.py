@@ -85,6 +85,7 @@ def main():
     }
 
     model = TAudio(**taudio_config).to(device)
+    model.train()
 
     # Create dataset
     ds = get_ds(
@@ -113,14 +114,17 @@ def main():
     )
 
     # Setup optimizer and scheduler
+    steps_per_epoch = dataset_length // training_config['batch_size']
     total_optimizer_steps = (
-        dataset_length * training_config['epochs']) // training_config['grad_accumulation_steps']
+        steps_per_epoch * training_config['epochs']) // training_config['grad_accumulation_steps']
 
     if training_config['optim_8bit']:
+        logging.info("Using AdamW8bit optimizer")
         optim = bnb.optim.AdamW8bit(
             model.parameters(), lr=training_config['learning_rate'])
     else:
-        optim = torch.optim.AdamW(
+        logging.info("Using AdamW optimizer")
+        optim = bnb.optim.AdamW(
             model.parameters(), lr=training_config['learning_rate'])
 
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
@@ -180,7 +184,7 @@ def main():
         logging.info(f"Epoch {epoch + 1} completed.")
 
         # Save checkpoint
-        if not args.debug and system_config.get('save_checkpoints', True):
+        if (not args.debug and system_config.get('save_checkpoints', True)) or epoch == training_config['epochs'] - 1:
             checkpoint_path = experiment_dir / f"model_epoch{epoch + 1}.pt"
             torch.save(model.state_dict(), checkpoint_path)
             logging.info(f"Model saved to {checkpoint_path}")

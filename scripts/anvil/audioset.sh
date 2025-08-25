@@ -6,12 +6,11 @@
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:1
 #SBATCH --time=11:59:00
-#SBATCH --job-name=train_and_eval
+#SBATCH --job-name=audioset
 #SBATCH --output=/anvil/scratch/x-pkeung/taudio/scripts/logs/%x/%j.out
 #SBATCH --error=/anvil/scratch/x-pkeung/taudio/scripts/logs/%x/%j.err
 
 cd /anvil/scratch/x-pkeung/taudio
 module load conda
-conda activate ./env
-python train.py --config $1
-python evaluate.py --experiment $1 --split $2
+conda activate ./temp_env
+python utils/audioset_resampled.py

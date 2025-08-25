@@ -9,6 +9,7 @@ model:
   freeze_text_model: false
   audio_layer: -1
   bidirectional_audio: true
+  linear_bias: -3
 
 # Training configuration
 training:
