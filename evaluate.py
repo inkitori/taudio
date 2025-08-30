@@ -104,7 +104,11 @@ def main():
     dataset_config = config['dataset']
     task_config = config['task']
 
-    task = create_task(task_type=task_config['type'], **task_config.get('kwargs', {}))
+	task_kwargs = task_config.get('kwargs', {})
+    task_kwargs['min_time'] = args.min_time
+    task_kwargs['max_time'] = args.max_time
+
+    task = create_task(task_type=task_config['type'], **task_kwargs)
 
     taudio_config = {
         **model_config,

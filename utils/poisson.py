@@ -3,6 +3,8 @@ import torch
 from scipy.stats import beta
 import logging
 
+MAX_COUNT = 100
+
 def beta_medians(n):
     # input: scalar n
     values = np.arange(n) + 1
@@ -62,8 +64,19 @@ def poisson_count_loss(log_hazard, counts, frame_mask):
     counts (batch, ): boolean mask for when the events occurred, 1 if the event occurred in that frame, 0 otherwise
     frame_mask (batch, seq len): boolean mask for the frame padding
     '''
-    cumulative_hazard = torch.cumsum(torch.exp(log_hazard) * frame_mask, dim=1)[:, -1]
-    return cumulative_hazard - torch.log(cumulative_hazard) * counts + torch.lgamma(counts + 1)
+    cumulative_hazard = log_hazard[:, 0] # shape: (batch,)
+    return torch.mean(torch.abs(counts - cumulative_hazard))
+
+    # log_hazard = log_hazard.to(torch.float64)
+    # counts = counts.to(torch.float64)
+    # counts += 0.5
+    # frame_mask = frame_mask.to(torch.float64)
+    
+    # cumulative_hazard = torch.sum(torch.relu(log_hazard) * frame_mask, dim=1)
+    # return cumulative_hazard - torch.log(cumulative_hazard) * counts + torch.lgamma(counts + 1)
+
+    # # return mean squared error instead
+    # return torch.mean((counts - torch.sum(log_hazard * frame_mask, dim=1)) ** 2)
 
     # '''
     # A more numerically stable version of the Poisson count loss.
@@ -112,4 +125,11 @@ def infer_count(log_hazard, frame_mask):
     log_hazard (batch, seq len): outputs of the model
     frame_mask (batch, seq len): boolean mask for the frame padding
     '''
-    return torch.floor(torch.cumsum(torch.exp(log_hazard) * frame_mask, dim=1)[:, -1])
+    cumulative_hazard = log_hazard[:, 0] # shape: (batch,)
+    logging.info(f"cumulative_hazard: {cumulative_hazard}")
+    return torch.round(cumulative_hazard)
+
+    # log_hazard = log_hazard.to(torch.float64)
+    # frame_mask = frame_mask.to(torch.float64)
+    
+    # cumulative_hazard = torch.sum(torch.relu(log_hazard) * frame_mask, dim=1)
