@@ -207,10 +207,11 @@ class SingleTimestampTask(BaseTask):
             )
         generated_tokens = tokens[0][inputs["input_ids"].shape[1]:-1]
         generated_string = processor.tokenizer.decode(generated_tokens)
+        logging.info(f"Token prediction: {generated_string}, GT: {gt}")
         try:
             token_pred = json.loads(generated_string)[name]
         except Exception:
-            return {"token_correct": 0.0}
+            return {"token_correct": 0.0, "parsing_error": 1.0}
 
         # Metric increments
         abs_err = abs(float(token_pred) - float(gt))
@@ -266,7 +267,7 @@ class SingleTimestampTask(BaseTask):
                 _, aux_pred_top_idx = torch.max(logits, dim=0)
         aux_pred = float(aux_pred_top_idx) / model.adapter.seconds_to_embedding
 
-        logging.info(f"Auxiliary prediction: {aux_pred}, GT: {gt}")
+        logging.info(f"Auxiliary prediction: {aux_pred:.2f}, GT: {gt:.2f}")
 
         # Metric increments
         abs_err = abs(float(aux_pred) - float(gt))
@@ -276,14 +277,12 @@ class SingleTimestampTask(BaseTask):
         }
         return metrics
 
-    def calculate_loss(self, logits, labels, use_poisson_loss: bool = False, class_weighting: bool = False) -> torch.Tensor:
+    def calculate_loss(self, logits, labels, adapter: BaseModelAdapter, use_poisson_loss: bool, class_weighting: bool) -> torch.Tensor:
         gt_timestamp = torch.argmax(labels).item()
-        pred_timestamp = torch.argmax(logits).item() # technically not correct for poisson 
-
-        logging.info(f"Predicted Timestamp: {pred_timestamp}, GT Timestamp: {gt_timestamp}")
 
         if use_poisson_loss:
-            return poisson_loss(logits.unsqueeze(0), labels.unsqueeze(0), torch.ones_like(logits.unsqueeze(0))) 
+            loss = poisson_loss(logits.unsqueeze(0), labels.unsqueeze(0), torch.ones_like(logits.unsqueeze(0))) 
+            pred_timestamp = infer_timestamps(1, logits.cpu().float().detach().numpy())
         else:
             if class_weighting:
                 num_ones = (labels == 1).sum()
@@ -295,4 +294,12 @@ class SingleTimestampTask(BaseTask):
             else:
                 criterion = nn.BCEWithLogitsLoss()
 
-            return criterion(logits, labels), abs(pred_timestamp - gt_timestamp)
+            loss = criterion(logits, labels)
+            pred_timestamp = torch.argmax(logits).item() 
+
+        pred_timestamp = float(pred_timestamp) / adapter.seconds_to_embedding
+        gt_timestamp = float(gt_timestamp) / adapter.seconds_to_embedding
+
+        logging.info(f"Predicted Timestamp: {pred_timestamp:.2f}, GT Timestamp: {gt_timestamp:.2f}")
+
+        return loss, abs(pred_timestamp - gt_timestamp)

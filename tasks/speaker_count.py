@@ -185,7 +185,7 @@ class SpeakerCountTask(BaseTask):
         }
         return metrics
 
-    def calculate_loss(self, logits, labels, use_poisson_loss: bool, class_weighting: bool) -> torch.Tensor:
+    def calculate_loss(self, logits, labels, adapter: BaseModelAdapter, use_poisson_loss: bool, class_weighting: bool) -> torch.Tensor:
         if use_poisson_loss:
             logits = logits.unsqueeze(0) # make it look batched
             counts = labels.sum()

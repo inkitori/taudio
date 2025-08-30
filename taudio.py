@@ -93,7 +93,7 @@ class TAudio(nn.Module):
 
         if self.surrogate_loss:
             surrogate_loss, auxiliary_deviation = self.task.calculate_loss(
-                logits=logits, labels=labels, use_poisson_loss=self.poisson_loss, class_weighting=self.class_weighting)
+                logits=logits, labels=labels, adapter=self.adapter, use_poisson_loss=self.poisson_loss, class_weighting=self.class_weighting)
         else:
             surrogate_loss = torch.tensor(
                 0.0, device=logits.device, dtype=logits.dtype)

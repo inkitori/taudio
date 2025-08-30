@@ -1,6 +1,6 @@
 # Base experiment configuration
-experiment_name: "[librispeech][count]surrogate+bidirectional_audio[poisson]_DEBUG"
-description: "Surrogate loss, bidirectional audio, poisson loss, DEBUG"
+experiment_name: "[librispeech]surrogate+class_weighting+bidirectional_audio[poisson][start][<4]"
+description: "Surrogate loss, class weighting, start key, bidirectional audio, max time 4 seconds, timestamp single"
 
 # Model configuration
 model:
@@ -9,44 +9,46 @@ model:
   freeze_text_model: false
   audio_layer: -1
   bidirectional_audio: true
-  linear_bias: 0
+  linear_bias: -5
+  dtype: "auto"
 
 # Training configuration
 training:
-  epochs: 100
+  epochs: 1
   batch_size: 1
   grad_accumulation_steps: 8
-  learning_rate: 2.0e-6
+  learning_rate: 5.0e-6
   eta_min_scale: 0.1
   optim_8bit: false
-
+  
 # Dataset configuration
 dataset:
   split: "train_clean_100"
   repository: "gilkeyio/librispeech-alignments"
   padding: 0
-  take_first: 8
 
-# Task configuration
 task:
-  type: "SPEAKER_COUNTING"
-  
+  type: "SINGLE_WORD_TIMESTAMP"
+  kwargs:
+    key: "start"
+    min_time: 0
+    max_time: 4
+
 # Loss configuration
 loss:
-  class_weighting: false
-  surrogate_loss: true
   token_loss: false
+  surrogate_loss: true
   surrogate_loss_weight: 1.0
+  class_weighting: false
   poisson_loss: true
 
 # System configuration
 system:
   dataloader_num_workers: 1
   seed: 80
-  save_checkpoints: false
 
 # Wandb configuration
 wandb:
   entity: "taudio"
   project: "Train"
-  tags: ["surrogate", "bidirectional_audio", "speaker_counting", "padding_0", "poisson"] 
+  tags: ["surrogate", "class_weighting", "bidirectional_audio", "start", "padding_0", "<4", "timestamp_single"] 
