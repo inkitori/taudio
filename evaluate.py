@@ -84,7 +84,7 @@ def main():
     run = wandb.init(
         entity=config['wandb']['entity'],
         project="Eval",
-        name=f"{experiment_dir.name}[{args.split}][epoch_{args.epoch}]",
+        name=f"{experiment_dir.name}[{args.split}][epoch_{args.epoch}][{args.min_time}-{args.max_time}]",
         config={
             "experiment_name": config['experiment_name'],
             "checkpoint_path": str(checkpoint_path),
@@ -104,7 +104,7 @@ def main():
     dataset_config = config['dataset']
     task_config = config['task']
 
-	task_kwargs = task_config.get('kwargs', {})
+    task_kwargs = task_config.get('kwargs', {})
     task_kwargs['min_time'] = args.min_time
     task_kwargs['max_time'] = args.max_time
 

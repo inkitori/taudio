@@ -1,6 +1,6 @@
 # Base experiment configuration
-experiment_name: "[librispeech][count]token+optim_8bit+bidirectional_audio"
-description: "Token loss, 8-bit optimizer, bidirectional audio"
+experiment_name: "[librispeech]token+bidirectional_audio[start][<8]"
+description: "Token loss, start key, bidirectional audio, max time 8 seconds, timestamp single"
 
 # Model configuration
 model:
@@ -9,7 +9,8 @@ model:
   freeze_text_model: false
   audio_layer: -1
   bidirectional_audio: true
-  linear_bias: -3
+  linear_bias: 0
+  dtype: "auto"
 
 # Training configuration
 training:
@@ -18,21 +19,27 @@ training:
   grad_accumulation_steps: 8
   learning_rate: 5.0e-6
   eta_min_scale: 0.1
-  optim_8bit: true
+  optim_8bit: false
   
 # Dataset configuration
 dataset:
   split: "train_clean_100"
   repository: "gilkeyio/librispeech-alignments"
-  task: "SPEAKER_COUNTING"
   padding: 0
-  
+
+task:
+  type: "SINGLE_WORD_TIMESTAMP"
+  kwargs:
+    key: "start"
+    min_time: 0
+    max_time: 8
+
 # Loss configuration
 loss:
   token_loss: true
-  class_weighting: false
   surrogate_loss: false
-  surrogate_loss_weight: 0
+  surrogate_loss_weight: 1.0
+  class_weighting: false
   poisson_loss: false
 
 # System configuration
@@ -44,4 +51,4 @@ system:
 wandb:
   entity: "taudio"
   project: "Train"
-  tags: ["token", "optim_8bit", "bidirectional_audio", "speaker_counting", "padding_0"] 
+  tags: ["token", "bidirectional_audio", "start", "padding_0", "<8", "timestamp_single"] 
