@@ -7,7 +7,7 @@ from .speaker_count import SpeakerCountTask
 
 _TASKS: Dict[str, Type[BaseTask]] = {
     "SINGLE_WORD_TIMESTAMP": SingleTimestampTask,
-    "SPEAKER_COUNTING": SpeakerCountTask,
+    "SPEAKER_COUNT": SpeakerCountTask,
 }
 
 

@@ -9,10 +9,11 @@ import logging
 
 
 class SpeakerCountTask(BaseTask):
-    def __init__(self, *, min_value: Optional[float] = None, max_value: Optional[float] = None):
+    def __init__(self, *, min_time: Optional[float] = None, max_time: Optional[float] = None):
         super().__init__()
-        self.min_value = min_value
-        self.max_value = max_value
+        # not really times but for backwards compatibility with timestamp single lol
+        self.min_time = min_time
+        self.max_time = max_time
 
     def _build_conversation_text(self, *, model_processor: Any, ds_adapter: BaseDatasetAdapter, speaker_count: int, eval_mode: bool) -> str:
         prompt = ds_adapter.get_speaker_count_prompt()
@@ -87,8 +88,7 @@ class SpeakerCountTask(BaseTask):
         labels_size = int((input_ids == model_adapter.audio_id).sum().item())
         labels = torch.zeros(labels_size, device=input_ids.device)
 
-        # this will be 0 for all but the first speaker_count tokens
-        labels[:speaker_count] = 1.0
+        labels[0] = speaker_count
 
         # Mask out everything up to and including the assistant token
         label_ids = input_ids.clone()
@@ -133,16 +133,16 @@ class SpeakerCountTask(BaseTask):
             )
         generated_tokens = tokens[0][inputs["input_ids"].shape[1]:-1]
         generated_string = processor.tokenizer.decode(generated_tokens)
+        logging.info(f"Token prediction: {generated_string}, GT: {speaker_count}")
         try:
             token_pred = int(generated_string)
         except Exception:
-            return {"token_correct": 0.0}
-
-        logging.info(f"Token prediction: {token_pred}, GT: {speaker_count}")
+            return {"token_correct": 0.0, "parsing_error": 1.0}
 
         # Metric increments
+        abs_err = abs(token_pred - speaker_count)
         metrics: Dict[str, float] = {
-            "token_abs_error_sum": abs(token_pred - speaker_count),
+            "token_abs_error_sum": abs_err,
             "token_correct": 1.0 if token_pred == speaker_count else 0.0,
         }
         return metrics
@@ -173,14 +173,15 @@ class SpeakerCountTask(BaseTask):
             audio_hidden_states = hidden_states[inputs["input_ids"]
                                                 == model.adapter.audio_id]
             logits = model.linear(audio_hidden_states).squeeze()
-            aux_pred = infer_count(logits.unsqueeze(
-                0), torch.ones_like(logits.unsqueeze(0)))[0]
+            logits = logits.unsqueeze(0)
+            aux_pred = infer_count(logits, torch.ones_like(logits)).item()
 
         logging.info(f"Auxiliary prediction: {aux_pred}, GT: {speaker_count}")
 
         # Metric increments
+        abs_err = abs(aux_pred - speaker_count)
         metrics: Dict[str, float] = {
-            "aux_abs_error_sum": abs(aux_pred - speaker_count),
+            "aux_abs_error_sum": abs_err,
             "aux_correct": 1.0 if aux_pred == speaker_count else 0.0,
         }
         return metrics
