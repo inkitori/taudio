@@ -5,7 +5,7 @@ import torch
 from nltk.corpus import stopwords
 import json
 import torch.nn as nn
-
+import math
 from dataset.base_dataset_adapter import BaseDatasetAdapter
 from models.base_model_adapter import BaseModelAdapter
 
@@ -150,7 +150,7 @@ class SingleTimestampTask(BaseTask):
         labels_size = int((input_ids == model_adapter.audio_id).sum().item())
         labels = torch.zeros(labels_size, device=input_ids.device)
 
-        event_idx = clamp(better_round(
+        event_idx = clamp(math.floor(
             t_sec * (model_adapter.seconds_to_embedding)), 0, labels_size - 1)
         labels[event_idx] = 1.0
 
@@ -215,6 +215,9 @@ class SingleTimestampTask(BaseTask):
 
         # Metric increments
         abs_err = abs(float(token_pred) - float(gt))
+        abs_err = better_round(abs_err * 100.0) / 100.0
+        logging.info(f"Absolute error: {abs_err}, Error bound: {error_bound}, Correct: {1.0 if abs_err <= float(error_bound) else 0.0}")
+
         metrics: Dict[str, float] = {
             "token_abs_error_sum": abs_err,
             "token_correct": 1.0 if abs_err <= float(error_bound) else 0.0,
@@ -261,12 +264,16 @@ class SingleTimestampTask(BaseTask):
                     1, logits.cpu().float().numpy())
             else:
                 _, aux_pred_top_idx = torch.max(logits, dim=0)
+                # aux_pred_top_idx = aux_pred_top_idx.float() + 0.5 # because we floor timestamps to the frame, we want to have full coverage over the frame
         aux_pred = float(aux_pred_top_idx) / model.adapter.seconds_to_embedding
+        aux_pred = better_round(aux_pred * 100.0) / 100.0
 
-        logging.info(f"Auxiliary prediction: {aux_pred:.2f}, GT: {gt:.2f}")
+        logging.info(f"Auxiliary prediction: {aux_pred}, GT: {gt}")
+        print(f"Raw GT: {gt}")
 
         # Metric increments
-        abs_err = abs(float(aux_pred) - float(gt))
+        abs_err = better_round(abs(float(aux_pred) - float(gt)) * 100.0) / 100.0
+        logging.info(f"Absolute error: {abs_err}, Error bound: {error_bound}, Correct: {1.0 if abs_err <= float(error_bound) else 0.0}")
         metrics: Dict[str, float] = {
             "aux_abs_error_sum": abs_err,
             "aux_correct": 1.0 if abs_err <= float(error_bound) else 0.0,
@@ -292,10 +299,15 @@ class SingleTimestampTask(BaseTask):
 
             loss = criterion(logits, labels)
             pred_timestamp = torch.argmax(logits).item() 
+            pred_timestamp = pred_timestamp.float() + 0.5 # see evaluate_auxiliary_outputs for why we do this
+
 
         pred_timestamp = float(pred_timestamp) / adapter.seconds_to_embedding
+        pred_timestamp = better_round(pred_timestamp * 100.0) / 100.0
+
         gt_timestamp = float(gt_timestamp) / adapter.seconds_to_embedding
 
-        logging.info(f"Predicted Timestamp: {pred_timestamp:.2f}, GT Timestamp: {gt_timestamp:.2f}")
+        logging.info(f"Predicted Timestamp: {pred_timestamp}, GT Timestamp: {gt_timestamp}")
+        abs_err = better_round(abs(pred_timestamp - gt_timestamp) * 100.0) / 100.0
 
-        return loss, abs(pred_timestamp - gt_timestamp)
+        return loss, abs_err

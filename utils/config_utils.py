@@ -4,6 +4,7 @@ Utilities for loading and managing experiment configurations.
 
 import os
 import yaml
+import re
 from typing import Dict, Any, Optional
 from pathlib import Path
 import datetime
@@ -68,16 +69,37 @@ class ConfigManager:
     
     def find_latest_experiment(self, experiment_base_name: str) -> Optional[Path]:
         """Find the latest experiment with the given base name."""
-        matching_dirs = [
-            d for d in self.outputs_dir.iterdir() 
-            if d.is_dir() and d.name.startswith(experiment_base_name)
-        ]
+        # Pattern to match exact experiment name followed by timestamp
+        # Timestamp format: _YYYYMMDD_HHMMSS
+        timestamp_pattern = r"_\d{8}_\d{6}$"
+        expected_prefix = f"{experiment_base_name}"
+        
+        matching_dirs = []
+        for d in self.outputs_dir.iterdir():
+            if not d.is_dir():
+                continue
+            
+            # Check if directory name starts with the expected prefix
+            if not d.name.startswith(expected_prefix):
+                continue
+            
+            # Check if the remaining part after the prefix matches the timestamp pattern
+            remaining = d.name[len(expected_prefix):]
+            if re.match(timestamp_pattern, remaining):
+                matching_dirs.append(d)
         
         if not matching_dirs:
             return None
         
-        # Sort by creation time and return the most recent
-        latest_dir = max(matching_dirs, key=lambda d: d.stat().st_mtime)
+        # Sort by timestamp in directory name and return the most recent
+        def extract_timestamp(dir_path):
+            signature = "_YYYYMMDD_HHMMSS"
+            # Extract timestamp from directory name (last 16 characters: YYYYMMDD_HHMMSS)
+            timestamp_str = dir_path.name[-len(signature):]  # _YYYYMMDD_HHMMSS
+            # Remove underscore and convert to comparable format: YYYYMMDDHHMMSS
+            return timestamp_str.replace('_', '')
+        
+        latest_dir = max(matching_dirs, key=extract_timestamp)
         return latest_dir
     
     def get_model_checkpoint(self, experiment_dir: Path, epoch: Optional[int] = None) -> Optional[Path]:

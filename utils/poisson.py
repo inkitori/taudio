@@ -125,7 +125,7 @@ def infer_count(log_hazard, frame_mask):
     '''
     cumulative_hazard = log_hazard[:, -1] # shape: (batch,)
     logging.info(f"cumulative_hazard: {cumulative_hazard}")
-    return torch.round(cumulative_hazard)
+    return torch.floor(cumulative_hazard+0.3333-0.02/cumulative_hazard)
 
     # log_hazard = log_hazard.to(torch.float64)
     # frame_mask = frame_mask.to(torch.float64)
