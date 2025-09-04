@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --partition=gpu-l40
+#SBATCH --partition=gpu-l40s
 #SBATCH --account=ark
 #SBATCH --mem-per-gpu=128G
 #SBATCH --cpus-per-gpu=10
