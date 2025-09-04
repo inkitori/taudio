@@ -157,7 +157,8 @@ def infer_count(log_hazard, frame_mask):
     # 4. Sum the per-frame hazards across the sequence to get the total expected count (λ)
     predicted_counts = torch.sum(masked_hazard, dim=1)
 
-    return torch.round(predicted_counts)
+	return torch.floor(predicted_counts+0.3333-0.02/predicted_counts)
+    # return torch.round(predicted_counts)
 
     # cumulative_hazard = log_hazard[:, -1] # shape: (batch,)
     # logging.info(f"cumulative_hazard: {cumulative_hazard}")

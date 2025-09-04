@@ -91,10 +91,7 @@ class SpeakerCountTask(BaseTask):
         labels_size = int((input_ids == model_adapter.audio_id).sum().item())
         labels = torch.zeros(labels_size, device=input_ids.device)
 
-        events = ds_adapter.get_speaker_times(example)
-        for event in events:
-            event_idx = clamp(math.floor(ds_adapter.get_target_seconds(event, "end") * (model_adapter.seconds_to_embedding)), 0, labels_size - 1)
-            labels[event_idx] = 1
+        labels[0] = speaker_count
 
         # Mask out everything up to and including the assistant token
         label_ids = input_ids.clone()
@@ -216,21 +213,13 @@ class SpeakerCountTask(BaseTask):
 
             return loss, abs(pred_count - gt_count)
         else:
-            if class_weighting:
-                logging.info("Class weighting enabled")
-                num_ones = (labels == 1).sum()
-                num_zeros = (labels == 0).sum()
-                pos_weight = (
-                    num_zeros / num_ones) if num_ones > 0 else 1.0
+            logging.info("Bernoulli loss enabled")
 
-                criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
-            else:
-                logging.info("Class weighting disabled")
-                criterion = nn.BCEWithLogitsLoss()
-
-            loss = criterion(logits, labels)
             probs = torch.sigmoid(logits)
-            pred_count = torch.round(probs.sum()).item()
+            raw_count = probs.sum()
+            pred_count = torch.round(raw_count).item()
+
+            loss = torch.abs(raw_count - labels.sum())
 
             logging.info(f"Labels Ground Truth: {gt_count}")
             logging.info(f"Predicted Count: {pred_count}")

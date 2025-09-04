@@ -55,7 +55,3 @@ class BaseDatasetAdapter(ABC):
     @abstractmethod
     def get_speaker_count_prompt(self) -> str:
         """Return the prompt for the speaker count task."""
-
-    @abstractmethod
-    def get_speaker_times(self, example: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """Return the list of speaker times for the speaker count task."""
