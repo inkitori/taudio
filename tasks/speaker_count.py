@@ -1,11 +1,14 @@
 from typing import Any, Dict, Iterable, Optional
 import torch
+import torch.nn as nn
 
 from .base import BaseTask
 from utils.poisson import poisson_count_loss, infer_count
 from dataset.base_dataset_adapter import BaseDatasetAdapter
 from models.base_model_adapter import BaseModelAdapter
 import logging
+import math
+from utils.utils import clamp
 
 
 class SpeakerCountTask(BaseTask):
@@ -88,7 +91,10 @@ class SpeakerCountTask(BaseTask):
         labels_size = int((input_ids == model_adapter.audio_id).sum().item())
         labels = torch.zeros(labels_size, device=input_ids.device)
 
-        labels[0] = speaker_count
+        events = ds_adapter.get_speaker_times(example)
+        for event in events:
+            event_idx = clamp(math.floor(ds_adapter.get_target_seconds(event, "end") * (model_adapter.seconds_to_embedding)), 0, labels_size - 1)
+            labels[event_idx] = 1
 
         # Mask out everything up to and including the assistant token
         label_ids = input_ids.clone()
@@ -174,7 +180,12 @@ class SpeakerCountTask(BaseTask):
                                                 == model.adapter.audio_id]
             logits = model.linear(audio_hidden_states).squeeze()
             logits = logits.unsqueeze(0)
-            aux_pred = infer_count(logits, torch.ones_like(logits)).item()
+            if model.poisson_loss:
+                aux_pred = infer_count(logits, torch.ones_like(logits)).item()
+            else:
+                # Calculate how many frames have logits > 0.5
+                probs = torch.sigmoid(logits)
+                aux_pred = torch.round(probs.sum()).item()
 
         logging.info(f"Auxiliary prediction: {aux_pred}, GT: {speaker_count}")
 
@@ -187,7 +198,10 @@ class SpeakerCountTask(BaseTask):
         return metrics
 
     def calculate_loss(self, logits, labels, adapter: BaseModelAdapter, use_poisson_loss: bool, class_weighting: bool) -> torch.Tensor:
+        gt_count = labels.sum().item()
+
         if use_poisson_loss:
+            logging.info("Poisson loss enabled")
             logits = logits.unsqueeze(0) # make it look batched
             counts = labels.sum()
             frame_mask = torch.ones_like(logits)
@@ -202,5 +216,23 @@ class SpeakerCountTask(BaseTask):
 
             return loss, abs(pred_count - gt_count)
         else:
-            raise ValueError(
-                "Only Poisson loss is supported for speaker counting")
+            if class_weighting:
+                logging.info("Class weighting enabled")
+                num_ones = (labels == 1).sum()
+                num_zeros = (labels == 0).sum()
+                pos_weight = (
+                    num_zeros / num_ones) if num_ones > 0 else 1.0
+
+                criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
+            else:
+                logging.info("Class weighting disabled")
+                criterion = nn.BCEWithLogitsLoss()
+
+            loss = criterion(logits, labels)
+            probs = torch.sigmoid(logits)
+            pred_count = torch.round(probs.sum()).item()
+
+            logging.info(f"Labels Ground Truth: {gt_count}")
+            logging.info(f"Predicted Count: {pred_count}")
+
+            return loss, abs(pred_count - gt_count)

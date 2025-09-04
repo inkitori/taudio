@@ -1,5 +1,5 @@
 # Base experiment configuration
-experiment_name: "[librispeech][count]surrogate+bidirectional_audio[poisson][start]"
+experiment_name: "[librispeech][count]surrogate+bidirectional_audio[start]"
 description: "Surrogate loss, start key, bidirectional audio, timestamp single, count task"
 
 # Model configuration
@@ -36,7 +36,7 @@ loss:
   surrogate_loss: true
   surrogate_loss_weight: 1.0
   class_weighting: false
-  poisson_loss: true
+  poisson_loss: false
 
 # System configuration
 system:
