@@ -134,17 +134,3 @@ def flatten_config(config: Dict[str, Any], prefix: str = "") -> Dict[str, Any]:
             flattened[new_key] = value
     
     return flattened
-
-
-def create_wandb_run_name(config: Dict[str, Any]) -> str:
-    """Create a descriptive wandb run name from the configuration."""
-    experiment_name = config.get('experiment_name', 'unknown')
-    
-    # Add key parameters to the run name
-    parts = [experiment_name]
-    
-    if 'training' in config and 'learning_rate' in config['training']:
-        lr = config['training']['learning_rate']
-        parts.append(f"lr-{lr}")
-
-    return "_".join(parts) 

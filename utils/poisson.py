@@ -91,8 +91,7 @@ def poisson_count_loss(log_hazard, counts, frame_mask):
     # counts += 0.5
     # frame_mask = frame_mask.to(torch.float64)
     
-    frame_mask_float = frame_mask.float()
-    cumulative_hazard = torch.sum(torch.relu(log_hazard) * frame_mask_float, dim=1)
+    cumulative_hazard = torch.exp(log_hazard[:, -1])
     return cumulative_hazard - torch.log(cumulative_hazard) * counts + torch.lgamma(counts + 1)
 
     # # return mean squared error instead
@@ -145,19 +144,8 @@ def infer_count(log_hazard, frame_mask):
     log_hazard (batch, seq len): outputs of the model
     frame_mask (batch, seq len): boolean mask for the frame padding
     '''
-    # 1. Convert log-hazard to hazard (the per-frame event rate)
-    hazard = torch.relu(log_hazard)
-
-    # 2. Ensure mask is float to apply it via multiplication
-    frame_mask_float = frame_mask.float()
-
-    # 3. Apply the mask to zero out hazards for padded frames
-    masked_hazard = hazard * frame_mask_float
-
-    # 4. Sum the per-frame hazards across the sequence to get the total expected count (λ)
-    predicted_counts = torch.sum(masked_hazard, dim=1)
-
-    return torch.floor(predicted_counts+0.3333-0.02/predicted_counts)
+    cumulative_hazard = torch.exp(log_hazard[:, -1])
+    return torch.floor(cumulative_hazard)
     # return torch.round(predicted_counts)
 
     # cumulative_hazard = log_hazard[:, -1] # shape: (batch,)

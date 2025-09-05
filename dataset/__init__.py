@@ -4,11 +4,13 @@ from .base_dataset_adapter import BaseDatasetAdapter
 from .librispeech import LibriSpeechAdapter
 from .audiotime import AudioTimeAdapter
 from .audioset import AudioSetAdapter
+from .synthconv import SynthConvAdapter
 
 _ADAPTERS: Dict[str, Type[BaseDatasetAdapter]] = {
     "librispeech": LibriSpeechAdapter,
     "audiotime": AudioTimeAdapter,
     "audioset": AudioSetAdapter,
+    "taudio": SynthConvAdapter,
 }
 
 
@@ -27,5 +29,7 @@ def infer_adapter_from_repository(repository: str) -> str:
         return "audiotime"
     if "audioset" in repo:
         return "audioset"
+    if "taudio" in repo:
+        return "taudio"
     raise ValueError(f"Cannot infer adapter from repository: {repository}")
 

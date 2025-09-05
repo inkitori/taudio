@@ -1,7 +1,3 @@
-# Base experiment configuration
-experiment_name: "[librispeech][count]surrogate+bidirectional_audio[poisson][start][float16]"
-description: "Surrogate loss, start key, bidirectional audio, timestamp single, count task, float16"
-
 # Model configuration
 model:
   model_id: "Qwen/Qwen2.5-Omni-3B"
@@ -23,9 +19,8 @@ training:
   
 # Dataset configuration
 dataset:
-  split: "train_clean_100"
-  repository: "gilkeyio/librispeech-alignments"
-  padding: 0
+  split: "train"
+  repository: "wjiaqi/taudio"
 
 task:
   type: "SPEAKER_COUNT"
@@ -47,4 +42,3 @@ system:
 wandb:
   entity: "taudio"
   project: "Train"
-  tags: ["surrogate", "bidirectional_audio", "start", "padding_0", "speaker_count", "float16"] 

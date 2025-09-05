@@ -8,7 +8,7 @@ import logging
 
 from tasks import create_task
 from taudio import TAudio
-from utils.config_utils import ConfigManager, flatten_config, create_wandb_run_name
+from utils.config_utils import ConfigManager, flatten_config
 from utils.utils import get_dataset_length, patch_dataset_length
 from dataset.dataset import get_ds, collate_fn
 from utils.metrics import AverageMetrics
@@ -30,6 +30,7 @@ def main():
 
     # Load configuration
     config = config_manager.load_config(args.config)
+    experiment_name = args.config
 
     # Set random seed
     system_config = config['system']
@@ -41,7 +42,7 @@ def main():
     if not args.debug:
         # Create experiment directory
         experiment_dir = config_manager.create_experiment_dir(
-            config['experiment_name'],
+            experiment_name,
             timestamp=not args.no_timestamp
         )
 
@@ -49,8 +50,7 @@ def main():
         config_manager.save_config(config, experiment_dir)
 
     logging.info(f"Output directory: {experiment_dir}")
-    logging.info(f"Starting experiment: {config['experiment_name']}")
-    logging.info(f"Description: {config['description']}")
+    logging.info(f"Starting experiment: {experiment_name}")
     logging.info(f"Config: {config}")
 
     # Device setup
@@ -59,7 +59,7 @@ def main():
 
     if not args.debug:
         # Initialize wandb
-        wandb_run_name = create_wandb_run_name(config)
+        wandb_run_name = experiment_name
         flattened_config = flatten_config(config)
 
         run = wandb.init(
@@ -67,7 +67,6 @@ def main():
             project=config['wandb']['project'],
             name=wandb_run_name,
             config=flattened_config,
-            tags=config['wandb']['tags'],
         )
 
     # Create model

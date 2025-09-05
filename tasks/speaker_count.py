@@ -180,7 +180,6 @@ class SpeakerCountTask(BaseTask):
             if model.poisson_loss:
                 aux_pred = infer_count(logits, torch.ones_like(logits)).item()
             else:
-                # Calculate how many frames have logits > 0.5
                 probs = torch.sigmoid(logits)
                 aux_pred = torch.round(probs.sum()).item()
 

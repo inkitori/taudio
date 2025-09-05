@@ -86,7 +86,7 @@ def main():
         project="Eval",
         name=f"{experiment_dir.name}[{args.split}][epoch_{args.epoch}][{args.min_time}-{args.max_time}][bound_{args.error_bound}]",
         config={
-            "experiment_name": config['experiment_name'],
+            "experiment_name": experiment_dir.name,
             "checkpoint_path": str(checkpoint_path),
             "split": args.split,
             "aux_output": args.aux_output,
