@@ -13,7 +13,7 @@ training:
   epochs: 1
   batch_size: 1
   grad_accumulation_steps: 8
-  learning_rate: 1.0e-6
+  learning_rate: 3.0e-6
   eta_min_scale: 0.1
   optim_8bit: false
   
@@ -22,7 +22,6 @@ dataset:
   split: "train"
   repository: "wjiaqi/taudio"
   padding: 0
-  take_first: 8
 
 task:
   type: "SPEAKER_COUNT"
