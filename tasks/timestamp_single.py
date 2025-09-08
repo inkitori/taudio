@@ -24,7 +24,7 @@ class SingleTimestampTask(BaseTask):
         self.max_time = max_time
         self.min_time = min_time
 
-    def _choose_event(self, *, events: Iterable[Dict[str, Any]], ds_adapter: BaseDatasetAdapter, apply_fallback: bool = True) -> Dict[str, Any]:
+    def _choose_event(self, *, events: Iterable[Dict[str, Any]], ds_adapter: BaseDatasetAdapter, apply_fallback: bool) -> Dict[str, Any]:
         seen_names = set()
         candidate_events: list[Dict[str, Any]] = []
         unknown = set(ds_adapter.unknown_events())
@@ -263,8 +263,8 @@ class SingleTimestampTask(BaseTask):
                 aux_pred_top_idx = infer_timestamps(
                     1, logits.cpu().float().numpy())
             else:
-                _, aux_pred_top_idx = torch.max(logits, dim=0)
-                # aux_pred_top_idx = aux_pred_top_idx.float() + 0.5 # because we floor timestamps to the frame, we want to have full coverage over the frame
+                aux_pred_top_idx = torch.argmax(logits, dim=0).item()
+                aux_pred_top_idx = aux_pred_top_idx + 0.5 # because we floor timestamps to the frame, we want to have full coverage over the frame
         aux_pred = float(aux_pred_top_idx) / model.adapter.seconds_to_embedding
         aux_pred = better_round(aux_pred * 100.0) / 100.0
 
@@ -299,7 +299,7 @@ class SingleTimestampTask(BaseTask):
 
             loss = criterion(logits, labels)
             pred_timestamp = torch.argmax(logits).item() 
-            pred_timestamp = pred_timestamp.float() + 0.5 # see evaluate_auxiliary_outputs for why we do this
+            pred_timestamp = pred_timestamp + 0.5 # because we floor timestamps to the frame, we want to have full coverage over the frame
 
 
         pred_timestamp = float(pred_timestamp) / adapter.seconds_to_embedding

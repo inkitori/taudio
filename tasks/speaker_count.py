@@ -182,7 +182,7 @@ class SpeakerCountTask(BaseTask):
             else:
                 # probs = torch.sigmoid(logits)
                 # aux_pred = torch.round(probs.sum()).item()
-                aux_pred = torch.round(5 * torch.sigmoid(logits[:, -1])).item()
+                aux_pred = torch.round(torch.sigmoid(logits[:, -1])).item()
 
         logging.info(f"Auxiliary prediction: {aux_pred}, GT: {speaker_count}")
 
@@ -215,12 +215,12 @@ class SpeakerCountTask(BaseTask):
         else:
             logging.info("Bernoulli loss enabled")
 
-            # probs = torch.sigmoid(logits)
-            # raw_count = probs.sum()
+            probs = torch.sigmoid(logits)
+            raw_count = probs.sum()
             raw_count = torch.sigmoid(logits[-1])
-            pred_count = torch.round(5 * raw_count).item()
+            pred_count = torch.round(raw_count).item()
 
-            loss = torch.abs(raw_count - labels.sum() / 5)
+            loss = torch.abs(raw_count - labels.sum())
 
             logging.info(f"Labels Ground Truth: {gt_count}")
             logging.info(f"Predicted Count: {pred_count}")

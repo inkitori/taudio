@@ -8,17 +8,18 @@ import logging
 
 from tasks import create_task
 from taudio import TAudio
-from utils.config_utils import ConfigManager, flatten_config
+from utils.config_utils import ConfigManager, flatten_config, infer_wandb_project_from_config
 from utils.utils import get_dataset_length, patch_dataset_length
 from dataset.dataset import get_ds, collate_fn
 from utils.metrics import AverageMetrics
+from dataset import infer_adapter_from_repository
 
 def main():
     logging.getLogger().setLevel(logging.INFO)
 
     parser = argparse.ArgumentParser(description="Train TAudio model.")
     parser.add_argument('--config', type=str, required=True,
-                        help='Name of the config file (without .yaml extension)')
+                        help='Path to the config file')
     parser.add_argument('--no-timestamp', action='store_true',
                         help='Don\'t add timestamp to output directory name')
     parser.add_argument('--debug', action='store_true',
@@ -29,8 +30,8 @@ def main():
     config_manager = ConfigManager()
 
     # Load configuration
-    config = config_manager.load_config(args.config)
-    experiment_name = args.config
+    config = config_manager.load_config(f"{args.config}")
+    experiment_name = args.config.split("/")[-1].split(".")[0] # Remove the .yaml extension
 
     # Set random seed
     system_config = config['system']
@@ -57,6 +58,12 @@ def main():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     logging.info(f"Using device: {device}")
 
+    # Create model
+    model_config = config['model']
+    loss_config = config['loss']
+    dataset_config = config['dataset']
+    task_config = config['task']
+
     if not args.debug:
         # Initialize wandb
         wandb_run_name = experiment_name
@@ -64,16 +71,11 @@ def main():
 
         run = wandb.init(
             entity=config['wandb']['entity'],
-            project=config['wandb']['project'],
+            project=infer_wandb_project_from_config(config, "Train"),
             name=wandb_run_name,
             config=flattened_config,
         )
 
-    # Create model
-    model_config = config['model']
-    loss_config = config['loss']
-    dataset_config = config['dataset']
-    task_config = config['task']
 
     task = create_task(task_type=task_config['type'], **task_config.get('kwargs', {}))
 

@@ -62,6 +62,29 @@ def poisson_count_loss(log_hazard, counts, frame_mask):
     counts (batch, ): boolean mask for when the events occurred, 1 if the event occurred in that frame, 0 otherwise
     frame_mask (batch, seq len): boolean mask for the frame padding
     '''
+    # To use logsumexp with a mask, we can set the masked-out values
+    # of log_hazard to a very large negative number (-inf).
+    # This ensures their exp() value is 0 and they don't contribute to the sum.
+    # Note: .bool() is important if frame_mask is 0/1 floats.
+    masked_log_hazard = log_hazard.masked_fill(~frame_mask.bool(), -torch.inf)
+
+    # 1. Calculate the log of the cumulative hazard directly and stably.
+    log_cumulative_hazard = torch.logsumexp(masked_log_hazard, dim=1)
+
+    # 2. We still need the cumulative hazard for the first term of the loss.
+    # We can get this by exponentiating the stable log_cumulative_hazard.
+    # This is safe because logsumexp has already handled potential overflows.
+    cumulative_hazard = torch.exp(log_cumulative_hazard)
+
+    # The Poisson Negative Log-Likelihood is:  λ - k*log(λ) + log(k!)
+    # where λ is cumulative_hazard and k is counts.
+    # We use our stably computed terms here.
+    loss = cumulative_hazard - counts * log_cumulative_hazard + torch.lgamma(counts + 1)
+
+    return loss.mean() # Often, we take the mean over the batch.
+
+	# cumulative_hazard = torch.sum(torch.exp(log_hazard) * frame_mask, dim=1)
+	# return cumulative_hazard - (log_hazard * counts).sum(dim=1)
 
     # # Ensure mask is float for multiplication
     # frame_mask_float = frame_mask.float()
@@ -91,8 +114,8 @@ def poisson_count_loss(log_hazard, counts, frame_mask):
     # counts += 0.5
     # frame_mask = frame_mask.to(torch.float64)
     
-    cumulative_hazard = torch.exp(log_hazard[:, -1])
-    return cumulative_hazard - torch.log(cumulative_hazard) * counts + torch.lgamma(counts + 1)
+    # cumulative_hazard = torch.exp(log_hazard[:, -1])
+    # return cumulative_hazard - torch.log(cumulative_hazard) * counts + torch.lgamma(counts + 1)
 
     # # return mean squared error instead
     # return torch.mean((counts - torch.sum(log_hazard * frame_mask, dim=1)) ** 2)
@@ -144,8 +167,24 @@ def infer_count(log_hazard, frame_mask):
     log_hazard (batch, seq len): outputs of the model
     frame_mask (batch, seq len): boolean mask for the frame padding
     '''
-    cumulative_hazard = torch.exp(log_hazard[:, -1])
-    return torch.floor(cumulative_hazard)
+    # Ensure inputs have the same shape
+    if not (log_hazard.shape == frame_mask.shape):
+        raise ValueError("Input tensors log_hazard and frame_mask must have the same shape.")
+
+    # 1. Convert log_hazard to hazard (which is the expected count per frame)
+    hazard = torch.exp(log_hazard)
+
+    # 2. Apply the mask to zero out contributions from padded frames
+    masked_hazard = hazard * frame_mask
+
+    # 3. Sum the expected counts over the sequence length dimension (dim=1)
+    # This gives the total expected count for each sequence in the batch.
+    predicted_total_counts = torch.floor(torch.sum(masked_hazard, dim=1))
+
+    return predicted_total_counts
+
+    # cumulative_hazard = torch.exp(log_hazard[:, -1])
+    # return torch.floor(cumulative_hazard)
     # return torch.round(predicted_counts)
 
     # cumulative_hazard = log_hazard[:, -1] # shape: (batch,)

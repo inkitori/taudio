@@ -9,7 +9,7 @@ from taudio import TAudio
 import wandb
 import argparse
 from pathlib import Path
-from utils.config_utils import ConfigManager
+from utils.config_utils import ConfigManager, infer_wandb_project_from_config
 import logging
 from tasks import create_task
 from utils.metrics import AverageMetrics
@@ -83,7 +83,7 @@ def main():
     # Initialize wandb
     run = wandb.init(
         entity=config['wandb']['entity'],
-        project="Eval",
+        project=infer_wandb_project_from_config(config, "Eval"),
         name=f"{experiment_dir.name}[{args.split}][epoch_{args.epoch}][{args.min_time}-{args.max_time}][bound_{args.error_bound}]",
         config={
             "experiment_name": experiment_dir.name,

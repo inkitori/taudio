@@ -1,7 +1,3 @@
-# Base experiment configuration
-experiment_name: "[librispeech]token+bidirectional_audio[start]"
-description: "Token loss, start key, bidirectional audio, timestamp single"
-
 # Model configuration
 model:
   model_id: "Qwen/Qwen2.5-Omni-3B"
@@ -48,5 +44,3 @@ system:
 # Wandb configuration
 wandb:
   entity: "taudio"
-  project: "Train"
-  tags: ["token", "bidirectional_audio", "start", "padding_0", "timestamp_single"] 

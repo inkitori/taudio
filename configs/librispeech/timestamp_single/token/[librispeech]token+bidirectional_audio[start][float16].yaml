@@ -1,7 +1,3 @@
-# Base experiment configuration
-experiment_name: "[librispeech]surrogate+bidirectional_audio[poisson][start]"
-description: "Surrogate loss, start key, bidirectional audio, timestamp single"
-
 # Model configuration
 model:
   model_id: "Qwen/Qwen2.5-Omni-3B"
@@ -9,8 +5,8 @@ model:
   freeze_text_model: false
   audio_layer: -1
   bidirectional_audio: true
-  linear_bias: -5
-  dtype: "auto"
+  linear_bias: 0
+  dtype: "float16"
 
 # Training configuration
 training:
@@ -34,11 +30,11 @@ task:
 
 # Loss configuration
 loss:
-  token_loss: false
-  surrogate_loss: true
+  token_loss: true
+  surrogate_loss: false
   surrogate_loss_weight: 1.0
   class_weighting: false
-  poisson_loss: true
+  poisson_loss: false
 
 # System configuration
 system:
@@ -48,5 +44,3 @@ system:
 # Wandb configuration
 wandb:
   entity: "taudio"
-  project: "Train"
-  tags: ["surrogate", "bidirectional_audio", "start", "padding_0", "timestamp_single"] 

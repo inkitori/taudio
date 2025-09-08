@@ -8,6 +8,7 @@ import re
 from typing import Dict, Any, Optional
 from pathlib import Path
 import datetime
+from dataset import infer_adapter_from_repository
 
 
 class ConfigManager:
@@ -21,10 +22,9 @@ class ConfigManager:
         self.configs_dir.mkdir(exist_ok=True)
         self.outputs_dir.mkdir(exist_ok=True)
     
-    def load_config(self, config_name: str) -> Dict[str, Any]:
+    def load_config(self, config_path: str) -> Dict[str, Any]:
         """Load a configuration file."""
-        config_path = self.configs_dir / f"{config_name}.yaml"
-        
+        config_path = Path(config_path)
         if not config_path.exists():
             raise FileNotFoundError(f"Config file not found: {config_path}")
         
@@ -134,3 +134,7 @@ def flatten_config(config: Dict[str, Any], prefix: str = "") -> Dict[str, Any]:
             flattened[new_key] = value
     
     return flattened
+
+def infer_wandb_project_from_config(config: Dict[str, Any], mode: str) -> str:
+    """Infer the wandb project from the configuration."""
+    return f"[{infer_adapter_from_repository(config['dataset']['repository'])}][{config['task']['type']}][{config['model']['model_id'].replace('/', '_')}]{mode}"
