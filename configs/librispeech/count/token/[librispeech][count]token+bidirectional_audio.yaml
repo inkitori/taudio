@@ -6,7 +6,7 @@ model:
   audio_layer: -1
   bidirectional_audio: true
   linear_bias: 0
-  dtype: "float16"
+  dtype: "auto"
 
 # Training configuration
 training:
@@ -28,9 +28,9 @@ task:
 
 # Loss configuration
 loss:
-  token_loss: false
-  surrogate_loss: true
-  surrogate_loss_weight: 1.0
+  token_loss: true
+  surrogate_loss: false
+  surrogate_loss_weight: 0.0
   class_weighting: false
   poisson_loss: false
 
@@ -42,4 +42,3 @@ system:
 # Wandb configuration
 wandb:
   entity: "taudio"
-  project: "Train"

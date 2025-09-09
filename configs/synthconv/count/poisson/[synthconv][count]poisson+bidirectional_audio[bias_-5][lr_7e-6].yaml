@@ -1,7 +1,3 @@
-# Base experiment configuration
-experiment_name: "[librispeech]surrogate+bidirectional_audio[poisson][start][<20]"
-description: "Surrogate loss, start key, bidirectional audio, max time 20 seconds, timestamp single"
-
 # Model configuration
 model:
   model_id: "Qwen/Qwen2.5-Omni-3B"
@@ -17,22 +13,18 @@ training:
   epochs: 1
   batch_size: 1
   grad_accumulation_steps: 8
-  learning_rate: 5.0e-6
+  learning_rate: 7.0e-6
   eta_min_scale: 0.1
   optim_8bit: false
   
 # Dataset configuration
 dataset:
-  split: "train_clean_100"
-  repository: "gilkeyio/librispeech-alignments"
+  split: "train"
+  repository: "wjiaqi/taudio"
   padding: 0
 
 task:
-  type: "SINGLE_WORD_TIMESTAMP"
-  kwargs:
-    key: "start"
-    min_time: 0
-    max_time: 20
+  type: "SPEAKER_COUNT"
 
 # Loss configuration
 loss:
@@ -50,5 +42,3 @@ system:
 # Wandb configuration
 wandb:
   entity: "taudio"
-  project: "Train"
-  tags: ["surrogate", "class_weighting", "bidirectional_audio", "start", "padding_0", "<20", "timestamp_single"] 

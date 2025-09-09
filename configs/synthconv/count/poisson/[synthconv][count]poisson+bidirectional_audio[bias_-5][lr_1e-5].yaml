@@ -5,22 +5,22 @@ model:
   freeze_text_model: false
   audio_layer: -1
   bidirectional_audio: true
-  linear_bias: 0
-  dtype: "float16"
+  linear_bias: -5
+  dtype: "auto"
 
 # Training configuration
 training:
   epochs: 1
   batch_size: 1
   grad_accumulation_steps: 8
-  learning_rate: 5.0e-6
+  learning_rate: 1.0e-5
   eta_min_scale: 0.1
   optim_8bit: false
   
 # Dataset configuration
 dataset:
-  split: "train_clean_100"
-  repository: "gilkeyio/librispeech-alignments"
+  split: "train"
+  repository: "wjiaqi/taudio"
   padding: 0
 
 task:
@@ -32,7 +32,7 @@ loss:
   surrogate_loss: true
   surrogate_loss_weight: 1.0
   class_weighting: false
-  poisson_loss: false
+  poisson_loss: true
 
 # System configuration
 system:
@@ -42,4 +42,3 @@ system:
 # Wandb configuration
 wandb:
   entity: "taudio"
-  project: "Train"
