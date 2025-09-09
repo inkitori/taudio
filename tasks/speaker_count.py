@@ -180,9 +180,9 @@ class SpeakerCountTask(BaseTask):
             if model.poisson_loss:
                 aux_pred = infer_count(logits, torch.ones_like(logits)).item()
             else:
-                # probs = torch.sigmoid(logits)
-                # aux_pred = torch.round(probs.sum()).item()
-                aux_pred = torch.round(torch.sigmoid(logits[:, -1])).item()
+                probs = torch.sigmoid(logits)
+                logging.info(f"Sigmoid probs: {probs}")
+                aux_pred = torch.round(probs.sum()).item()
 
         logging.info(f"Auxiliary prediction: {aux_pred}, GT: {speaker_count}")
 
@@ -216,8 +216,8 @@ class SpeakerCountTask(BaseTask):
             logging.info("Bernoulli loss enabled")
 
             probs = torch.sigmoid(logits)
+            logging.info(f"Sigmoid probs: {probs}")
             raw_count = probs.sum()
-            raw_count = torch.sigmoid(logits[-1])
             pred_count = torch.round(raw_count).item()
 
             loss = torch.abs(raw_count - labels.sum())
