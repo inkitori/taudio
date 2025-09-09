@@ -29,13 +29,15 @@ class SingleTimestampTask(BaseTask):
         candidate_events: list[Dict[str, Any]] = []
         unknown = set(ds_adapter.unknown_events())
 
+		logging.info(f"Min time: {self.min_time}, Max time: {self.max_time}, Key: {self.key}, Apply fallback: {apply_fallback}")
+
         for event in events:
             name = ds_adapter.event_name(event)
             if name in seen_names:
                 continue
 
             # timing filter
-            t_seconds = float(event.get(self.key, 0.0))
+            t_seconds = float(ds_adapter.get_target_seconds(event, self.key))
             if self.min_time is not None and t_seconds < self.min_time:
                 seen_names.add(name)
                 continue
@@ -51,6 +53,7 @@ class SingleTimestampTask(BaseTask):
             candidate_events.append(event)
             seen_names.add(name)
 
+		logging.info(f"Candidate events: {candidate_events}")
         if len(candidate_events) > 0:
             return random.choice(candidate_events)
 
