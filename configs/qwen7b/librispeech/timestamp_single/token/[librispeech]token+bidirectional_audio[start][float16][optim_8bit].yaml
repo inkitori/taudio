@@ -6,7 +6,7 @@ model:
   audio_layer: -1
   bidirectional_audio: true
   linear_bias: 0
-  dtype: "auto"
+  dtype: "float16"
 
 # Training configuration
 training:
@@ -15,7 +15,7 @@ training:
   grad_accumulation_steps: 8
   learning_rate: 5.0e-6
   eta_min_scale: 0.1
-  optim_8bit: false
+  optim_8bit: true
   
 # Dataset configuration
 dataset:

@@ -1,6 +1,6 @@
 # Model configuration
 model:
-  model_id: "Qwen/Qwen2.5-Omni-3B"
+  model_id: "Qwen/Qwen2.5-Omni-7B"
   load_in_8bit: false
   freeze_text_model: false
   audio_layer: -1
