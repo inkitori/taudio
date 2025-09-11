@@ -44,9 +44,10 @@ def collate_fn(batch: list) -> Dict[str, torch.Tensor]:
         items = [item[key] for item in batch]
         if key == 'input_ids' or key == 'attention_mask':
             collated[key] = torch.nn.utils.rnn.pad_sequence(
-                items, batch_first=True, padding_value=0, padding_side='left')
+                items, batch_first=True, padding_value=0, padding_side='right')
         elif key == 'labels':
-            collated[key] = torch.cat(items, dim=0)
+            collated[key] = torch.nn.utils.rnn.pad_sequence(
+                items, batch_first=True, padding_value=0, padding_side='right')
         elif key == 'label_ids':
             collated[key] = torch.nn.utils.rnn.pad_sequence(
                 items, batch_first=True, padding_value=-100, padding_side='right')
