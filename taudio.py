@@ -30,6 +30,7 @@ class TAudio(nn.Module):
         poisson_loss: bool,
         linear_bias: Optional[float],
         dtype: str,
+        gradient_checkpointing: bool = False,
     ) -> None:
         super(TAudio, self).__init__()
 
@@ -60,6 +61,10 @@ class TAudio(nn.Module):
         self.poisson_loss = poisson_loss
         self.task = task
 
+        if gradient_checkpointing:
+            self.adapter.enable_gradient_checkpointing()
+            logging.info("Enabled gradient checkpointing")
+
     def forward(
         self,
         input_ids: torch.Tensor,  # (batch_size, seq_len)
@@ -71,6 +76,9 @@ class TAudio(nn.Module):
         labels: torch.Tensor,  # (num_audio_tokens)
         label_ids: torch.Tensor  # (batch_size, seq_len)
     ) -> torch.Tensor:
+        if labels.ndim == 2:
+            labels = labels.squeeze(0)
+
         outputs = self.adapter(
             input_ids=input_ids,
             attention_mask=attention_mask,

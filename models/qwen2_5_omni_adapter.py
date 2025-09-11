@@ -6,7 +6,7 @@ import torch
 import torch.nn as nn
 from transformers import Qwen2_5OmniProcessor, Qwen2_5OmniThinkerForConditionalGeneration
 from utils.utils import get_audio_bounds
-from utils.qwen2_5_omni_constants import ASSISTANT_ID, BEGIN_AUDIO_ID, END_AUDIO_ID, SECONDS_TO_EMBEDDING
+from utils import qwen_3b_constants, qwen_7b_constants
 from contextlib import contextmanager
 import types
 import logging
@@ -30,6 +30,19 @@ class Qwen2_5OmniAdapter(BaseModelAdapter):
         self._processor = Qwen2_5OmniProcessor.from_pretrained(model_id)
         self.bidirectional_audio = bidirectional_audio
 
+        if model_id.lower() == "qwen/qwen2.5-omni-3b":
+            self.constants = qwen_3b_constants
+        elif model_id.lower() == "qwen/qwen2.5-omni-7b":
+            self.constants = qwen_7b_constants
+        else:
+            raise ValueError(f"Unsupported model: {model_id}")
+
+    def enable_gradient_checkpointing(self):
+        self.base_model.gradient_checkpointing_enable()
+        self._audio_tower.gradient_checkpointing_enable()
+        self._text_model.gradient_checkpointing_enable()
+        logging.info("Enabled gradient checkpointing")
+
     # Properties required by TAudio
     @property
     def hidden_dim(self) -> int:
@@ -49,7 +62,7 @@ class Qwen2_5OmniAdapter(BaseModelAdapter):
 
     @property
     def assistant_id(self) -> int:
-        return ASSISTANT_ID
+        return self.constants.ASSISTANT_ID
 
     @property
     def text_model(self) -> nn.Module:
@@ -79,7 +92,7 @@ class Qwen2_5OmniAdapter(BaseModelAdapter):
 
     @property
     def seconds_to_embedding(self) -> int:
-        return SECONDS_TO_EMBEDDING
+        return self.constants.SECONDS_TO_EMBEDDING
 
     # --- Bidirectional audio mask patching (Qwen-specific) ---
     def _patch_causal_mask_zero_region(self, start: int, end: int):
@@ -132,7 +145,7 @@ class Qwen2_5OmniAdapter(BaseModelAdapter):
     @contextmanager
     def bidirectional_audio_context(self, input_ids: torch.Tensor):
         start_audio_index, end_audio_index = get_audio_bounds(
-            input_ids, BEGIN_AUDIO_ID, END_AUDIO_ID)
+            input_ids, self.constants.BEGIN_AUDIO_ID, self.constants.END_AUDIO_ID)
         self._patch_causal_mask_zero_region(start_audio_index, end_audio_index)
         logging.info(f"Enabled bidirectional audio processing for region [{
                      start_audio_index}:{end_audio_index}]")
