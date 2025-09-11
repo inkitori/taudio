@@ -1,0 +1,44 @@
+# Model configuration
+model:
+  model_id: "Qwen/Qwen2.5-Omni-3B"
+  load_in_8bit: false
+  freeze_text_model: false
+  audio_layer: -1
+  bidirectional_audio: true
+  linear_bias: -3
+  dtype: "float16"
+
+# Training configuration
+training:
+  epochs: 1
+  batch_size: 1
+  grad_accumulation_steps: 8
+  learning_rate: 5.0e-6
+  eta_min_scale: 0.1
+  optim_8bit: false
+  
+# Dataset configuration
+dataset:
+  split: "train_clean_100"
+  repository: "gilkeyio/librispeech-alignments"
+  padding: 0
+
+task:
+  type: "SPEAKER_COUNT"
+
+# Loss configuration
+loss:
+  token_loss: false
+  surrogate_loss: true
+  surrogate_loss_weight: 1.0
+  class_weighting: false
+  poisson_loss: true
+
+# System configuration
+system:
+  dataloader_num_workers: 1
+  seed: 80
+
+# Wandb configuration
+wandb:
+  entity: "taudio"
