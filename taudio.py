@@ -79,14 +79,23 @@ class TAudio(nn.Module):
         if labels.ndim == 2:
             labels = labels.squeeze(0)
 
-        outputs = self.adapter(
-            input_ids=input_ids,
-            attention_mask=attention_mask,
-            input_features=input_features,
-            feature_attention_mask=feature_attention_mask,
-            output_hidden_states=True,
-            labels=label_ids,
-        )
+        if self.token_loss:
+            outputs = self.adapter(
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                input_features=input_features,
+                feature_attention_mask=feature_attention_mask,
+                output_hidden_states=True,
+                labels=label_ids,
+            )
+        else:
+            outputs = self.adapter(
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                input_features=input_features,
+                feature_attention_mask=feature_attention_mask,
+                output_hidden_states=True,
+            )
 
         # (batch_size, seq_len, hidden_dim)
         hidden_states = outputs.hidden_states[self.audio_layer]
