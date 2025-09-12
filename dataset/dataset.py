@@ -1,16 +1,10 @@
 import torch
 from datasets import Dataset
-import random
 from typing import Any, Dict, Optional
-from nltk.corpus import stopwords
-import logging
 
 from dataset import create_adapter, infer_adapter_from_repository
 from models.base_model_adapter import BaseModelAdapter
 from tasks.base import BaseTask
-
-STOPS = set(stopwords.words('english'))
-
 
 def get_ds(
     model_adapter: BaseModelAdapter,
