@@ -9,7 +9,7 @@ from taudio import TAudio
 import wandb
 import argparse
 from pathlib import Path
-from utils.config_utils import ConfigManager, infer_wandb_project_from_config
+from utils.config_utils import ConfigManager, relative_path_to_experiment_name, relative_path_to_project_name
 import logging
 from tasks import create_task
 from utils.metrics import AverageMetrics
@@ -36,24 +36,16 @@ def main():
     config_manager = ConfigManager()
 
     # Find experiment directory
-    experiment_dir = config_manager.get_experiment_path(args.experiment)
-    if experiment_dir is None:
-        # Try to find by base name
-        experiment_dir = config_manager.find_latest_experiment(args.experiment)
-        if experiment_dir is None:
-            print(f"Experiment not found: {args.experiment}")
-            print("Available experiments:")
-            for exp in config_manager.list_experiments():
-                print(f"  - {exp}")
-            return
+    experiment_dir = args.experiment
+    experiment_name = relative_path_to_experiment_name(experiment_dir, eval=True)
+    project_name = relative_path_to_project_name(experiment_dir, eval=True)
 
-    print(f"Evaluating experiment: {experiment_dir}")
+    logging.info(f"Evaluating experiment: {experiment_dir}")
 
     # Load configuration
     config_path = experiment_dir / "config.yaml"
     if not config_path.exists():
-        print(f"Config file not found: {config_path}")
-        return
+        raise ValueError(f"Config file not found: {config_path}")
 
     with open(config_path, 'r') as f:
         import yaml
@@ -66,10 +58,10 @@ def main():
     checkpoint_path = config_manager.get_model_checkpoint(
         experiment_dir, args.epoch)
     if checkpoint_path is None:
-        print(f"No checkpoint found in {experiment_dir}")
+        raise ValueError(f"No checkpoint found in {experiment_dir}")
         return
 
-    print(f"Using checkpoint: {checkpoint_path}")
+    logging.info(f"Using checkpoint: {checkpoint_path}")
 
     # Set random seed
     SEED = config['system']['seed']
@@ -78,15 +70,15 @@ def main():
 
     # Device setup
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    print(f"Using device: {device}")
+    logging.info(f"Using device: {device}")
 
     # Initialize wandb
     run = wandb.init(
         entity=config['wandb']['entity'],
-        project=infer_wandb_project_from_config(config, "Eval"),
-        name=f"{experiment_dir.name}[{args.split}][epoch_{args.epoch}][{args.min_time}-{args.max_time}][bound_{args.error_bound}]",
+        project=project_name,
+        name=f"{experiment_name}[{args.split}][epoch_{args.epoch if args.epoch is not None else 'latest'}][{args.min_time}-{args.max_time}][bound_{args.error_bound}]",
         config={
-            "experiment_name": experiment_dir.name,
+            "experiment_name": experiment_name,
             "checkpoint_path": str(checkpoint_path),
             "split": args.split,
             "aux_output": args.aux_output,
@@ -131,8 +123,7 @@ def main():
     # Metrics aggregator (running averages)
     metrics = AverageMetrics()
 
-    print(f"Evaluating on {args.split} split")
-
+    logging.info(f"Evaluating on {args.split} split")
 
     for example in base_ds:
         # Token-based evaluation

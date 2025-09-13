@@ -94,21 +94,41 @@ def flatten_config(config: Dict[str, Any], prefix: str = "") -> Dict[str, Any]:
     return flattened
 
 
-def relative_path_to_experiment_name(config_path: str) -> str:
+def relative_path_to_experiment_name(config_path: str, eval: bool) -> str:
     """
     Convert a relative path to an experiment name.
-    should be prepended with "configs/"
-    example: configs/qwen3b/librispeech/timestamps/bernoulli/bidirectional_audio.yaml -> bidirectional_audio
+    If eval is True only pass the experiment directory
+    
+    Train example:
+    configs/qwen3b/librispeech/timestamps/bernoulli/bidirectional_audio.yaml -> bidirectional_audio
+
+    Eval example:
+    outputs/qwen7b/librispeech/timestamp_single/bernoulli+bidirectional_audio+class_weighting[start][float16]/20250913_175143 -> 'bernoulli+bidirectional_audio+class_weighting[start][float16]_20250913_175143'
     """
     config_path_parts = config_path.split("/")
-    filename = Path(config_path_parts[-1]).stem  # Remove file extension using pathlib
-    
-    return filename
+    if eval:
+        return config_path_parts[-2] + '_' + config_path_parts[-1] # returns the experiment name + timestamp
+    else:
+        filename = Path(config_path_parts[-1]).stem  # Remove file extension using pathlib
+        
+        return filename
 
-def relative_path_to_project_name(config_path: str, mode: str) -> str:
-    """Convert a relative path to a project name."""
+def relative_path_to_project_name(config_path: str, eval: bool) -> str:
+    """
+    Convert a relative path to a project name.
+    If eval is True only pass the experiment directory
+
+	Train example:
+    configs/qwen3b/librispeech/timestamps/bernoulli/bidirectional_audio.yaml -> '[qwen3b][librispeech][timestamps][Train]'
+
+    Eval example:
+    outputs/qwen7b/librispeech/timestamp_single/bernoulli+bidirectional_audio+class_weighting[start][float16]/20250913_175143 -> '[qwen7b][librispeech][timestamp_single][Eval]'
+    """
     config_path_parts = config_path.split("/")
-    directories = config_path_parts[1:-1]  # All parts except filename and configs/
-    
+    if eval:
+        directories = config_path_parts[1:-2] # Get rid of timestamp and experiment name
+    else:
+        directories = config_path_parts[1:-1]  # All parts except filename and configs/
+
     # Format as [dir1][dir2][dir3]
-    return "".join(f"[{dir}]" for dir in directories) + f"[{mode}]"
+    return "".join(f"[{dir}]" for dir in directories) + f"[{"Eval" if eval else "Train"}]"

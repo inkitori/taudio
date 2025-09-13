@@ -45,8 +45,8 @@ def main():
     torch.manual_seed(system_config['seed'])
 
     experiment_dir = None
-    experiment_name = relative_path_to_experiment_name(args.config)
-    project_name = relative_path_to_project_name(args.config, 'Train')
+    experiment_name = relative_path_to_experiment_name(args.config, eval=False)
+    project_name = relative_path_to_project_name(args.config, eval=False)
 
     if not args.debug:
         # Create experiment directory
