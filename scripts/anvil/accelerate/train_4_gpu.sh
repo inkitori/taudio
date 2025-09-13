@@ -6,7 +6,7 @@
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:4
 #SBATCH --time=1:59:00
-#SBATCH --job-name=accelerate_train_and_eval_4_gpu
+#SBATCH --job-name=accelerate_train_4_gpu
 #SBATCH --output=/anvil/scratch/x-pkeung/taudio/scripts/logs/%x/%j.out
 #SBATCH --error=/anvil/scratch/x-pkeung/taudio/scripts/logs/%x/%j.err
 
