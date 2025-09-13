@@ -78,6 +78,10 @@ class TAudio(nn.Module):
     ) -> torch.Tensor:
         if labels.ndim == 2:
             labels = labels.squeeze(0)
+        
+        # Remove -100 padding values from labels
+        labels = labels[labels != -100]
+        
 
         if self.token_loss:
             outputs = self.adapter(
@@ -101,12 +105,17 @@ class TAudio(nn.Module):
         hidden_states = outputs.hidden_states[self.audio_layer]
 
         # (num_audio_tokens, hidden_dim)
-        audio_hidden_states = hidden_states[input_ids ==
-                                            self.adapter.audio_id]
+        # Extract audio hidden states with cleanup of intermediate mask
+        audio_mask = (input_ids == self.adapter.audio_id)
+        audio_hidden_states = hidden_states[audio_mask]
+        del audio_mask
 
         # (num_audio_tokens across batch)
         logits = self.linear(audio_hidden_states).squeeze()
-        labels = labels.to(logits.dtype)
+        
+        # Convert labels to proper dtype with cleanup
+        if labels.dtype != logits.dtype:
+            labels = labels.to(logits.dtype)
 
         if self.surrogate_loss:
             surrogate_loss, auxiliary_deviation = self.task.calculate_loss(
