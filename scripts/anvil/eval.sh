@@ -2,7 +2,7 @@
 #SBATCH --partition=ai
 #SBATCH --account=nairr250124-ai
 #SBATCH --mem-per-gpu=64G
-#SBATCH --cpus-per-gpu=4
+#SBATCH --cpus-per-gpu=1
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:1
 #SBATCH --time=0:30:00
