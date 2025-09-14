@@ -81,7 +81,6 @@ class TAudio(nn.Module):
         
         # Remove -100 padding values from labels
         labels = labels[labels != -100]
-        
 
         if self.token_loss:
             outputs = self.adapter(
