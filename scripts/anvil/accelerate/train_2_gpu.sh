@@ -14,4 +14,4 @@ cd /anvil/scratch/x-pkeung/taudio
 module load conda
 conda activate ./env
 
-accelerate launch --config_file $1 accelerate_train.py --config $2
+accelerate launch --config_file accelerate_configs/2_gpu_stage_2.yaml train.py --config $1
