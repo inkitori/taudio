@@ -150,7 +150,12 @@ class SingleTimestampTask(BaseTask):
         feature_attention_mask = inputs["feature_attention_mask"]
 
         # Labels aligned to <AUDIO> embeddings (40 ms per embedding for Qwen2.5 Omni)
-        labels_size = int((input_ids == model_adapter.audio_id).sum().item())
+        # Calculate labels size with explicit cleanup
+        audio_mask = (input_ids == model_adapter.audio_id)
+        labels_size_tensor = audio_mask.sum()
+        labels_size = int(labels_size_tensor.item())
+        del audio_mask, labels_size_tensor
+        
         labels = torch.zeros(labels_size, device=input_ids.device)
 
         event_idx = clamp(math.floor(
@@ -159,9 +164,13 @@ class SingleTimestampTask(BaseTask):
 
         # Mask out everything up to and including the assistant token
         label_ids = input_ids.clone()
-        assistant_idx = (input_ids == model_adapter.assistant_id).nonzero(
-            as_tuple=True)[1][0]
+        assistant_mask = (input_ids == model_adapter.assistant_id)
+        assistant_indices = assistant_mask.nonzero(as_tuple=True)[1]
+        assistant_idx = assistant_indices[0]
         label_ids[0, : assistant_idx + 1] = -100
+        
+        # Clean up intermediate tensors
+        del assistant_mask, assistant_indices
 
         return {
             "input_ids": input_ids[0],
@@ -284,25 +293,53 @@ class SingleTimestampTask(BaseTask):
         return metrics
 
     def calculate_loss(self, logits, labels, adapter: BaseModelAdapter, use_poisson_loss: bool, class_weighting: bool) -> torch.Tensor:
-        gt_timestamp = torch.argmax(labels).item()
+        # Get ground truth timestamp index - use temporary variable to avoid keeping tensor
+        gt_timestamp_tensor = torch.argmax(labels)
+        gt_timestamp = gt_timestamp_tensor.item()
+        del gt_timestamp_tensor
 
         if use_poisson_loss:
-            loss = poisson_loss(logits.unsqueeze(0), labels.unsqueeze(0), torch.ones_like(logits.unsqueeze(0))) 
-            pred_timestamp = infer_timestamps(1, logits.cpu().float().detach().numpy())
+            # Create temporary tensors for poisson loss calculation
+            logits_batch = logits.unsqueeze(0)
+            labels_batch = labels.unsqueeze(0)
+            frame_mask = torch.ones_like(logits_batch)
+            
+            loss = poisson_loss(logits_batch, labels_batch, frame_mask)
+            
+            # Clean conversion to numpy for inference - avoid chaining operations
+            logits_detached = logits.detach()
+            logits_cpu = logits_detached.cpu()
+            logits_float = logits_cpu.float()
+            logits_numpy = logits_float.numpy()
+            pred_timestamp = infer_timestamps(1, logits_numpy)
+            
+            # Clean up intermediate tensors
+            del logits_batch, labels_batch, frame_mask
+            del logits_detached, logits_cpu, logits_float
         else:
             if class_weighting:
-                num_ones = (labels == 1).sum()
-                num_zeros = (labels == 0).sum()
-                pos_weight = (
-                    num_zeros / num_ones) if num_ones > 0 else 1.0
-
-                criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
+                # Calculate class weights with explicit cleanup
+                ones_mask = (labels == 1)
+                zeros_mask = (labels == 0)
+                num_ones = ones_mask.sum()
+                num_zeros = zeros_mask.sum()
+                
+                # Get scalar values and clean up tensors
+                num_ones_val = num_ones.item()
+                num_zeros_val = num_zeros.item()
+                del ones_mask, zeros_mask, num_ones, num_zeros
+                
+                pos_weight = (num_zeros_val / num_ones_val) if num_ones_val > 0 else 1.0
+                criterion = nn.BCEWithLogitsLoss(pos_weight=torch.tensor(pos_weight, device=logits.device))
             else:
                 criterion = nn.BCEWithLogitsLoss()
 
             loss = criterion(logits, labels)
-            pred_timestamp = torch.argmax(logits).item() 
-            pred_timestamp = pred_timestamp + 0.5 # because we floor timestamps to the frame, we want to have full coverage over the frame
+            
+            # Get prediction timestamp with cleanup
+            pred_timestamp_tensor = torch.argmax(logits)
+            pred_timestamp = pred_timestamp_tensor.item() + 0.5  # because we floor timestamps to the frame, we want to have full coverage over the frame
+            del pred_timestamp_tensor
 
 
         pred_timestamp = float(pred_timestamp) / adapter.seconds_to_embedding
