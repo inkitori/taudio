@@ -4,8 +4,9 @@ from tqdm.auto import tqdm
 import bitsandbytes as bnb
 import argparse
 import logging
-import wandb
-from torch.cuda.amp import GradScaler
+from accelerate import Accelerator
+from accelerate.utils import DataLoaderConfiguration
+
 from tasks import create_task
 from taudio import TAudio
 from utils.config_utils import ConfigManager, flatten_config, relative_path_to_experiment_name, relative_path_to_project_name
@@ -15,7 +16,6 @@ from utils.metrics import AverageMetrics
 from dataset import infer_adapter_from_repository
 
 def main():
-    torch.autograd.set_detect_anomaly(True)
     logging.getLogger().setLevel(logging.INFO)
 
     parser = argparse.ArgumentParser(description="Train TAudio model.")
@@ -74,10 +74,17 @@ def main():
     }
 
     # Create model
-    device = torch.device('cuda')
-
-    model = TAudio(**taudio_config).to(device)
+    model = TAudio(**taudio_config)
     model.train()
+
+    accelerator_dataloader_config = DataLoaderConfiguration(
+        dispatch_batches=True,
+        split_batches=True,
+    )
+
+    accelerator = Accelerator(log_with="wandb", dataloader_config=accelerator_dataloader_config)
+
+    logging.info(f"Using accelerator: {accelerator}")
 
     ds = get_ds(
         model_adapter=model.adapter,
@@ -98,7 +105,7 @@ def main():
         collate_fn=collate_fn,
         batch_size=training_config['batch_size'],
         num_workers=system_config['dataloader_num_workers'],
-        pin_memory=True,
+        # pin_memory=True,
         drop_last=True
     )
 
@@ -127,32 +134,28 @@ def main():
         # Initialize wandb
         flattened_config = flatten_config(config)
 
-        run = wandb.init(
-            entity=config['wandb']['entity'],
-            project=project_name, 
-            name=experiment_name,
+        accelerator.init_trackers(
+            project_name=project_name, 
             config=flattened_config,
+            init_kwargs={"wandb": {"name": experiment_name, "entity": config['wandb']['entity']}}
         )
         
-    logging.info(f"Using device: {torch.device('cuda')}")
+    logging.info(f"Using device: {accelerator.device}")
 
-    scaler = GradScaler()
+    model, optim, dataloader, scheduler = accelerator.prepare(model, optim, dataloader, scheduler)
 
     # Training loop
     for epoch in range(training_config['epochs']):
         progress_bar = tqdm(
             dataloader, 
             desc=f"Epoch {epoch + 1}",
+            disable=(not accelerator.is_main_process)
         )
 
         metrics = AverageMetrics()
 
         for step, batch in enumerate(progress_bar):
-            batch = {k: v.to(device) for k, v in batch.items()}
-
-            with torch.autocast(device_type=device.type, dtype=torch.float16):
-                output = model(**batch)
-
+            output = model(**batch)
             logging.info(f"Done with forward pass")
 
             loss = output.loss
@@ -169,13 +172,11 @@ def main():
             logging.info(f"Done with metrics")
 
             scaled_loss = loss / training_config['grad_accumulation_steps']
-            logging.info(f"Scaled loss: {scaled_loss}")
-            scaler.scale(scaled_loss).backward()
+            accelerator.backward(scaled_loss)
             logging.info(f"Done with backward pass")
 
             if (step + 1) % training_config['grad_accumulation_steps'] == 0:
-                scaler.step(optim)
-                scaler.update()
+                optim.step()
                 logging.info(f"Done with optimizer step")
                 optim.zero_grad()
                 logging.info(f"Done with optimizer zero grad")
@@ -193,7 +194,7 @@ def main():
                     f"GPU Mem: {allocated_memory:.2f}/{reserved_memory:.2f}/{max_memory:.2f} GB (allocated/reserved/max)")
 
                 if not args.debug:
-                    run.log({
+                    accelerator.log({
                         **metrics.to_dict(),
                         "step": step + 1,
                         "epoch": epoch + 1,
@@ -208,18 +209,22 @@ def main():
         logging.info(f"Epoch {epoch + 1} completed.")
 
         # Save checkpoint
-        if ((not args.debug and system_config.get('save_checkpoints', True)) or epoch == training_config['epochs'] - 1):
+        if ((not args.debug and system_config.get('save_checkpoints', True)) or epoch == training_config['epochs'] - 1) and accelerator.is_main_process:
             checkpoint_path = experiment_dir / f"model_epoch{epoch + 1}.pt"
+            logging.info(f"Unwrapping model")
+            unwrapped_model = accelerator.unwrap_model(model)
+
             logging.info(f"Saving model to {checkpoint_path}")
-            torch.save(model.state_dict(), checkpoint_path)
+            accelerator.save(unwrapped_model.state_dict(), checkpoint_path)
 
             logging.info(f"Model saved to {checkpoint_path}")
 
+        accelerator.wait_for_everyone()
 
     # Log final experiment directory to wandb
     if not args.debug:
-        run.log({"experiment_directory": str(experiment_dir)})
-        run.finish()
+        accelerator.log({"experiment_directory": str(experiment_dir)})
+        accelerator.end_training()
 
     logging.info(f"Training completed. All outputs saved to: {experiment_dir}")
 
