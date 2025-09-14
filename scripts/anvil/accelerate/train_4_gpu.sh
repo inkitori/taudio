@@ -2,7 +2,7 @@
 #SBATCH --partition=ai
 #SBATCH --account=nairr250124-ai
 #SBATCH --mem-per-gpu=96G
-#SBATCH --cpus-per-gpu=2
+#SBATCH --cpus-per-gpu=1
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:4
 #SBATCH --time=1:59:00
@@ -14,4 +14,4 @@ cd /anvil/scratch/x-pkeung/taudio
 module load conda
 conda activate ./env
 
-accelerate launch --config_file $2 train.py --config $1 
+accelerate launch --config_file $2 accelerate_train.py --config $1 
