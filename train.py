@@ -5,7 +5,6 @@ import bitsandbytes as bnb
 import argparse
 import logging
 import wandb
-from torch.cuda.amp import GradScaler
 from tasks import create_task
 from taudio import TAudio
 from utils.config_utils import ConfigManager, flatten_config, relative_path_to_experiment_name, relative_path_to_project_name
@@ -113,7 +112,7 @@ def main():
             model.parameters(), lr=training_config['learning_rate'])
     else:
         logging.info("Using AdamW optimizer")
-        optim = torch.optim.AdamW(
+        optim = bnb.optim.AdamW(
             model.parameters(), lr=training_config['learning_rate'])
 
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
@@ -136,8 +135,6 @@ def main():
         
     logging.info(f"Using device: {torch.device('cuda')}")
 
-    scaler = GradScaler()
-
     # Training loop
     for epoch in range(training_config['epochs']):
         progress_bar = tqdm(
@@ -150,8 +147,7 @@ def main():
         for step, batch in enumerate(progress_bar):
             batch = {k: v.to(device) for k, v in batch.items()}
 
-            with torch.autocast(device_type=device.type, dtype=torch.float16):
-                output = model(**batch)
+            output = model(**batch)
 
             logging.info(f"Done with forward pass")
 
@@ -170,12 +166,11 @@ def main():
 
             scaled_loss = loss / training_config['grad_accumulation_steps']
             logging.info(f"Scaled loss: {scaled_loss}")
-            scaler.scale(scaled_loss).backward()
+            scaled_loss.backward()
             logging.info(f"Done with backward pass")
 
             if (step + 1) % training_config['grad_accumulation_steps'] == 0:
-                scaler.step(optim)
-                scaler.update()
+                optim.step()
                 logging.info(f"Done with optimizer step")
                 optim.zero_grad()
                 logging.info(f"Done with optimizer zero grad")
