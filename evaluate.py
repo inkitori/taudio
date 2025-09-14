@@ -43,6 +43,7 @@ def main():
     logging.info(f"Evaluating experiment: {experiment_dir}")
 
     # Load configuration
+    experiment_dir = Path(experiment_dir)
     config_path = experiment_dir / "config.yaml"
     if not config_path.exists():
         raise ValueError(f"Config file not found: {config_path}")
@@ -57,6 +58,7 @@ def main():
     # Get model checkpoint
     checkpoint_path = config_manager.get_model_checkpoint(
         experiment_dir, args.epoch)
+    logging.info(f"Checkpoint path: {checkpoint_path}")
     if checkpoint_path is None:
         raise ValueError(f"No checkpoint found in {experiment_dir}")
         return

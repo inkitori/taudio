@@ -208,9 +208,8 @@ def main():
 
         logging.info(f"Epoch {epoch + 1} completed.")
 
-        accelerator.wait_for_everyone()
         # Save checkpoint
-        if (not args.debug and system_config.get('save_checkpoints', True)) or epoch == training_config['epochs'] - 1:
+        if ((not args.debug and system_config.get('save_checkpoints', True)) or epoch == training_config['epochs'] - 1) and accelerator.is_main_process:
             checkpoint_path = experiment_dir / f"model_epoch{epoch + 1}.pt"
             logging.info(f"Unwrapping model")
             unwrapped_model = accelerator.unwrap_model(model)
@@ -220,10 +219,12 @@ def main():
 
             logging.info(f"Model saved to {checkpoint_path}")
 
+        accelerator.wait_for_everyone()
+
     # Log final experiment directory to wandb
     if not args.debug:
         accelerator.log({"experiment_directory": str(experiment_dir)})
-        run.finish()
+        accelerator.end_training()
 
     logging.info(f"Training completed. All outputs saved to: {experiment_dir}")
 
