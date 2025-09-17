@@ -8,7 +8,7 @@ from contextlib import nullcontext
 
 import logging
 from models import create_adapter
-from tasks.base import BaseTask
+from tasks.base_task import BaseTask
 
 Output = namedtuple(
     'Output', ['loss', 'token_loss', 'surrogate_loss', 'auxiliary_deviation'])

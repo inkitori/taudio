@@ -4,7 +4,9 @@ from typing import Any, Dict, Optional
 
 from dataset import create_adapter, infer_adapter_from_repository
 from models.base_model_adapter import BaseModelAdapter
-from tasks.base import BaseTask
+from tasks.base_task import BaseTask
+
+WRITER_BATCH_SIZE = 128
 
 def get_ds(
     model_adapter: BaseModelAdapter,
@@ -13,7 +15,6 @@ def get_ds(
     task: BaseTask,
     take_first: Optional[int] = None,
 ) -> Dataset:
-    # Unified dataset construction that delegates prompt/label logic to task classes
     ds_adapter = create_adapter(infer_adapter_from_repository(
         repository), sampling_rate=model_adapter.sampling_rate, repository=repository, take_first=take_first)
 
@@ -25,8 +26,12 @@ def get_ds(
             eval_mode=False,
         )
 
-    base_ds = ds_adapter.load_streaming_split(split)
-    ds = base_ds.map(preprocess_fn, remove_columns=base_ds.column_names)
+    base_ds = ds_adapter.load_split(split)
+
+    ds = base_ds.filter(lambda x: not task.skip_example(x, ds_adapter))
+    ds = ds.map(preprocess_fn, remove_columns=base_ds.column_names, writer_batch_size=WRITER_BATCH_SIZE)
+    ds = ds.with_format("torch")
+
     return ds
 
 

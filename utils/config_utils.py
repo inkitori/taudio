@@ -2,13 +2,9 @@
 Utilities for loading and managing experiment configurations.
 """
 
-import os
 import yaml
-import re
 from typing import Dict, Any, Optional
 from pathlib import Path
-import datetime
-from dataset import infer_adapter_from_repository
 
 
 class ConfigManager:
@@ -33,7 +29,7 @@ class ConfigManager:
         
         return config
     
-    def create_experiment_dir(self, config_path: str, timestamp: bool = True) -> Path:
+    def create_experiment_dir(self, config_path: str) -> Path:
         """Create a directory for an experiment based on config path structure."""
         # Convert config path to experiment directory path
         # Replace "configs/" with "outputs/" and remove .yaml extension
@@ -43,13 +39,7 @@ class ConfigManager:
         relative_path = config_path.relative_to(self.configs_dir) if str(config_path).startswith("configs/") else config_path
         experiment_subpath = relative_path.with_suffix("")  # Remove .yaml extension
         
-        if timestamp:
-            # Add timestamp to make each run unique
-            timestamp_str = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-            experiment_dir = self.outputs_dir / experiment_subpath / timestamp_str
-        else:
-            experiment_dir = self.outputs_dir / experiment_subpath
-        
+        experiment_dir = self.outputs_dir / experiment_subpath
         experiment_dir.mkdir(parents=True, exist_ok=True)
         
         return experiment_dir
@@ -61,7 +51,6 @@ class ConfigManager:
             yaml.dump(config, f, default_flow_style=False)
     
     def get_model_checkpoint(self, experiment_dir: Path, epoch: Optional[int] = None) -> Optional[Path]:
-        """Get the model checkpoint from an experiment directory."""
         if epoch is not None:
             checkpoint_path = experiment_dir / f"model_epoch{epoch}.pt"
         else:

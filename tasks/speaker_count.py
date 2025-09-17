@@ -1,14 +1,11 @@
 from typing import Any, Dict, Iterable, Optional
 import torch
-import torch.nn as nn
 
-from .base import BaseTask
+from .base_task import BaseTask
 from utils.poisson import poisson_count_loss, infer_count
 from dataset.base_dataset_adapter import BaseDatasetAdapter
 from models.base_model_adapter import BaseModelAdapter
 import logging
-import math
-from utils.utils import clamp
 
 
 class SpeakerCountTask(BaseTask):

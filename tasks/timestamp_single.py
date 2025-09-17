@@ -9,13 +9,11 @@ import math
 from dataset.base_dataset_adapter import BaseDatasetAdapter
 from models.base_model_adapter import BaseModelAdapter
 
-from .base import BaseTask
+from .base_task import BaseTask
 from utils.utils import clamp, better_round
 from utils.poisson import poisson_loss, infer_timestamps
 
-
 STOPS = set(stopwords.words("english"))
-
 
 class SingleTimestampTask(BaseTask):
     def __init__(self, *, key: str = "start", max_time: Optional[float] = None, min_time: Optional[float] = None):
@@ -26,7 +24,7 @@ class SingleTimestampTask(BaseTask):
 
     def _choose_event(self, *, events: Iterable[Dict[str, Any]], ds_adapter: BaseDatasetAdapter, apply_fallback: bool, return_all: bool = False) -> Dict[str, Any]:
         seen_names = set()
-        candidate_events: list[Dict[str, Any]] = []
+        candidate_events = []
         unknown = set(ds_adapter.unknown_events())
 
         logging.info(f"Min time: {self.min_time}, Max time: {self.max_time}, Key: {self.key}, Apply fallback: {apply_fallback}")
@@ -36,22 +34,20 @@ class SingleTimestampTask(BaseTask):
             if name in seen_names:
                 continue
 
+            seen_names.add(name)
+
             # timing filter
             t_seconds = float(ds_adapter.get_target_seconds(event, self.key))
             if self.min_time is not None and t_seconds < self.min_time:
-                seen_names.add(name)
                 continue
-            if self.max_time is not None and t_seconds > self.max_time:
-                seen_names.add(name)
+            if self.max_time is not None and t_seconds >= self.max_time:
                 continue
 
             # lexical filters
             if name in unknown or name in STOPS:
-                seen_names.add(name)
                 continue
 
             candidate_events.append(event)
-            seen_names.add(name)
 
         if return_all:
             return candidate_events
@@ -60,11 +56,7 @@ class SingleTimestampTask(BaseTask):
         if len(candidate_events) > 0:
             return random.choice(candidate_events)
 
-        if apply_fallback:
-            # fallback to first event if no candidates
-            return next(iter(events))
-        else:
-            return None
+        raise ValueError("No candidate events found")
 
     def _build_conversation_text(self, *, model_processor: Any, ds_adapter: BaseDatasetAdapter, event: Dict[str, Any], eval_mode: bool) -> str:
         name = ds_adapter.event_name(event)
@@ -356,7 +348,7 @@ class SingleTimestampTask(BaseTask):
         return loss, abs_err
 
     def skip_example(self, example: Dict[str, Any], adapter: BaseModelAdapter) -> bool:
-        events = _choose_event(events=list(adapter.get_events(example)), ds_adapter=adapter, apply_fallback=False, return_all=True)
+        events = self._choose_event(events=list(adapter.get_events(example)), ds_adapter=adapter, apply_fallback=False, return_all=True)
         if len(events) == 0:
             return True
         return False

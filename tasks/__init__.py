@@ -1,6 +1,6 @@
 from typing import Dict, Type
 
-from .base import BaseTask
+from .base_task import BaseTask
 from .timestamp_single import SingleTimestampTask
 from .speaker_count import SpeakerCountTask
 

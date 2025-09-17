@@ -120,7 +120,7 @@ def main():
         repository=dataset_config['repository'],
         sampling_rate=model.adapter.sampling_rate,
     )
-    base_ds = adapter.load_streaming_split(args.split)
+    base_ds = adapter.load_split(args.split)
 
     # Metrics aggregator (running averages)
     metrics = AverageMetrics()
@@ -128,6 +128,8 @@ def main():
     logging.info(f"Evaluating on {args.split} split")
 
     for example in base_ds:
+        if task.skip_example(example, adapter):
+            continue
         # Token-based evaluation
         if args.token_output:
             token_metrics = task.evaluate_tokens(
