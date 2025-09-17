@@ -1,4 +1,4 @@
-name: /anvil/scratch/x-pkeung/taudio/env
+name: taudio
 channels:
   - anaconda
   - conda-forge
@@ -11,7 +11,6 @@ dependencies:
   - cairo=1.16.0=he5ede1b_6
   - dav1d=1.2.1=hd590300_0
   - expat=2.7.1=hecca717_0
-  - ffmpeg=6.1.1=h2a67f75_3
   - fontconfig=2.14.1=h55d465d_3
   - freetype=2.12.1=h267a509_2
   - giflib=5.2.2=hd590300_0
@@ -77,12 +76,15 @@ dependencies:
   - zlib=1.2.13=h4ab18f5_6
   - zstd=1.5.6=ha6fb4c9_0
   - pip:
+      - accelerate==1.10.1
       - aiohappyeyeballs==2.6.1
       - aiohttp==3.12.15
       - aiosignal==1.4.0
       - annotated-types==0.7.0
+      - astroid==3.3.11
       - attrs==25.3.0
       - audioread==3.0.1
+      - audioset-strong-download==2.0.5
       - av==15.0.0
       - bitsandbytes==0.47.0
       - certifi==2025.8.3
@@ -92,26 +94,34 @@ dependencies:
       - datasets==4.0.0
       - decorator==5.2.1
       - decord==0.6.0
+      - deepspeed==0.17.5
       - dill==0.3.8
+      - einops==0.8.1
+      - ffmpeg==1.4
       - filelock==3.19.1
       - frozenlist==1.7.0
       - fsspec==2025.3.0
       - gitdb==4.0.12
       - gitpython==3.1.45
       - hf-xet==1.1.8
+      - hjson==3.1.0
       - huggingface-hub==0.34.4
       - idna==3.10
+      - isort==6.0.1
       - jinja2==3.1.6
       - joblib==1.5.1
       - lazy-loader==0.4
       - librosa==0.11.0
       - llvmlite==0.44.0
       - markupsafe==3.0.2
+      - mccabe==0.7.0
       - mpmath==1.3.0
       - msgpack==1.1.1
       - multidict==6.6.4
       - multiprocess==0.70.16
+      - muon-optimizer==0.1.0
       - networkx==3.5
+      - ninja==1.13.0
       - nltk==3.9.1
       - numba==0.61.2
       - numpy==2.2.6
@@ -126,6 +136,7 @@ dependencies:
       - nvidia-cusolver-cu12==11.7.3.90
       - nvidia-cusparse-cu12==12.5.8.93
       - nvidia-cusparselt-cu12==0.7.1
+      - nvidia-ml-py==13.580.65
       - nvidia-nccl-cu12==2.27.3
       - nvidia-nvjitlink-cu12==12.8.93
       - nvidia-nvtx-cu12==12.8.90
@@ -136,10 +147,13 @@ dependencies:
       - pooch==1.8.2
       - propcache==0.3.2
       - protobuf==6.32.0
+      - psutil==7.0.0
+      - py-cpuinfo==9.0.0
       - pyarrow==21.0.0
       - pycparser==2.22
       - pydantic==2.11.7
       - pydantic-core==2.33.2
+      - pylint==3.3.8
       - python-dateutil==2.9.0.post0
       - pytz==2025.2
       - pyyaml==6.0.2
@@ -157,6 +171,7 @@ dependencies:
       - sympy==1.14.0
       - threadpoolctl==3.6.0
       - tokenizers==0.21.4
+      - tomlkit==0.13.3
       - torch==2.8.0
       - torchaudio==2.8.0
       - torchcodec==0.6.0
@@ -171,6 +186,8 @@ dependencies:
       - wandb==0.21.1
       - xxhash==3.5.0
       - yarl==1.20.1
+      - yt-dlp==2025.8.22
 variables:
   HF_HOME: .cache/huggingface
+  TRITON_CACHE_DIR: .triton_cache
 prefix: /anvil/scratch/x-pkeung/taudio/env
