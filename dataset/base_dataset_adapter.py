@@ -23,6 +23,10 @@ class BaseDatasetAdapter(ABC):
     @abstractmethod
     def load_streaming_split(self, split: str):
         """Return an iterable/streaming dataset for this repository and split."""
+    
+    @abstractmethod
+    def load_split(self, split: str):
+        """Return a non-streaming dataset for this repository and split."""
 
     @abstractmethod
     def get_audio(self, example: Dict[str, Any]) -> Dict[str, Any]:

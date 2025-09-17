@@ -226,3 +226,11 @@ class SpeakerCountTask(BaseTask):
             logging.info(f"Predicted Count: {pred_count}")
 
             return loss, abs(pred_count - gt_count)
+
+	# [min, max)
+    def skip_example(self, example: Dict[str, Any], adapter: BaseModelAdapter) -> bool:
+        if self.min_time is not None and adapter.get_num_speakers(example) < self.min_time:
+            return True
+        if self.max_time is not None and adapter.get_num_speakers(example) >= self.max_time: 
+            return True
+        return False

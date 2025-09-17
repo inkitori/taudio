@@ -1,6 +1,7 @@
 import numpy as np
 from datasets import load_dataset
 from datasets import IterableDataset
+import logging
 
 def clamp(n, smallest, largest): return max(smallest, min(n, largest))
 
@@ -11,9 +12,16 @@ def get_audio_bounds(input_ids, begin_audio_id, end_audio_id):
 
     return start_audio_index, end_audio_index
 
-def get_dataset_length(repository: str, split: str):
+def get_dataset_length(repository: str, split: str, task=None, ds_adapter=None):
     dataset = load_dataset(repository, split=split)
     dataset_length = len(dataset)
+
+    if task is not None and ds_adapter is not None:
+        for example in dataset:
+            if task.skip_example(example, ds_adapter):
+                dataset_length -= 1
+
+    logging.info(f"Dataset length: {dataset_length}")
     
     return dataset_length
 

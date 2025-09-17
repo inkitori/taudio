@@ -12,6 +12,13 @@ class LibriSpeechAdapter(BaseDatasetAdapter):
             ds = ds.take(self.take_first)
         return ds
 
+    def load_split(self, split: str):
+        ds = load_dataset(self.repository, split=split)
+        ds = ds.cast_column("audio", Audio(sampling_rate=self.sampling_rate))
+        if self.take_first:
+            ds = ds.select(range(self.take_first))
+        return ds
+
     def get_audio(self, example: Dict[str, Any]) -> Dict[str, Any]:
         return example["audio"]
 

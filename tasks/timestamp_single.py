@@ -24,7 +24,7 @@ class SingleTimestampTask(BaseTask):
         self.max_time = max_time
         self.min_time = min_time
 
-    def _choose_event(self, *, events: Iterable[Dict[str, Any]], ds_adapter: BaseDatasetAdapter, apply_fallback: bool) -> Dict[str, Any]:
+    def _choose_event(self, *, events: Iterable[Dict[str, Any]], ds_adapter: BaseDatasetAdapter, apply_fallback: bool, return_all: bool = False) -> Dict[str, Any]:
         seen_names = set()
         candidate_events: list[Dict[str, Any]] = []
         unknown = set(ds_adapter.unknown_events())
@@ -52,6 +52,9 @@ class SingleTimestampTask(BaseTask):
 
             candidate_events.append(event)
             seen_names.add(name)
+
+        if return_all:
+            return candidate_events
 
         logging.info(f"Candidate events: {candidate_events}")
         if len(candidate_events) > 0:
@@ -351,3 +354,9 @@ class SingleTimestampTask(BaseTask):
         abs_err = better_round(abs(pred_timestamp - gt_timestamp) * 100.0) / 100.0
 
         return loss, abs_err
+
+    def skip_example(self, example: Dict[str, Any], adapter: BaseModelAdapter) -> bool:
+        events = _choose_event(events=list(adapter.get_events(example)), ds_adapter=adapter, apply_fallback=False, return_all=True)
+        if len(events) == 0:
+            return True
+        return False

@@ -37,3 +37,7 @@ class BaseTask(ABC):
     @abstractmethod
     def calculate_loss(self, logits, labels, adapter: BaseModelAdapter, poisson_loss: bool, class_weighting: bool) -> Tuple[torch.Tensor, torch.Tensor]:
         """Calculate the loss for the task."""
+
+    @abstractmethod
+    def skip_example(self, example: Dict[str, Any], adapter: BaseModelAdapter) -> bool:
+        """Skip the example if it is not suitable for the task."""
