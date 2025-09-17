@@ -1,9 +1,11 @@
 import argparse
 import logging
 import random
+import os
 
 import deepspeed
 import torch
+import torch.distributed as dist
 from tqdm.auto import tqdm
 
 from dataset.dataset import get_ds, collate_fn
@@ -17,6 +19,13 @@ from utils.config_utils import (
 from utils.metrics import AverageMetrics
 
 def main():
+    dist.init_process_group(backend='nccl')
+    # deepspeed.init_distributed()
+
+    local_rank = int(os.environ["LOCAL_RANK"])
+    rank = int(os.environ["RANK"])
+    world_size = int(os.environ["WORLD_SIZE"])
+
     logging.getLogger().setLevel(logging.INFO)
 
     parser = argparse.ArgumentParser(description="Train TAudio model.")
@@ -28,7 +37,11 @@ def main():
 
     parser = deepspeed.add_config_arguments(parser)
 
+
     args = parser.parse_args()
+    
+    torch.cuda.set_device(args.local_rank)
+    device = torch.device('cuda', args.local_rank)
 
     # Initialize config manager
     config_manager = ConfigManager()
@@ -70,7 +83,7 @@ def main():
     }
 
     # Create model
-    model = TAudio(**taudio_config)
+    model = TAudio(**taudio_config).to(device)
     model.train()
 
     ds = get_ds(
@@ -81,12 +94,15 @@ def main():
         take_first=dataset_config.get('take_first', None),
     )
 
+    # optim = torch.optim.AdamW(model.parameters(), lr=training_config['learning_rate'])
+
     model_engine, _, dataloader, _ = deepspeed.initialize(
         args=args, 
         model=model, 
         model_parameters=model.parameters(),
         training_data=ds,
-        collate_fn=collate_fn
+        collate_fn=collate_fn,
+        # optimizer=optim
     )
 
     # Training loop
@@ -99,7 +115,7 @@ def main():
         metrics = AverageMetrics()
 
         for step, batch in enumerate(progress_bar):
-            batch = {k: v.to(model_engine.device) for k, v in batch.items()}
+            batch = {k: v.to(device) for k, v in batch.items()}
             output = model_engine(**batch)
 
             local_loss = output.loss
@@ -108,6 +124,11 @@ def main():
             local_auxiliary_deviation = output.auxiliary_deviation
 
             model_engine.backward(local_loss)
+
+            logging.info(f"Local loss: {local_loss.item()}")
+            logging.info(f"Local token loss: {local_token_loss.item()}")
+            logging.info(f"Local surrogate loss: {local_surrogate_loss.item()}")
+            logging.info(f"Local auxiliary deviation: {local_auxiliary_deviation}")
 
             model_engine.step()
             progress_bar.set_description(
@@ -119,6 +140,9 @@ def main():
         if not args.debug:
             logging.info(f"Saving model to {experiment_dir}")
             model_engine.save_checkpoint(experiment_dir)
+            
+            dist.barrier()
+
             logging.info(f"Model saved to {experiment_dir}")
 
     logging.info(f"Training completed. All outputs saved to: {experiment_dir}")
