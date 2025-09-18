@@ -12,15 +12,16 @@ import types
 import logging
 from models.base_model_adapter import BaseModelAdapter
 from contextlib import nullcontext
+# Import FSDP to check for it
+from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 
 
 class Qwen2_5OmniAdapter(BaseModelAdapter):
-    def __init__(self, model_id: str, load_in_8bit: bool, bidirectional_audio: bool, dtype: str) -> None:
+    def __init__(self, model_id: str, bidirectional_audio: bool, dtype: str) -> None:
         super().__init__()
         self.base_model = Qwen2_5OmniThinkerForConditionalGeneration.from_pretrained(
             model_id,
             torch_dtype=dtype,
-            load_in_8bit=load_in_8bit,
         )
 
         # Convenience references
@@ -37,10 +38,25 @@ class Qwen2_5OmniAdapter(BaseModelAdapter):
         else:
             raise ValueError(f"Unsupported model: {model_id}")
 
+    # --- START: NEW HELPER PROPERTY ---
+    @property
+    def _actual_text_model(self) -> nn.Module:
+        """
+        Returns the underlying text model, handling the case where it might be
+        wrapped by FSDP.
+        """
+        if isinstance(self._text_model, FSDP):
+            # If it's an FSDP instance, the real module is in the .module attribute
+            return self._text_model.module
+        else:
+            # Otherwise, return it directly
+            return self._text_model
+    # --- END: NEW HELPER PROPERTY ---
+
     def enable_gradient_checkpointing(self):
+        # Note: FSDP has its own way of handling gradient checkpointing, often
+        # enabled during the FSDP wrapping process. This might be redundant.
         self.base_model.gradient_checkpointing_enable()
-        self._audio_tower.gradient_checkpointing_enable()
-        self._text_model.gradient_checkpointing_enable()
         logging.info("Enabled gradient checkpointing")
 
     # Properties required by TAudio
@@ -66,6 +82,8 @@ class Qwen2_5OmniAdapter(BaseModelAdapter):
 
     @property
     def text_model(self) -> nn.Module:
+        # This property should still return the FSDP wrapper if it exists,
+        # as the training loop needs to interact with it.
         return self._text_model
 
     @property
@@ -96,13 +114,15 @@ class Qwen2_5OmniAdapter(BaseModelAdapter):
 
     # --- Bidirectional audio mask patching (Qwen-specific) ---
     def _patch_causal_mask_zero_region(self, start: int, end: int):
-        model = self._text_model
+        model = self._actual_text_model
+        # This is the original method from the Qwen2_5OmniThinkerTextModel class
         original_method = model._update_causal_mask
 
         model.mask_start = start
         model.mask_end = end
 
         def patched_update_causal_mask(self_ref, attention_mask, input_tensor, cache_position, past_key_values, output_attentions=False):
+            # First, call the original method to get the base causal mask
             causal_mask = original_method(
                 attention_mask, input_tensor, cache_position, past_key_values, output_attentions
             )
@@ -120,11 +140,22 @@ class Qwen2_5OmniAdapter(BaseModelAdapter):
                     and 0 <= end_idx < causal_mask.shape[3]
                     and start_idx <= end_idx
                 ):
-                    causal_mask[0, 0, start_idx:end_idx +
-                                1, start_idx:end_idx + 1] = 0
-                    logging.info(f"Zeroed out causal mask region [{start_idx}:{
-                                 end_idx + 1}, {start_idx}:{end_idx + 1}]")
+                    # --- START: THE FIX ---
+                    # 1. Clone the mask to create a new tensor that can be modified safely.
+                    #    This is now an out-of-place operation.
+                    cloned_causal_mask = causal_mask.clone()
 
+                    # 2. Modify the clone, not the original.
+                    cloned_causal_mask[0, 0, start_idx:end_idx + 1, start_idx:end_idx + 1] = 0
+                    
+                    logging.info(f"Zeroed out causal mask region [{start_idx}:{
+                                    end_idx + 1}, {start_idx}:{end_idx + 1}]")
+                    
+                    # 3. Return the modified clone.
+                    return cloned_causal_mask
+                    # --- END: THE FIX ---
+
+            # If no modifications were made, return the original mask
             return causal_mask
 
         model._update_causal_mask = types.MethodType(
@@ -132,7 +163,8 @@ class Qwen2_5OmniAdapter(BaseModelAdapter):
         logging.info(f"Patched _update_causal_mask on {type(model).__name__}")
 
     def _unpatch_causal_mask(self):
-        model = self._text_model
+        # Use the new helper property to get the actual model
+        model = self._actual_text_model
         original_method = type(model)._update_causal_mask
         model._update_causal_mask = types.MethodType(original_method, model)
         if hasattr(model, 'mask_start'):

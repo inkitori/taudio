@@ -19,7 +19,6 @@ class TAudio(nn.Module):
         self,
         model_id: str,
         freeze_text_model: bool,
-        load_in_8bit: bool,
         audio_layer: int,
         class_weighting: bool,
         surrogate_loss: bool,
@@ -36,7 +35,7 @@ class TAudio(nn.Module):
 
         # Adapter-based backend
         self.adapter = create_adapter(
-            model_id=model_id, load_in_8bit=load_in_8bit, bidirectional_audio=bidirectional_audio, dtype=dtype)
+            model_id=model_id, bidirectional_audio=bidirectional_audio, dtype=dtype)
 
         self.hidden_dim = self.adapter.hidden_dim
 
