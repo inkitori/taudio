@@ -21,7 +21,7 @@ cd /anvil/scratch/x-pkeung/taudio
 module load conda
 conda activate ./env
 # Capture the training output to extract the experiment directory
-train_output=$(torchrun --nproc_per_node 2 train.py --config $1 2>&1) # this also has the effect of piping all train to out, and eval to err
+train_output=$(torchrun --nproc_per_node 2 --master_addr $MASTER_ADDR --master_port $MASTER_PORT train.py --config $1 2>&1) # this also has the effect of piping all train to out, and eval to err
 echo "$train_output"
 
 # Extract the experiment directory from training output
@@ -43,15 +43,11 @@ echo "Experiment name: $experiment_name"
 eval_cmd="python evaluate.py --experiment $experiment_name --split $2"
 
 if [ -n "$3" ]; then
-    eval_cmd="$eval_cmd --error-bound $3"
+    eval_cmd="$eval_cmd --min-time $3"
 fi
 
 if [ -n "$4" ]; then
-    eval_cmd="$eval_cmd --min-time $4"
-fi
-
-if [ -n "$5" ]; then
-    eval_cmd="$eval_cmd --max-time $5"
+    eval_cmd="$eval_cmd --max-time $4"
 fi
 
 echo "Eval command: $eval_cmd"

@@ -30,6 +30,10 @@ from utils.config_utils import (
 from utils.metrics import AverageMetrics
 
 def main():
+    logging.getLogger().setLevel(logging.INFO)
+    logging.info(f"MASTER_PORT: {os.environ['MASTER_PORT']}")
+    logging.info(f"MASTER_ADDR: {os.environ['MASTER_ADDR']}")
+
     dist.init_process_group(
         backend='nccl',
         timeout=timedelta(hours=1), # an hour
@@ -41,7 +45,6 @@ def main():
 
     is_master = rank == 0
 
-    logging.getLogger().setLevel(logging.DEBUG)
 
     logging.info(f"Local rank: {local_rank}")
     logging.info(f"Rank: {rank}")
