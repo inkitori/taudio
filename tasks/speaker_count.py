@@ -218,7 +218,7 @@ class SpeakerCountTask(BaseTask):
             # Clean up intermediate tensors
             del logits_batched, frame_mask, pred_count_tensor
 
-            return loss, abs(pred_count - gt_count)
+            return loss, torch.tensor(abs(pred_count - gt_count)).to(loss.device)
         else:
             logging.info("Bernoulli loss enabled")
 

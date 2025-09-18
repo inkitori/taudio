@@ -1,1 +1,3 @@
 sbatch scripts/anvil/train_and_eval.sh configs/qwen3b/librispeech/timestamp_single/poisson+bidirectional_audio[start][bias_-6][float16].yaml test_clean
+sbatch scripts/anvil/train_and_eval.sh configs/qwen3b/librispeech/timestamp_single/bernoulli+bidirectional_audio+class_weighting[start][float16].yaml test_clean
+sbatch scripts/anvil/train_and_eval.sh configs/qwen3b/librispeech/timestamp_single/token+bidirectional_audio[start][float16].yaml test_clean

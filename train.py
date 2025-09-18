@@ -100,6 +100,16 @@ def main():
     logging.info(f"Starting experiment: {experiment_name}")
     logging.info(f"Config: {config}")
 
+    if not args.debug and is_master:
+        flattened_config = flatten_config(config)
+
+        run = wandb.init(
+            entity=config['wandb']['entity'],
+            project=project_name,
+            name=experiment_name,
+            config=flattened_config,
+        )
+
     batch_size = world_size # 1 batch per device
     gradient_accumulation_steps = training_config['effective_batch_size'] // batch_size
 
@@ -157,15 +167,6 @@ def main():
     num_optim_steps = len(dataloader) // gradient_accumulation_steps
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optim, T_max=num_optim_steps, eta_min=training_config['learning_rate'] * training_config['eta_min_scale'])
 
-    if not args.debug and is_master:
-        flattened_config = flatten_config(config)
-
-        run = wandb.init(
-            entity=config['wandb']['entity'],
-            project=project_name,
-            name=experiment_name,
-            config=flattened_config,
-        )
 
     for epoch in range(training_config['epochs']):
         progress_bar = tqdm(
