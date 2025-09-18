@@ -28,17 +28,12 @@ def get_ds(
         )
 
 
-    if dist.get_rank() == 0:
-        base_ds = ds_adapter.load_split(split)
-        ds = base_ds.filter(lambda x: not task.skip_example(x, ds_adapter))
-        ds = ds.map(preprocess_fn, remove_columns=base_ds.column_names, writer_batch_size=WRITER_BATCH_SIZE)
-        ds = ds.with_format("torch")
-        processed_ds = [ds]
-    else:
-        processed_ds = [None]
-    
-    dist.broadcast_object_list(processed_ds, src=0)
-    ds = processed_ds[0]
+    base_ds = ds_adapter.load_split(split)
+    sharded_ds = base_ds.shard(num_shards=dist.get_world_size(), index=dist.get_rank())
+
+    ds = sharded_ds.filter(lambda x: not task.skip_example(x, ds_adapter))
+    ds = ds.map(preprocess_fn, remove_columns=base_ds.column_names, writer_batch_size=WRITER_BATCH_SIZE)
+    ds = ds.with_format("torch")
     
     dist.barrier()
 

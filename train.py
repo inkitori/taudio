@@ -6,7 +6,6 @@ from datetime import timedelta
 
 import torch
 import torch.distributed as dist
-from torch.utils.data.distributed import DistributedSampler
 from torch.utils.data import DataLoader
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp.wrap import transformer_auto_wrap_policy, ModuleWrapPolicy
@@ -100,6 +99,7 @@ def main():
 
     logging.info(f"Batch size: {batch_size}")
     logging.info(f"Gradient accumulation steps: {gradient_accumulation_steps}")
+
     # Create task
     task = create_task(task_type=task_config['type'], **task_config.get('kwargs', {}))
 
@@ -140,8 +140,7 @@ def main():
         take_first=dataset_config.get('take_first', None),
     )
 
-    sampler = DistributedSampler(ds, shuffle=False)
-    dataloader = DataLoader(ds, batch_size=1, collate_fn=collate_fn, sampler=sampler)
+    dataloader = DataLoader(ds, batch_size=1, collate_fn=collate_fn)
 
     dist.barrier() 
 
@@ -156,8 +155,8 @@ def main():
             name=experiment_name,
             config=flattened_config,
         )
+
     for epoch in range(training_config['epochs']):
-        sampler.set_epoch(epoch)
         progress_bar = tqdm(
             dataloader, 
             desc=f"Epoch {epoch + 1}",

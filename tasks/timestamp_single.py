@@ -27,7 +27,7 @@ class SingleTimestampTask(BaseTask):
         candidate_events = []
         unknown = set(ds_adapter.unknown_events())
 
-        logging.info(f"Min time: {self.min_time}, Max time: {self.max_time}, Key: {self.key}, Apply fallback: {apply_fallback}")
+        logging.debug(f"Min time: {self.min_time}, Max time: {self.max_time}, Key: {self.key}, Apply fallback: {apply_fallback}")
 
         for event in events:
             name = ds_adapter.event_name(event)
@@ -52,7 +52,7 @@ class SingleTimestampTask(BaseTask):
         if return_all:
             return candidate_events
 
-        logging.info(f"Candidate events: {candidate_events}")
+        logging.debug(f"Candidate events: {candidate_events}")
         if len(candidate_events) > 0:
             return random.choice(candidate_events)
 
@@ -119,7 +119,7 @@ class SingleTimestampTask(BaseTask):
         # Logging for traceability
         name = ds_adapter.event_name(event)
         t_sec = ds_adapter.get_target_seconds(event, self.key)
-        logging.info(f"Selected event: {name}, {t_sec}")
+        logging.debug(f"Selected event: {name}, {t_sec}")
 
         # Build prompt text via chat template and prepare inputs using the model adapter's processor
         processor = model_adapter.processor
