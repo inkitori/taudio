@@ -28,16 +28,15 @@ def get_ds(
         )
 
 
-    base_ds = ds_adapter.load_split(split)
+    base_ds = ds_adapter.load_split(split).filter(lambda x: not task.skip_example(x, ds_adapter))
     sharded_ds = base_ds.shard(num_shards=dist.get_world_size(), index=dist.get_rank())
 
-    ds = sharded_ds.filter(lambda x: not task.skip_example(x, ds_adapter))
-    ds = ds.map(preprocess_fn, remove_columns=base_ds.column_names, writer_batch_size=WRITER_BATCH_SIZE)
-    ds = ds.with_format("torch")
+    sharded_ds = sharded_ds.map(preprocess_fn, remove_columns=base_ds.column_names, writer_batch_size=WRITER_BATCH_SIZE)
+    sharded_ds = sharded_ds.with_format("torch")
     
     dist.barrier()
 
-    return ds
+    return sharded_ds
 
 
 def collate_fn(batch: list) -> Dict[str, torch.Tensor]:

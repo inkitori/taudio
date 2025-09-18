@@ -14,6 +14,9 @@ import functools
 from transformers.models.qwen2_5_omni.modeling_qwen2_5_omni import Qwen2_5OmniAudioEncoderLayer, Qwen2_5OmniDecoderLayer, Qwen2_5OmniAudioEncoder, Qwen2_5OmniThinkerTextModel
 import bitsandbytes as bnb
 import wandb
+from contextlib import nullcontext
+from transformers import set_seed
+import numpy as np
 
 from dataset.dataset import get_ds, collate_fn
 from tasks import create_task
@@ -72,7 +75,10 @@ def main():
 
     # Set random seed
     random.seed(system_config['seed'])
+    torch.cuda.manual_seed(system_config['seed'])
     torch.manual_seed(system_config['seed'])
+    np.random.seed(system_config['seed'])
+    set_seed(system_config['seed'])    
 
     experiment_dir = None
     experiment_name = relative_path_to_experiment_name(args.config, eval=False)
@@ -131,7 +137,6 @@ def main():
     model = FSDP(model, auto_wrap_policy=auto_wrap_policy, device_id=torch.cuda.current_device())
     model.train()
 
-
     ds = get_ds(
         model_adapter=model.adapter,
         repository=dataset_config['repository'],
@@ -140,13 +145,17 @@ def main():
         take_first=dataset_config.get('take_first', None),
     )
 
-    dataloader = DataLoader(ds, batch_size=1, collate_fn=collate_fn)
+    dataloader = DataLoader(
+        ds, 
+        batch_size=1, 
+        collate_fn=collate_fn,
+    )
 
     dist.barrier() 
 
     optim = torch.optim.AdamW(model.parameters(), lr=training_config['learning_rate'])
 
-    if not args.debug:
+    if not args.debug and is_master:
         flattened_config = flatten_config(config)
 
         run = wandb.init(
@@ -165,43 +174,45 @@ def main():
 
         metrics = AverageMetrics()
 
-        for step, batch in enumerate(progress_bar):
+        for step, batch in enumerate(progress_bar, start=1):
             batch = {k: v.to(device) for k, v in batch.items()}
-            output = model(**batch)
+            context = model.no_sync() if step % gradient_accumulation_steps != 0 else nullcontext()
 
-            loss = output.loss
-            token_loss = output.token_loss
-            surrogate_loss = output.surrogate_loss
-            auxiliary_deviation = output.auxiliary_deviation
-            
-            loss.backward()
-            optim.step()
-            optim.zero_grad()
+            with context:
+                output = model(**batch)
+                
+                scaled_loss = output.loss / gradient_accumulation_steps
+                    
+                scaled_loss.backward()
 
-            dist.all_reduce(loss, op=dist.ReduceOp.AVG)
-            dist.all_reduce(token_loss, op=dist.ReduceOp.AVG)
-            dist.all_reduce(surrogate_loss, op=dist.ReduceOp.AVG)
-            dist.all_reduce(auxiliary_deviation, op=dist.ReduceOp.AVG)
+            dist.all_reduce(output.loss, op=dist.ReduceOp.AVG)
+            dist.all_reduce(output.token_loss, op=dist.ReduceOp.AVG)
+            dist.all_reduce(output.surrogate_loss, op=dist.ReduceOp.AVG)
+            dist.all_reduce(output.auxiliary_deviation, op=dist.ReduceOp.AVG)
 
             metrics.update_dict({
-                "loss": loss.item(),
-                "token_loss": token_loss.item(),
-                "surrogate_loss": surrogate_loss.item(),
-                "auxiliary_deviation": auxiliary_deviation.item(),
+                "loss": output.loss.item(),
+                "token_loss": output.token_loss.item(),
+                "surrogate_loss": output.surrogate_loss.item(),
+                "auxiliary_deviation": output.auxiliary_deviation.item(),
             })
 
+            if step % gradient_accumulation_steps == 0:
+                optim.step()
+                optim.zero_grad()
 
-            if not args.debug:
-                run.log({
-                    **metrics.to_dict(),
-                    "epoch": epoch + 1,
-                    "step": step + 1,
-                })
+                if is_master and not args.debug:
+                    run.log({
+                        **metrics.to_dict(),
+                        "epoch": epoch + 1,
+                        "step": step + 1,
+                    })
 
                 metrics.reset()
 
-                progress_bar.set_description(
-                    f"Epoch {epoch + 1}, Loss: {loss.item():.4f}")
+            progress_bar.set_description(
+                f"Epoch {epoch + 1}, Loss: {output.loss.item():.4f}")
+
 
         logging.info(f"Epoch {epoch + 1} completed.")
 
