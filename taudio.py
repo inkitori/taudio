@@ -105,10 +105,7 @@ class TAudio(nn.Module):
 
         # (num_audio_tokens, hidden_dim)
         # Extract audio hidden states with cleanup of intermediate mask
-        audio_mask = (input_ids == self.adapter.audio_id)
-        audio_hidden_states = hidden_states[audio_mask]
-        del audio_mask
-
+        audio_hidden_states = hidden_states[input_ids == self.adapter.audio_id]
         # (num_audio_tokens across batch)
         logits = self.linear(audio_hidden_states).squeeze()
         

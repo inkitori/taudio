@@ -41,22 +41,8 @@ def poisson_loss(log_hazard, label_mask, frame_mask):
     frame_mask (batch, seq len): boolean mask for the frame padding
     '''
     # Calculate cumulative hazard with intermediate tensor cleanup
-    exp_log_hazard = torch.exp(log_hazard)
-    masked_hazard = exp_log_hazard * frame_mask
-    cumulative_hazard = torch.sum(masked_hazard, dim=1)
-    
-    # Calculate label term with cleanup
-    label_term = log_hazard * label_mask
-    label_sum = label_term.sum(dim=1)
-    
-    # Calculate loss
-    loss = cumulative_hazard - label_sum
-    
-    # Clean up intermediate tensors
-    del exp_log_hazard, masked_hazard, label_term
-    
-    return loss
-
+    cumulative_hazard = torch.sum(torch.exp(log_hazard) * frame_mask, dim=1)
+    return cumulative_hazard - (log_hazard * label_mask).sum(dim=1)
 # perform inference
 
 

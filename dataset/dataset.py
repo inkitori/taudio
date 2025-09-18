@@ -27,20 +27,18 @@ def get_ds(
             eval_mode=False,
         )
 
-    base_ds = ds_adapter.load_split(split)
 
     if dist.get_rank() == 0:
+        base_ds = ds_adapter.load_split(split)
         ds = base_ds.filter(lambda x: not task.skip_example(x, ds_adapter))
         ds = ds.map(preprocess_fn, remove_columns=base_ds.column_names, writer_batch_size=WRITER_BATCH_SIZE)
         ds = ds.with_format("torch")
-        ds = [ds]
+        processed_ds = [ds]
     else:
-        ds = [None]
+        processed_ds = [None]
     
-    dist.barrier()
-
-    dist.broadcast_object_list(ds, src=0)
-    ds = ds[0]
+    dist.broadcast_object_list(processed_ds, src=0)
+    ds = processed_ds[0]
     
     dist.barrier()
 

@@ -3,6 +3,7 @@ Utilities for loading and managing experiment configurations.
 """
 
 import yaml
+import datetime
 from typing import Dict, Any, Optional
 from pathlib import Path
 
@@ -28,8 +29,8 @@ class ConfigManager:
             config = yaml.safe_load(f)
         
         return config
-    
-    def create_experiment_dir(self, config_path: str) -> Path:
+
+    def create_experiment_dir(self, config_path: str, timestamp: bool = True) -> Path:
         """Create a directory for an experiment based on config path structure."""
         # Convert config path to experiment directory path
         # Replace "configs/" with "outputs/" and remove .yaml extension
@@ -39,7 +40,13 @@ class ConfigManager:
         relative_path = config_path.relative_to(self.configs_dir) if str(config_path).startswith("configs/") else config_path
         experiment_subpath = relative_path.with_suffix("")  # Remove .yaml extension
         
-        experiment_dir = self.outputs_dir / experiment_subpath
+        if timestamp:
+            # Add timestamp to make each run unique
+            timestamp_str = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            experiment_dir = self.outputs_dir / experiment_subpath / timestamp_str
+        else:
+            experiment_dir = self.outputs_dir / experiment_subpath
+        
         experiment_dir.mkdir(parents=True, exist_ok=True)
         
         return experiment_dir
