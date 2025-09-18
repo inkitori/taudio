@@ -53,12 +53,6 @@ class Qwen2_5OmniAdapter(BaseModelAdapter):
             return self._text_model
     # --- END: NEW HELPER PROPERTY ---
 
-    def enable_gradient_checkpointing(self):
-        # Note: FSDP has its own way of handling gradient checkpointing, often
-        # enabled during the FSDP wrapping process. This might be redundant.
-        self.base_model.gradient_checkpointing_enable()
-        logging.info("Enabled gradient checkpointing")
-
     # Properties required by TAudio
     @property
     def hidden_dim(self) -> int:

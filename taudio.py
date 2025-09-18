@@ -29,7 +29,6 @@ class TAudio(nn.Module):
         poisson_loss: bool,
         linear_bias: Optional[float],
         dtype: str,
-        gradient_checkpointing: bool = False,
     ) -> None:
         super(TAudio, self).__init__()
 
@@ -59,10 +58,6 @@ class TAudio(nn.Module):
         self.surrogate_loss_weight = surrogate_loss_weight
         self.poisson_loss = poisson_loss
         self.task = task
-
-        if gradient_checkpointing:
-            self.adapter.enable_gradient_checkpointing()
-            logging.info("Enabled gradient checkpointing")
 
     def forward(
         self,

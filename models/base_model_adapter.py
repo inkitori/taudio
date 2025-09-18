@@ -60,7 +60,3 @@ class BaseModelAdapter(nn.Module):
     def bidirectional_audio_context(self, input_ids: torch.Tensor):
         """Default no-op context; adapters override to implement model-specific patching."""
         yield
-
-    def enable_gradient_checkpointing(self):
-        """Enable gradient checkpointing for memory efficiency."""
-        raise NotImplementedError
