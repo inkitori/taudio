@@ -177,9 +177,12 @@ class SpeakerCountTask(BaseTask):
             if model.poisson_loss:
                 aux_pred = infer_count(logits, torch.ones_like(logits)).item()
             else:
-                probs = torch.sigmoid(logits)
-                logging.info(f"Sigmoid probs: {probs}")
-                aux_pred = torch.round(probs.sum()).item()
+                # probs = torch.sigmoid(logits)
+                # logging.info(f"Sigmoid probs: {probs}")
+                # aux_pred = torch.round(probs.sum()).item()
+
+                prob = logits[:, -1]
+                aux_pred = torch.round(prob).item()
 
         logging.info(f"Auxiliary prediction: {aux_pred}, GT: {speaker_count}")
 
@@ -192,37 +195,51 @@ class SpeakerCountTask(BaseTask):
         return metrics
 
     def calculate_loss(self, logits, labels, adapter: BaseModelAdapter, use_poisson_loss: bool, class_weighting: bool) -> torch.Tensor:
-        gt_count = labels.sum().item()
+        # Get ground truth count with cleanup
+        labels_sum = labels.sum()
+        gt_count = labels_sum.item()
 
         if use_poisson_loss:
             logging.info("Poisson loss enabled")
-            logits = logits.unsqueeze(0) # make it look batched
-            counts = labels.sum()
-            frame_mask = torch.ones_like(logits)
+            # Create batched tensors with explicit cleanup
+            logits_batched = logits.unsqueeze(0)  # make it look batched
+            counts = labels_sum  # reuse the already computed sum
+            frame_mask = torch.ones_like(logits_batched)
 
             gt_count = counts.item()
-            pred_count = infer_count(logits, frame_mask).item()
+            pred_count_tensor = infer_count(logits_batched, frame_mask)
+            pred_count = pred_count_tensor.item()
 
             logging.info(f"Labels Ground Truth: {gt_count}")
             logging.info(f"Predicted Count: {pred_count}")
 
-            loss = poisson_count_loss(logits, counts, frame_mask)
+            loss = poisson_count_loss(logits_batched, counts, frame_mask)
+            
+            # Clean up intermediate tensors
+            del logits_batched, frame_mask, pred_count_tensor
 
             return loss, abs(pred_count - gt_count)
         else:
             logging.info("Bernoulli loss enabled")
 
-            probs = torch.sigmoid(logits)
-            logging.info(f"Sigmoid probs: {probs}")
-            raw_count = probs.sum()
-            pred_count = torch.round(raw_count).item()
+            # probs = torch.sigmoid(logits)
+            # logging.info(f"Sigmoid probs: {probs}")
+            # raw_count = probs.sum()
 
-            loss = torch.abs(raw_count - labels.sum())
+            raw_count = logits[-1]
+
+            pred_count_tensor = torch.round(raw_count)
+            pred_count = pred_count_tensor.item()
+
+            loss = torch.abs(raw_count - labels_sum)
 
             logging.info(f"Labels Ground Truth: {gt_count}")
             logging.info(f"Predicted Count: {pred_count}")
 
-            return loss, abs(pred_count - gt_count)
+            # Clean up intermediate tensors
+            del labels_sum, pred_count_tensor
+
+            return loss, torch.tensor(abs(pred_count - gt_count)).to(loss.device)
 
 	# [min, max)
     def skip_example(self, example: Dict[str, Any], adapter: BaseModelAdapter) -> bool:

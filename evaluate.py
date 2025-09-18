@@ -15,16 +15,16 @@ from tasks import create_task
 from utils.metrics import AverageMetrics
 
 def main():
-    logging.getLogger().setLevel(logging.INFO)
+    logging.getLogger().setLevel(logging.DEBUG)
 
     parser = argparse.ArgumentParser(description="Evaluate TAudio model.")
     parser.add_argument('--experiment', type=str, required=True,
                         help='Name of the experiment directory to evaluate')
     parser.add_argument('--epoch', type=int, default=None,
                         help='Specific epoch to evaluate (defaults to latest)')
-    parser.add_argument('--split', type=str, default='dev_clean',
+    parser.add_argument('--split', type=str, default='test_clean',
                         help='Dataset split to evaluate on')
-    parser.add_argument('--error-bound', type=float, default=0.1,
+    parser.add_argument('--error-bound', type=float, default=0.02,
                         help='Error bound for considering predictions correct')
     parser.add_argument('--min-time', type=float, default=None,
                         help='Minimum time for considering predictions correct')

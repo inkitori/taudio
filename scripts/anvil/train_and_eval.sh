@@ -2,19 +2,26 @@
 #SBATCH --partition=ai
 #SBATCH --account=nairr250124-ai
 #SBATCH --mem-per-gpu=64G
-#SBATCH --cpus-per-gpu=4
+#SBATCH --cpus-per-gpu=2
 #SBATCH --nodes=1
-#SBATCH --gres=gpu:1
+#SBATCH --gres=gpu:2
 #SBATCH --time=2:59:00
 #SBATCH --job-name=train_and_eval
 #SBATCH --output=/anvil/scratch/x-pkeung/taudio/scripts/logs/%x/%j.out
 #SBATCH --error=/anvil/scratch/x-pkeung/taudio/scripts/logs/%x/%j.err
 
+master_addr=$(scontrol show hostnames "$SLURM_JOB_NODELIST" | head -n 1)
+export MASTER_ADDR=$master_addr
+echo "MASTER_ADDR: $MASTER_ADDR"
+
+export MASTER_PORT=$(expr 10000 + $(echo -n $SLURM_JOBID | tail -c 4))
+echo "MASTER_PORT: $MASTER_PORT"
+
 cd /anvil/scratch/x-pkeung/taudio
 module load conda
 conda activate ./env
 # Capture the training output to extract the experiment directory
-train_output=$(python train.py --config $1 2>&1) # this also has the effect of piping all train to out, and eval to err
+train_output=$(torchrun --nproc_per_node 2 train.py --config $1 2>&1) # this also has the effect of piping all train to out, and eval to err
 echo "$train_output"
 
 # Extract the experiment directory from training output

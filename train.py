@@ -7,12 +7,12 @@ from datetime import timedelta
 import torch
 import torch.distributed as dist
 from torch.utils.data import DataLoader
-from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+from torch.distributed.fsdp import FullStateDictConfig, FullyShardedDataParallel as FSDP, StateDictType
 from torch.distributed.fsdp.wrap import transformer_auto_wrap_policy, ModuleWrapPolicy
+from torch.distributed.checkpoint.state_dict import get_model_state_dict, StateDictOptions
 from tqdm.auto import tqdm
 import functools
 from transformers.models.qwen2_5_omni.modeling_qwen2_5_omni import Qwen2_5OmniAudioEncoderLayer, Qwen2_5OmniDecoderLayer, Qwen2_5OmniAudioEncoder, Qwen2_5OmniThinkerTextModel
-import bitsandbytes as bnb
 import wandb
 from contextlib import nullcontext
 from transformers import set_seed
@@ -41,7 +41,7 @@ def main():
 
     is_master = rank == 0
 
-    logging.getLogger().setLevel(logging.INFO)
+    logging.getLogger().setLevel(logging.DEBUG)
 
     logging.info(f"Local rank: {local_rank}")
     logging.info(f"Rank: {rank}")
@@ -154,6 +154,8 @@ def main():
     dist.barrier() 
 
     optim = torch.optim.AdamW(model.parameters(), lr=training_config['learning_rate'])
+    num_optim_steps = len(dataloader) // gradient_accumulation_steps
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optim, T_max=num_optim_steps, eta_min=training_config['learning_rate'] * training_config['eta_min_scale'])
 
     if not args.debug and is_master:
         flattened_config = flatten_config(config)
@@ -206,9 +208,12 @@ def main():
                         **metrics.to_dict(),
                         "epoch": epoch + 1,
                         "step": step + 1,
+                        "lr": scheduler.get_last_lr()[0],
                     })
 
                 metrics.reset()
+
+                scheduler.step()
 
             progress_bar.set_description(
                 f"Epoch {epoch + 1}, Loss: {output.loss.item():.4f}")
@@ -219,15 +224,21 @@ def main():
         # Save checkpoint
         dist.barrier()
 
-        if not args.debug and is_master:
-            checkpoint_path = experiment_dir / f"model_epoch{epoch+1}.pt"
-            logging.info(f"Saving model checkpoint to {checkpoint_path}")
-            torch.save(model.state_dict(), checkpoint_path)
-            logging.info(f"Saved model checkpoint to {checkpoint_path}")
+        if not args.debug:
+            # All processes need to participate in creating the state_dict
+            full_state_dict_config = FullStateDictConfig(offload_to_cpu=True, rank0_only=True)
+            with FSDP.state_dict_type(model, StateDictType.FULL_STATE_DICT, full_state_dict_config):
+                state_dict = model.state_dict()
 
+            # But only the master process saves the file
+            if is_master:
+                checkpoint_path = experiment_dir / f"model_epoch{epoch+1}.pt"
+                logging.info(f"Saving model checkpoint to {checkpoint_path}")
+                torch.save(state_dict, checkpoint_path)
+                logging.info(f"Saved model checkpoint to {checkpoint_path}")
+        dist.barrier()
 
-    logging.info(f"Training completed")
-    logging.info(experiment_dir)
+    logging.info(f"Training completed. All outputs saved to: {experiment_dir}")
 
 
 if __name__ == "__main__":

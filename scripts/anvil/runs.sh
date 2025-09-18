@@ -1,0 +1,1 @@
+sbatch scripts/anvil/train_and_eval.sh configs/qwen3b/librispeech/timestamp_single/poisson+bidirectional_audio[start][bias_-6][float16].yaml test_clean
