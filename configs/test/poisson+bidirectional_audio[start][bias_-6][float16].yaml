@@ -18,7 +18,6 @@ training:
 dataset:
   split: "train_clean_100"
   repository: "gilkeyio/librispeech-alignments"
-  take_first: 100
 
 task:
   type: "SINGLE_WORD_TIMESTAMP"
