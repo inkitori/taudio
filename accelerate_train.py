@@ -9,7 +9,7 @@ import wandb
 from transformers import set_seed
 import numpy as np
 
-from dataset.dataset import get_ds, collate_fn
+from dataset.dataset import get_ds
 from tasks import create_task
 from taudio import TAudio
 from utils.config_utils import (
@@ -129,8 +129,9 @@ def main():
     dataloader = DataLoader(
         ds, 
         batch_size=1, 
-        collate_fn=collate_fn,
         drop_last=True,
+        pin_memory=True,
+        num_workers=8
     )
 
     optim = torch.optim.AdamW(model.parameters(), lr=training_config['learning_rate'])
