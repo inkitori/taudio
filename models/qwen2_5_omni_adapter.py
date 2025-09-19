@@ -90,7 +90,7 @@ class Qwen2_5OmniAdapter(BaseModelAdapter):
         **kwargs,
     ) -> Any:
         with self.bidirectional_audio_context(kwargs["input_ids"]) if self.bidirectional_audio else nullcontext():
-            logging.info(f"Using bidirectional audio context: {
+            logging.debug(f"Using bidirectional audio context: {
                          self.bidirectional_audio}")
             return self.base_model(
                 **kwargs,
@@ -98,7 +98,7 @@ class Qwen2_5OmniAdapter(BaseModelAdapter):
 
     def generate(self, **kwargs):
         with self.bidirectional_audio_context(kwargs["input_ids"]) if self.bidirectional_audio else nullcontext():
-            logging.info(f"Using bidirectional audio context: {
+            logging.debug(f"Using bidirectional audio context: {
                          self.bidirectional_audio}")
             return self.base_model.generate(**kwargs)
 
@@ -142,7 +142,7 @@ class Qwen2_5OmniAdapter(BaseModelAdapter):
                     # 2. Modify the clone, not the original.
                     cloned_causal_mask[0, 0, start_idx:end_idx + 1, start_idx:end_idx + 1] = 0
                     
-                    logging.info(f"Zeroed out causal mask region [{start_idx}:{
+                    logging.debug(f"Zeroed out causal mask region [{start_idx}:{
                                     end_idx + 1}, {start_idx}:{end_idx + 1}]")
                     
                     # 3. Return the modified clone.
@@ -154,7 +154,7 @@ class Qwen2_5OmniAdapter(BaseModelAdapter):
 
         model._update_causal_mask = types.MethodType(
             patched_update_causal_mask, model)
-        logging.info(f"Patched _update_causal_mask on {type(model).__name__}")
+        logging.debug(f"Patched _update_causal_mask on {type(model).__name__}")
 
     def _unpatch_causal_mask(self):
         # Use the new helper property to get the actual model
@@ -165,7 +165,7 @@ class Qwen2_5OmniAdapter(BaseModelAdapter):
             delattr(model, 'mask_start')
         if hasattr(model, 'mask_end'):
             delattr(model, 'mask_end')
-        logging.info(f"Unpatched _update_causal_mask on {
+        logging.debug(f"Unpatched _update_causal_mask on {
                      type(model).__name__}")
 
     @contextmanager
@@ -173,10 +173,10 @@ class Qwen2_5OmniAdapter(BaseModelAdapter):
         start_audio_index, end_audio_index = get_audio_bounds(
             input_ids, self.constants.BEGIN_AUDIO_ID, self.constants.END_AUDIO_ID)
         self._patch_causal_mask_zero_region(start_audio_index, end_audio_index)
-        logging.info(f"Enabled bidirectional audio processing for region [{
+        logging.debug(f"Enabled bidirectional audio processing for region [{
                      start_audio_index}:{end_audio_index}]")
         try:
             yield
         finally:
             self._unpatch_causal_mask()
-            logging.info("Restored original causal mask settings")
+            logging.debug("Restored original causal mask settings")
