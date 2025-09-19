@@ -5,7 +5,7 @@ model:
   audio_layer: -1
   bidirectional_audio: true
   linear_bias: 0
-  dtype: "auto"
+  dtype: "float16"
 
 # Training configuration
 training:
