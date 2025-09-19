@@ -1,16 +1,16 @@
 #!/bin/bash
 #SBATCH --partition=ai
 #SBATCH --account=nairr250124-ai
-#SBATCH --mem-per-gpu=64G
+#SBATCH --mem-per-gpu=96G
 #SBATCH --cpus-per-gpu=2
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:2
 #SBATCH --time=2:59:00
-#SBATCH --job-name=train_and_eval
+#SBATCH --job-name=2_gpu
 #SBATCH --output=/anvil/scratch/x-pkeung/taudio/scripts/logs/%x/%j.out
 #SBATCH --error=/anvil/scratch/x-pkeung/taudio/scripts/logs/%x/%j.err
 
-export OMP_NUM_THREADS=96
+export OMP_NUM_THREADS=$(lscpu -b -p=CPU | grep -v '^#' | wc -l)
 
 master_addr=$(scontrol show hostnames "$SLURM_JOB_NODELIST" | head -n 1)
 export MASTER_ADDR=$master_addr
@@ -23,7 +23,7 @@ cd /anvil/scratch/x-pkeung/taudio
 module load conda
 conda activate ./env
 # Capture the training output to extract the experiment directory
-train_output=$(torchrun --nproc_per_node 2 --master_addr $MASTER_ADDR --master_port $MASTER_PORT train.py --config $1 2>&1) # this also has the effect of piping all train to out, and eval to err
+train_output=$(accelerate launch --config_file accelerate_configs/ds_2_gpu.yaml accelerate_train.py --config $1 2>&1) # this also has the effect of piping all train to out, and eval to err
 echo "$train_output"
 
 # Extract the experiment directory from training output
@@ -34,22 +34,17 @@ if [ -z "$experiment_dir" ]; then
     exit 1
 fi
 
-# Extract just the experiment name (last part of the path)
-
-
-echo "Training completed, starting evaluation..."
+echo "Training completed, starting evaluation job"
 echo "Experiment directory: $experiment_dir"
-echo "Experiment name: $experiment_dir"
 
-# Build the evaluate command with the exact experiment name
-eval_cmd="python evaluate.py --experiment $experiment_dir --split $2"
+eval_cmd="sbatch scripts/anvil/eval.sh $experiment_dir $2"
 
 if [ -n "$3" ]; then
-    eval_cmd="$eval_cmd --min-time $3"
+    eval_cmd="$eval_cmd $3"
 fi
 
 if [ -n "$4" ]; then
-    eval_cmd="$eval_cmd --max-time $4"
+    eval_cmd="$eval_cmd $4"
 fi
 
 echo "Eval command: $eval_cmd"

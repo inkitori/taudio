@@ -112,7 +112,7 @@ def main():
     model = TAudio(**taudio_config)
     model.train()
 
-    kwargs = InitProcessGroupKwargs(timeout=timedelta(hours=1))
+    kwargs = InitProcessGroupKwargs(timeout=timedelta(hours=2))
     accelerator = Accelerator(gradient_accumulation_steps=gradient_accumulation_steps, kwargs_handlers=[kwargs])
 
     ds = get_ds(
@@ -135,51 +135,61 @@ def main():
 
     optim = torch.optim.AdamW(model.parameters(), lr=training_config['learning_rate'])
 
-    num_optim_steps = len(dataloader)
+    num_optim_steps = len(dataloader) // (gradient_accumulation_steps * world_batch_size)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optim, T_max=num_optim_steps, eta_min=training_config['learning_rate'] * training_config['eta_min_scale'])
 
     model, optim, scheduler, dataloader = accelerator.prepare(model, optim, scheduler, dataloader)
 
+    scheduler.step_with_optimizer = False
+
+    logging.info(f"Number of optimizer steps: {num_optim_steps}")
     logging.info(f"Dataloader length: {len(dataloader)}")
 
     for epoch in range(training_config['epochs']):
         progress_bar = tqdm(
-            dataloader, 
+            range(num_optim_steps), 
             desc=f"Epoch {epoch + 1}",
             disable=not is_master,
             )
 
         metrics = AverageMetrics()
 
-        for step, batch in enumerate(progress_bar, start=1):
-            batch = {k: v.to(accelerator.device) for k, v in batch.items()}
+        for step, batch in enumerate(dataloader, start=1):
+            with accelerator.accumulate(model):
+                batch = {k: v.to(accelerator.device) for k, v in batch.items()}
 
-            output = model(**batch)
-            accelerator.backward(output.loss)
+                output = model(**batch)
+                accelerator.backward(output.loss)
 
-            metrics.update_dict({
-                "loss": output.loss.item(),
-                "token_loss": output.token_loss.item(),
-                "surrogate_loss": output.surrogate_loss.item(),
-                "auxiliary_deviation": output.auxiliary_deviation.item(),
-            })
-
-            optim.step()
-            scheduler.step()
-            optim.zero_grad()
-
-            if is_master and not args.debug:
-                run.log({
-                    **metrics.to_dict(),
-                    "epoch": epoch + 1,
-                    "step": step + 1,
-                    "lr": scheduler.get_last_lr()[0],
+				# this only logs metrics on the master process
+                metrics.update_dict({
+                    "loss": output.loss.item(),
+                    "token_loss": output.token_loss.item(),
+                    "surrogate_loss": output.surrogate_loss.item(),
+                    "auxiliary_deviation": output.auxiliary_deviation.item(),
                 })
 
-            metrics.reset()
+                optim.step()
+                optim.zero_grad()
 
-            progress_bar.set_description(
-                f"Epoch {epoch + 1}, Loss: {output.loss.item():.4f}")
+                if accelerator.sync_gradients:
+                    if is_master and not args.debug:
+                        run.log({
+                            **metrics.to_dict(),
+                            "epoch": epoch + 1,
+                            "step": step + 1,
+                            "lr": scheduler.get_last_lr()[0],
+                        })
+
+
+                    metrics.reset()
+
+                    progress_bar.set_description(
+                        f"Epoch {epoch + 1}, Loss: {output.loss.item():.4f}")
+
+                    progress_bar.update(1)
+
+                    scheduler.step()
 
         logging.info(f"Epoch {epoch + 1} completed.")
 

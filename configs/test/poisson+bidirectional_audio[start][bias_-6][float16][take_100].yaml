@@ -1,6 +1,6 @@
 # Model configuration
 model:
-  model_id: "Qwen/Qwen2.5-Omni-7B"
+  model_id: "Qwen/Qwen2.5-Omni-3B"
   freeze_text_model: false
   audio_layer: -1
   bidirectional_audio: true
@@ -18,7 +18,7 @@ training:
 dataset:
   split: "train_clean_100"
   repository: "gilkeyio/librispeech-alignments"
-  take_first: 1000
+  take_first: 100
 
 task:
   type: "SINGLE_WORD_TIMESTAMP"
