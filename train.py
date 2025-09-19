@@ -113,10 +113,10 @@ def main():
             config=flattened_config,
         )
 
-    batch_size = world_size # 1 batch per device
-    gradient_accumulation_steps = training_config['effective_batch_size'] // batch_size
+    world_batch_size = world_size # 1 batch per device
+    gradient_accumulation_steps = training_config['effective_batch_size'] // world_batch_size
 
-    logging.info(f"Batch size: {batch_size}")
+    logging.info(f"World batch size: {world_batch_size}")
     logging.info(f"Gradient accumulation steps: {gradient_accumulation_steps}")
 
     # Create task
@@ -242,7 +242,9 @@ def main():
                 logging.info(f"Saved model checkpoint to {checkpoint_path}")
         dist.barrier()
 
-    logging.info(f"Training completed. All outputs saved to: {experiment_dir}")
+    # messes with shell script if not protected
+    if is_master:
+        logging.info(f"Training completed. All outputs saved to: {experiment_dir}")
 
 
 if __name__ == "__main__":

@@ -33,14 +33,14 @@ if [ -z "$experiment_dir" ]; then
 fi
 
 # Extract just the experiment name (last part of the path)
-experiment_name=$(basename "$experiment_dir")
+
 
 echo "Training completed, starting evaluation..."
 echo "Experiment directory: $experiment_dir"
-echo "Experiment name: $experiment_name"
+echo "Experiment name: $experiment_dir"
 
 # Build the evaluate command with the exact experiment name
-eval_cmd="python evaluate.py --experiment $experiment_name --split $2"
+eval_cmd="python evaluate.py --experiment $experiment_dir --split $2"
 
 if [ -n "$3" ]; then
     eval_cmd="$eval_cmd --min-time $3"

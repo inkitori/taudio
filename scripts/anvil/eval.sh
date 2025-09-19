@@ -18,15 +18,11 @@ conda activate ./env
 eval_cmd="python evaluate.py --experiment $1 --split $2"
 
 if [ -n "$3" ]; then
-    eval_cmd="$eval_cmd --error-bound $3"
+    eval_cmd="$eval_cmd --min-time $3"
 fi
 
 if [ -n "$4" ]; then
-    eval_cmd="$eval_cmd --min-time $4"
-fi
-
-if [ -n "$5" ]; then
-    eval_cmd="$eval_cmd --max-time $5"
+    eval_cmd="$eval_cmd --max-time $4"
 fi
 
 $eval_cmd

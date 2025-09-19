@@ -27,8 +27,16 @@ def get_ds(
             eval_mode=False,
         )
 
-
     base_ds = ds_adapter.load_split(split).filter(lambda x: not task.skip_example(x, ds_adapter))
+
+    world_size = dist.get_world_size()
+
+    num_samples = len(base_ds)
+    remainder = num_samples % world_size
+    if remainder != 0:
+        base_ds = base_ds.select(range(num_samples - remainder))
+
+
     sharded_ds = base_ds.shard(num_shards=dist.get_world_size(), index=dist.get_rank())
 
     sharded_ds = sharded_ds.map(preprocess_fn, remove_columns=base_ds.column_names, writer_batch_size=WRITER_BATCH_SIZE)

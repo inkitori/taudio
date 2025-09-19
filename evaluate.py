@@ -13,6 +13,8 @@ from utils.config_utils import ConfigManager, relative_path_to_experiment_name, 
 import logging
 from tasks import create_task
 from utils.metrics import AverageMetrics
+import numpy as np
+from transformers import set_seed
 
 def main():
     logging.getLogger().setLevel(logging.DEBUG)
@@ -68,7 +70,10 @@ def main():
     # Set random seed
     SEED = config['system']['seed']
     random.seed(SEED)
+    torch.cuda.manual_seed(SEED)
     torch.manual_seed(SEED)
+    np.random.seed(SEED)
+    set_seed(SEED)    
 
     # Device setup
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
