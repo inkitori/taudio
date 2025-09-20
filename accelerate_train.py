@@ -196,6 +196,8 @@ def main():
 
         # Save checkpoint
 
+        accelerator.wait_for_everyone()
+
         if not args.debug:
             unwrapped_model = accelerator.unwrap_model(model)
 
