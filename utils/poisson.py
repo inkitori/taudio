@@ -2,6 +2,7 @@ import numpy as np
 import torch
 from scipy.stats import beta
 import logging
+from accelerate import PartialState
 
 def beta_medians(n):
     # input: scalar n
@@ -40,7 +41,6 @@ def poisson_loss(log_hazard, label_mask, frame_mask):
     label_mask (batch, seq len): boolean mask for when the events occurred, 1 if the event occurred in that frame, 0 otherwise
     frame_mask (batch, seq len): boolean mask for the frame padding
     '''
-    # Calculate cumulative hazard with intermediate tensor cleanup
     cumulative_hazard = torch.sum(torch.exp(log_hazard) * frame_mask, dim=1)
     return cumulative_hazard - (log_hazard * label_mask).sum(dim=1)
 # perform inference

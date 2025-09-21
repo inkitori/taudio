@@ -35,7 +35,7 @@ class BaseTask(ABC):
         """Evaluate the auxiliary outputs of the model."""
 
     @abstractmethod
-    def calculate_loss(self, logits, labels, adapter: BaseModelAdapter, poisson_loss: bool, class_weighting: bool) -> Tuple[torch.Tensor, torch.Tensor]:
+    def calculate_loss(self, audio_logits, audio_labels, audio_labels_frame_mask, model_adapter: BaseModelAdapter, poisson_loss: bool, class_weighting: bool) -> Tuple[torch.Tensor, torch.Tensor]:
         """Calculate the loss for the task."""
 
     @abstractmethod

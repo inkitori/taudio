@@ -6,7 +6,7 @@
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:4
 #SBATCH --time=59:00
-#SBATCH --job-name=4_gpu
+#SBATCH --job-name=4_gpu_bf16
 #SBATCH --output=/anvil/scratch/x-pkeung/taudio/scripts/logs/%x/%j.out
 #SBATCH --error=/anvil/scratch/x-pkeung/taudio/scripts/logs/%x/%j.err
 
@@ -23,7 +23,7 @@ cd /anvil/scratch/x-pkeung/taudio
 module load conda
 conda activate ./env
 # Capture the training output to extract the experiment directory
-train_output=$(accelerate launch --config_file accelerate_configs/4_gpu.yaml accelerate_train.py --config $1 2>&1) # this also has the effect of piping all train to out, and eval to err
+train_output=$(accelerate launch --config_file accelerate_configs/4_gpu_bf16.yaml accelerate_train.py --config $1 2>&1) # this also has the effect of piping all train to out, and eval to err
 echo "$train_output"
 
 # Extract the experiment directory from training output

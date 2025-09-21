@@ -145,26 +145,26 @@ class SingleTimestampTask(BaseTask):
         feature_attention_mask = inputs["feature_attention_mask"]
 
         # Labels aligned to <AUDIO> embeddings (40 ms per embedding for Qwen2.5 Omni)
-        labels_size = int((input_ids == model_adapter.audio_id).sum().item())
-        labels = torch.zeros(labels_size, device=input_ids.device)
+        audio_labels_size = int((input_ids == model_adapter.audio_id).sum().item())
+        audio_labels = torch.zeros(audio_labels_size, device=input_ids.device)
 
         event_idx = clamp(math.floor(
-            t_sec * (model_adapter.seconds_to_embedding)), 0, labels_size - 1)
-        labels[event_idx] = 1.0
+            t_sec * (model_adapter.seconds_to_embedding)), 0, audio_labels_size - 1)
+        audio_labels[event_idx] = 1.0
 
         # Mask out everything up to and including the assistant token
-        label_ids = input_ids.clone()
+        labels = input_ids.clone()
         assistant_idx = (input_ids == model_adapter.assistant_id).nonzero(
             as_tuple=True)[1][0]
-        label_ids[0, : assistant_idx + 1] = -100
+        labels[0, : assistant_idx + 1] = -100
 
         return {
             "input_ids": input_ids[0],
             "attention_mask": attention_mask[0],
             "input_features": input_features[0],
             "feature_attention_mask": feature_attention_mask[0],
-            "labels": labels,
-            "label_ids": label_ids[0],
+            "audio_labels": audio_labels,
+            "labels": labels[0],
         }
 
     # ----- Evaluation helpers -----
@@ -192,13 +192,13 @@ class SingleTimestampTask(BaseTask):
         inputs = self.build_labels(
             example=example,
             ds_adapter=ds_adapter,
-            model_adapter=model.adapter,
+            model_adapter=model.model_adapter,
             eval_mode=True,
             event=event,
         )
         inputs = inputs.to(next(model.parameters()).device)
 
-        processor = model.adapter.processor
+        processor = model.model_adapter.processor
         with torch.no_grad():
             tokens = model.generate(
                 **inputs, eos_token_id=processor.tokenizer.eos_token_id
@@ -245,17 +245,17 @@ class SingleTimestampTask(BaseTask):
         inputs = self.build_labels(
             example=example,
             ds_adapter=ds_adapter,
-            model_adapter=model.adapter,
+            model_adapter=model.model_adapter,
             eval_mode=True,
             event=event,
         )
         inputs = inputs.to(next(model.parameters()).device)
 
         with torch.no_grad():
-            outputs = model.adapter(**inputs, output_hidden_states=True)
+            outputs = model.model_adapter(**inputs, output_hidden_states=True)
             hidden_states = outputs.hidden_states[model.audio_layer]
             audio_hidden_states = hidden_states[inputs["input_ids"]
-                                                == model.adapter.audio_id]
+                                                == model.model_adapter.audio_id]
             logits = model.linear(audio_hidden_states).squeeze()
             if model.poisson_loss:
                 aux_pred_top_idx = infer_timestamps(
@@ -263,7 +263,7 @@ class SingleTimestampTask(BaseTask):
             else:
                 aux_pred_top_idx = torch.argmax(logits, dim=0).item()
                 aux_pred_top_idx = aux_pred_top_idx + 0.5 # because we floor timestamps to the frame, we want to have full coverage over the frame
-        aux_pred = float(aux_pred_top_idx) / model.adapter.seconds_to_embedding
+        aux_pred = float(aux_pred_top_idx) / model.model_adapter.seconds_to_embedding
         aux_pred = better_round(aux_pred * 100.0) / 100.0
 
         logging.info(f"Auxiliary prediction: {aux_pred}, GT: {gt}")
@@ -278,13 +278,25 @@ class SingleTimestampTask(BaseTask):
         }
         return metrics
 
-    def calculate_loss(self, logits, labels, adapter: BaseModelAdapter, use_poisson_loss: bool, class_weighting: bool) -> torch.Tensor:
-        gt_timestamp = torch.argmax(labels).item()
+    def calculate_loss(self, audio_logits, audio_labels, audio_labels_frame_mask, model_adapter: BaseModelAdapter, use_poisson_loss: bool, class_weighting: bool) -> torch.Tensor:
+        first_audio_labels = audio_labels[0]
+        first_audio_logits = audio_logits[0]
+
+        if (first_audio_labels == -100).any():
+            first_neg100_idx = (first_audio_labels == -100).nonzero(as_tuple=True)[0][0].item()
+        else:
+            first_neg100_idx = None
+
+        first_audio_labels = first_audio_labels[:first_neg100_idx]
+        first_audio_logits = first_audio_logits[:first_neg100_idx]
+
+        gt_timestamp = torch.argmax(first_audio_labels).item()
 
         if use_poisson_loss:
-            loss = poisson_loss(logits.unsqueeze(0), labels.unsqueeze(0), torch.ones_like(logits.unsqueeze(0))) 
-            pred_timestamp = infer_timestamps(1, logits.cpu().float().detach().numpy())
+            loss = poisson_loss(audio_logits, audio_labels, audio_labels_frame_mask).mean()
+            pred_timestamp = infer_timestamps(1, first_audio_logits.cpu().float().detach().numpy())
         else:
+            # DONT FORGET TO HANDLE THE PADDING HERE TOO
             if class_weighting:
                 num_ones = (labels == 1).sum()
                 num_zeros = (labels == 0).sum()
@@ -300,10 +312,10 @@ class SingleTimestampTask(BaseTask):
             pred_timestamp = pred_timestamp + 0.5 # because we floor timestamps to the frame, we want to have full coverage over the frame
 
 
-        pred_timestamp = float(pred_timestamp) / adapter.seconds_to_embedding
+        pred_timestamp = float(pred_timestamp) / model_adapter.seconds_to_embedding
         pred_timestamp = better_round(pred_timestamp * 100.0) / 100.0
 
-        gt_timestamp = float(gt_timestamp) / adapter.seconds_to_embedding
+        gt_timestamp = float(gt_timestamp) / model_adapter.seconds_to_embedding
 
         logging.info(f"Predicted Timestamp: {pred_timestamp}, GT Timestamp: {gt_timestamp}")
         abs_err = better_round(abs(pred_timestamp - gt_timestamp) * 100.0) / 100.0

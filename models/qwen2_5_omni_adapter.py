@@ -25,9 +25,6 @@ class Qwen2_5OmniAdapter(BaseModelAdapter):
         )
 
         # Convenience references
-        self._audio_tower = self.base_model.audio_tower
-        self._text_model = self.base_model.model
-
         self._processor = Qwen2_5OmniProcessor.from_pretrained(model_id)
         self.bidirectional_audio = bidirectional_audio
 
@@ -45,12 +42,12 @@ class Qwen2_5OmniAdapter(BaseModelAdapter):
         Returns the underlying text model, handling the case where it might be
         wrapped by FSDP.
         """
-        if isinstance(self._text_model, FSDP):
+        if isinstance(self.base_model.model, FSDP):
             # If it's an FSDP instance, the real module is in the .module attribute
-            return self._text_model.module
+            return self.base_model.model.module
         else:
             # Otherwise, return it directly
-            return self._text_model
+            return self.base_model.model
     # --- END: NEW HELPER PROPERTY ---
 
     # Properties required by TAudio
@@ -78,7 +75,7 @@ class Qwen2_5OmniAdapter(BaseModelAdapter):
     def text_model(self) -> nn.Module:
         # This property should still return the FSDP wrapper if it exists,
         # as the training loop needs to interact with it.
-        return self._text_model
+        return self.base_model.model
 
     @property
     def processor(self) -> Qwen2_5OmniProcessor:

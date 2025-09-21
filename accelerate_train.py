@@ -3,13 +3,14 @@ import logging
 import random
 
 import torch
+from torch.distributed.fsdp import FullStateDictConfig, StateDictType
 from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
 import wandb
 from transformers import set_seed
 import numpy as np
 
-from dataset.dataset import get_ds
+from dataset.dataset import collate_fn, get_ds
 from tasks import create_task
 from taudio import TAudio
 from utils.config_utils import (
@@ -21,8 +22,6 @@ from utils.config_utils import (
 from utils.metrics import AverageMetrics
 
 from accelerate import Accelerator, PartialState
-from accelerate.utils import InitProcessGroupKwargs
-from datetime import timedelta
 
 def main():
     logging.getLogger().setLevel(logging.INFO)
@@ -49,11 +48,11 @@ def main():
     training_config = config['training']
     system_config = config['system']
 
-    world_batch_size = PartialState().num_processes # 1 batch per device
-    gradient_accumulation_steps = training_config['effective_batch_size'] // world_batch_size
+    world_size = PartialState().num_processes # 1 batch per device
+    batch_size_per_device = training_config['effective_batch_size'] // world_size
 
-    logging.info(f"World batch size: {world_batch_size}")
-    logging.info(f"Gradient accumulation steps: {gradient_accumulation_steps}")
+    logging.info(f"World Size: {world_size}")
+    logging.info(f"Batch size per device: {batch_size_per_device}")
 
     is_master = PartialState().is_main_process
     logging.info(f"Is master: {is_master}")
@@ -112,11 +111,10 @@ def main():
     model = TAudio(**taudio_config)
     model.train()
 
-    kwargs = InitProcessGroupKwargs(timeout=timedelta(hours=2))
-    accelerator = Accelerator(gradient_accumulation_steps=gradient_accumulation_steps, kwargs_handlers=[kwargs])
+    accelerator = Accelerator()
 
     ds = get_ds(
-        model_adapter=model.adapter,
+        model_adapter=model.model_adapter,
         repository=dataset_config['repository'],
         split=dataset_config['split'],
         task=task,
@@ -128,69 +126,68 @@ def main():
 
     dataloader = DataLoader(
         ds, 
-        batch_size=1, 
+        batch_size=batch_size_per_device, 
         drop_last=True,
         pin_memory=True,
-        num_workers=8
+        num_workers=8,
+        collate_fn=collate_fn
     )
 
     optim = torch.optim.AdamW(model.parameters(), lr=training_config['learning_rate'])
 
-    num_optim_steps = len(dataloader) // (gradient_accumulation_steps * world_batch_size)
+    num_optim_steps = len(dataloader)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optim, T_max=num_optim_steps, eta_min=training_config['learning_rate'] * training_config['eta_min_scale'])
 
     model, optim, scheduler, dataloader = accelerator.prepare(model, optim, scheduler, dataloader)
-
-    scheduler.step_with_optimizer = False
 
     logging.info(f"Number of optimizer steps: {num_optim_steps}")
     logging.info(f"Dataloader length: {len(dataloader)}")
 
     for epoch in range(training_config['epochs']):
         progress_bar = tqdm(
-            range(num_optim_steps), 
+            dataloader, 
             desc=f"Epoch {epoch + 1}",
             disable=not is_master,
             )
 
         metrics = AverageMetrics()
 
-        for step, batch in enumerate(dataloader, start=1):
-            with accelerator.accumulate(model):
-                batch = {k: v.to(accelerator.device) for k, v in batch.items()}
+        for step, batch in enumerate(progress_bar, start=1):
+            batch = {k: v.to(accelerator.device) for k, v in batch.items()}
 
-                output = model(**batch)
-                accelerator.backward(output.loss)
+            output = model(**batch)
 
-				# this only logs metrics on the master process
-                metrics.update_dict({
-                    "loss": output.loss.item(),
-                    "token_loss": output.token_loss.item(),
-                    "surrogate_loss": output.surrogate_loss.item(),
-                    "auxiliary_deviation": output.auxiliary_deviation.item(),
+            accelerator.backward(output.loss)
+
+            optim.step()
+            optim.zero_grad()
+            scheduler.step()
+
+            loss = accelerator.reduce(output.loss, reduction='mean')
+            token_loss = accelerator.reduce(output.token_loss, reduction='mean')
+            surrogate_loss = accelerator.reduce(output.surrogate_loss, reduction='mean')
+            auxiliary_deviation = accelerator.reduce(output.auxiliary_deviation, reduction='mean')
+
+            metrics.update_dict({
+                "loss": loss.item(),
+                "token_loss": token_loss.item(),
+                "surrogate_loss": surrogate_loss.item(),
+                "auxiliary_deviation": auxiliary_deviation.item(),
+            })
+
+            if is_master and not args.debug:
+                run.log({
+                    **metrics.to_dict(),
+                    "epoch": epoch + 1,
+                    "step": step + 1,
+                    "lr": scheduler.get_last_lr()[0],
                 })
 
-                optim.step()
-                optim.zero_grad()
+                metrics.reset()
 
-                if accelerator.sync_gradients:
-                    if is_master and not args.debug:
-                        run.log({
-                            **metrics.to_dict(),
-                            "epoch": epoch + 1,
-                            "step": step + 1,
-                            "lr": scheduler.get_last_lr()[0],
-                        })
+                progress_bar.set_description(
+                    f"Epoch {epoch + 1}, Loss: {loss.item():.4f}")
 
-
-                    metrics.reset()
-
-                    progress_bar.set_description(
-                        f"Epoch {epoch + 1}, Loss: {output.loss.item():.4f}")
-
-                    progress_bar.update(1)
-
-                    scheduler.step()
 
         logging.info(f"Epoch {epoch + 1} completed.")
 
@@ -198,15 +195,34 @@ def main():
 
         accelerator.wait_for_everyone()
 
-        if not args.debug:
-            unwrapped_model = accelerator.unwrap_model(model)
+        logging.info(f"Retrieving state dict")
 
-            # But only the master process saves the file
-            if is_master:
-                checkpoint_path = experiment_dir / f"model_epoch{epoch+1}.pt"
-                logging.info(f"Saving model checkpoint to {checkpoint_path}")
-                torch.save(unwrapped_model.state_dict(), checkpoint_path)
-                logging.info(f"Saved model checkpoint to {checkpoint_path}")
+        unwrapped_model = accelerator.unwrap_model(model)
+        state_dict = accelerator.get_state_dict(unwrapped_model)
+
+        if is_master:
+            checkpoint_path = experiment_dir / f"model_epoch{epoch+1}.pt"
+            logging.info(f"Saving model checkpoint to {checkpoint_path}")
+            torch.save(state_dict, checkpoint_path)
+
+
+
+        # if not args.debug and is_master:
+
+        # checkpoint_path = experiment_dir / f"model_epoch{epoch+1}.pt"
+        # logging.info(f"Saving model checkpoint to {experiment_dir}")
+
+
+            
+        # logging.info(f"Saved model checkpoint to {checkpoint_path}")
+
+        # logging.info(f"Unwrapping model")
+        # unwrapped_model = accelerator.unwrap_model(model)
+        # if is_master:
+        #     logging.info(f"Saving model checkpoint to {experiment_dir}")
+        #     torch.save(unwrapped_model.state_dict(), experiment_dir / f"model_epoch{epoch+1}.pt")
+
+        # accelerator.save_model(model, experiment_dir, max_shard_size="80GB", safe_serialization=False)
 
         accelerator.wait_for_everyone()
 

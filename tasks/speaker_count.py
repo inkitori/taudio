@@ -85,24 +85,24 @@ class SpeakerCountTask(BaseTask):
         feature_attention_mask = inputs["feature_attention_mask"]
 
         # Labels aligned to <AUDIO> embeddings (40 ms per embedding for Qwen2.5 Omni)
-        labels_size = int((input_ids == model_adapter.audio_id).sum().item())
-        labels = torch.zeros(labels_size, device=input_ids.device)
+        audio_labels_size = int((input_ids == model_adapter.audio_id).sum().item())
+        audio_labels = torch.zeros(audio_labels_size, device=input_ids.device)
 
-        labels[0] = speaker_count
+        audio_labels[0] = speaker_count
 
         # Mask out everything up to and including the assistant token
-        label_ids = input_ids.clone()
+        labels = input_ids.clone()
         assistant_idx = (input_ids == model_adapter.assistant_id).nonzero(
             as_tuple=True)[1][0]
-        label_ids[0, : assistant_idx + 1] = -100
+        labels[0, : assistant_idx + 1] = -100
 
         return {
             "input_ids": input_ids[0],
             "attention_mask": attention_mask[0],
             "input_features": input_features[0],
             "feature_attention_mask": feature_attention_mask[0],
-            "labels": labels,
-            "label_ids": label_ids[0],
+            "audio_labels": audio_labels,
+            "labels": labels[0],
         }
 
     # ----- Evaluation helpers -----
@@ -121,12 +121,12 @@ class SpeakerCountTask(BaseTask):
         inputs = self.build_labels(
             example=example,
             ds_adapter=ds_adapter,
-            model_adapter=model.adapter,
+            model_adapter=model.model_adapter,
             eval_mode=True,
         )
         inputs = inputs.to(next(model.parameters()).device)
 
-        processor = model.adapter.processor
+        processor = model.model_adapter.processor
         with torch.no_grad():
             tokens = model.generate(
                 **inputs, eos_token_id=processor.tokenizer.eos_token_id
@@ -162,16 +162,16 @@ class SpeakerCountTask(BaseTask):
         inputs = self.build_labels(
             example=example,
             ds_adapter=ds_adapter,
-            model_adapter=model.adapter,
+            model_adapter=model.model_adapter,
             eval_mode=True,
         )
         inputs = inputs.to(next(model.parameters()).device)
 
         with torch.no_grad():
-            outputs = model.adapter(**inputs, output_hidden_states=True)
+            outputs = model.model_adapter(**inputs, output_hidden_states=True)
             hidden_states = outputs.hidden_states[model.audio_layer]
             audio_hidden_states = hidden_states[inputs["input_ids"]
-                                                == model.adapter.audio_id]
+                                                == model.model_adapter.audio_id]
             logits = model.linear(audio_hidden_states).squeeze()
             logits = logits.unsqueeze(0)
             if model.poisson_loss:
@@ -194,10 +194,10 @@ class SpeakerCountTask(BaseTask):
         }
         return metrics
 
-    def calculate_loss(self, logits, labels, adapter: BaseModelAdapter, use_poisson_loss: bool, class_weighting: bool) -> torch.Tensor:
+    def calculate_loss(self, audio_logits, audio_labels, audio_labels_frame_mask, model_adapter: BaseModelAdapter, use_poisson_loss: bool, class_weighting: bool) -> torch.Tensor:
         # Get ground truth count with cleanup
-        labels_sum = labels.sum()
-        gt_count = labels_sum.item()
+        labels_sum = audio_labels.sum(dim=1)
+        first_gt_count = labels_sum[0].item()
 
         if use_poisson_loss:
             logging.info("Poisson loss enabled")
@@ -226,20 +226,16 @@ class SpeakerCountTask(BaseTask):
             # logging.info(f"Sigmoid probs: {probs}")
             # raw_count = probs.sum()
 
-            raw_count = logits[-1]
+            raw_count = audio_logits[:, -1]
 
-            pred_count_tensor = torch.round(raw_count)
-            pred_count = pred_count_tensor.item()
+            first_pred_count = torch.round(raw_count[0]).item()
 
-            loss = torch.abs(raw_count - labels_sum)
+            loss = torch.abs(raw_count - labels_sum).mean()
 
-            logging.info(f"Labels Ground Truth: {gt_count}")
-            logging.info(f"Predicted Count: {pred_count}")
+            logging.info(f"Labels Ground Truth: {first_gt_count}")
+            logging.info(f"Predicted Count: {first_pred_count}")
 
-            # Clean up intermediate tensors
-            del labels_sum, pred_count_tensor
-
-            return loss, torch.tensor(abs(pred_count - gt_count)).to(loss.device)
+            return loss, torch.tensor(abs(first_pred_count - first_gt_count)).to(loss.device)
 
 	# [min, max)
     def skip_example(self, example: Dict[str, Any], adapter: BaseModelAdapter) -> bool:

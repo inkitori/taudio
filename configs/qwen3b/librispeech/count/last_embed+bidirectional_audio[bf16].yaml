@@ -1,6 +1,6 @@
 # Model configuration
 model:
-  model_id: "Qwen/Qwen2.5-Omni-7B"
+  model_id: "Qwen/Qwen2.5-Omni-3B"
   freeze_text_model: false
   audio_layer: -1
   bidirectional_audio: true
@@ -10,15 +10,14 @@ model:
 # Training configuration
 training:
   epochs: 1
-  effective_batch_size: 4
+  effective_batch_size: 8
   learning_rate: 5.0e-6
   eta_min_scale: 0.1
   
 # Dataset configuration
 dataset:
-  split: "train"
-  repository: "wjiaqi/taudio"
-  take_first: 20
+  split: "train_clean_100"
+  repository: "gilkeyio/librispeech-alignments"
 
 task:
   type: "SPEAKER_COUNT"

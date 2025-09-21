@@ -17,7 +17,7 @@ import numpy as np
 from transformers import set_seed
 
 def main():
-    logging.getLogger().setLevel(logging.DEBUG)
+    logging.getLogger().setLevel(logging.INFO)
 
     parser = argparse.ArgumentParser(description="Evaluate TAudio model.")
     parser.add_argument('--experiment', type=str, required=True,
@@ -123,7 +123,7 @@ def main():
     adapter = create_adapter(
         infer_adapter_from_repository(dataset_config['repository']),
         repository=dataset_config['repository'],
-        sampling_rate=model.adapter.sampling_rate,
+        sampling_rate=model.model_adapter.sampling_rate,
     )
     base_ds = adapter.load_split(args.split)
 
