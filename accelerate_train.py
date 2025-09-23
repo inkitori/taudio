@@ -119,7 +119,6 @@ def main():
         split=dataset_config['split'],
         task=task,
         take_first=dataset_config.get('take_first', None),
-        sharded=False,
     )
 
     accelerator.wait_for_everyone()
@@ -167,6 +166,8 @@ def main():
             token_loss = accelerator.reduce(output.token_loss, reduction='mean')
             surrogate_loss = accelerator.reduce(output.surrogate_loss, reduction='mean')
             auxiliary_deviation = accelerator.reduce(output.auxiliary_deviation, reduction='mean')
+
+            logging.info(f"Loss: {loss.dtype}")
 
             metrics.update_dict({
                 "loss": loss.item(),
