@@ -39,7 +39,7 @@ class TAudio(nn.Module):
             for param in self.model_adapter.text_model.parameters():
                 param.requires_grad = False
 
-        self.linear = nn.Linear(self.hidden_dim, 1, dtype=self.model_adapter.dtype)
+        self.linear = nn.Linear(self.hidden_dim, 1, dtype=torch.float64)
 
         if linear_bias is not None:
             with torch.no_grad():
@@ -95,10 +95,13 @@ class TAudio(nn.Module):
 
         audio_logits = []
 
-        for example in range(batch_size):
-            audio_hidden_states = hidden_states[example][input_ids[example] == self.model_adapter.audio_id] # (num_audio_tokens, hidden_dim)
-            example_audio_logits = self.linear(audio_hidden_states).squeeze() # (num_audio_tokens)
-            audio_logits.append(example_audio_logits)
+        # ensure this path is computed in float64 regardless of global autocast
+        with torch.autocast(device_type=hidden_states.device.type, enabled=False):
+            hidden_states = hidden_states.to(torch.float64)
+            for example in range(batch_size):
+                audio_hidden_states = hidden_states[example][input_ids[example] == self.model_adapter.audio_id] # (num_audio_tokens, hidden_dim)
+                example_audio_logits = self.linear(audio_hidden_states).squeeze() # (num_audio_tokens)
+                audio_logits.append(example_audio_logits)
 
         audio_logits = torch.nn.utils.rnn.pad_sequence(audio_logits, batch_first=True, padding_value=0, padding_side='right') # (batch_size, num_audio_tokens)
         audio_labels_frame_mask = torch.where(audio_labels == -100, 0, 1) # (batch_size, num_audio_tokens)
