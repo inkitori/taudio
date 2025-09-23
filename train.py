@@ -6,8 +6,8 @@ from datetime import timedelta
 
 import torch
 import torch.distributed as dist
-from torch.utils.data import DataLoader
-from torch.distributed.fsdp import FullStateDictConfig, FullyShardedDataParallel as FSDP, StateDictType
+from torch.utils.data import DataLoader, DistributedSampler
+from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp.wrap import transformer_auto_wrap_policy, ModuleWrapPolicy
 from torch.distributed.checkpoint.state_dict import get_model_state_dict, StateDictOptions
 from tqdm.auto import tqdm
@@ -30,14 +30,13 @@ from utils.config_utils import (
 from utils.metrics import AverageMetrics
 
 def main():
+    CUDA_VISIBLE_DEVICES = int(os.environ["LOCAL_RANK"]) 
+
     logging.getLogger().setLevel(logging.INFO)
     logging.info(f"MASTER_PORT: {os.environ['MASTER_PORT']}")
     logging.info(f"MASTER_ADDR: {os.environ['MASTER_ADDR']}")
 
-    dist.init_process_group(
-        backend='nccl',
-        timeout=timedelta(hours=1), # an hour
-    )
+    dist.init_process_group(backend='nccl')
 
     local_rank = int(os.environ["LOCAL_RANK"])
     rank = int(os.environ["RANK"])
@@ -45,10 +44,9 @@ def main():
 
     is_master = rank == 0
 
-
     logging.info(f"Local rank: {local_rank}")
     logging.info(f"Rank: {rank}")
-    logging.info(f"World size: {world_size}")
+    logging.info(f"World Size: {world_size}")
     logging.info(f"Is master: {is_master}")
 
     parser = argparse.ArgumentParser(description="Train TAudio model.")
@@ -76,6 +74,10 @@ def main():
     training_config = config['training']
     system_config = config['system']
 
+    batch_size_per_device = training_config['effective_batch_size'] // world_size
+
+    logging.info(f"Batch size per device: {batch_size_per_device}")
+
     # Set random seed
     random.seed(system_config['seed'])
     torch.cuda.manual_seed(system_config['seed'])
@@ -97,7 +99,6 @@ def main():
         # Save config to experiment directory
         config_manager.save_config(config, experiment_dir)
 
-
     logging.info(f"Output directory: {experiment_dir}")
     logging.info(f"Project name: {project_name}")
     logging.info(f"Starting experiment: {experiment_name}")
@@ -112,12 +113,6 @@ def main():
             name=experiment_name,
             config=flattened_config,
         )
-
-    world_batch_size = world_size # 1 batch per device
-    gradient_accumulation_steps = training_config['effective_batch_size'] // world_batch_size
-
-    logging.info(f"World batch size: {world_batch_size}")
-    logging.info(f"Gradient accumulation steps: {gradient_accumulation_steps}")
 
     # Create task
     task = create_task(task_type=task_config['type'], **task_config.get('kwargs', {}))
@@ -134,8 +129,6 @@ def main():
     transformer_layer_cls = {
         Qwen2_5OmniAudioEncoderLayer,
         Qwen2_5OmniDecoderLayer,
-        # Qwen2_5OmniAudioEncoder,
-        # Qwen2_5OmniThinkerTextModel,
     }
     
     # auto_wrap_policy = functools.partial(
@@ -151,7 +144,7 @@ def main():
     model.train()
 
     ds = get_ds(
-        model_adapter=model.adapter,
+        model_adapter=model.model_adapter,
         repository=dataset_config['repository'],
         split=dataset_config['split'],
         task=task,
@@ -160,16 +153,18 @@ def main():
 
     dataloader = DataLoader(
         ds, 
-        batch_size=1, 
+        batch_size=batch_size_per_device, 
         collate_fn=collate_fn,
+        sampler=DistributedSampler(ds, num_replicas=world_size, rank=rank),
+        pin_memory=True,
+        num_workers=8,
     )
 
     dist.barrier() 
 
     optim = torch.optim.AdamW(model.parameters(), lr=training_config['learning_rate'])
-    num_optim_steps = len(dataloader) // gradient_accumulation_steps
+    num_optim_steps = len(dataloader)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optim, T_max=num_optim_steps, eta_min=training_config['learning_rate'] * training_config['eta_min_scale'])
-
 
     for epoch in range(training_config['epochs']):
         progress_bar = tqdm(
@@ -182,14 +177,11 @@ def main():
 
         for step, batch in enumerate(progress_bar, start=1):
             batch = {k: v.to(device) for k, v in batch.items()}
-            context = model.no_sync() if step % gradient_accumulation_steps != 0 else nullcontext()
-
-            with context:
+            
+            with torch.autocast(device_type=device.type, dtype=torch.bfloat16):
                 output = model(**batch)
-                
-                scaled_loss = output.loss / gradient_accumulation_steps
-                    
-                scaled_loss.backward()
+
+            output.loss.backward()
 
             dist.all_reduce(output.loss, op=dist.ReduceOp.AVG)
             dist.all_reduce(output.token_loss, op=dist.ReduceOp.AVG)
@@ -203,21 +195,20 @@ def main():
                 "auxiliary_deviation": output.auxiliary_deviation.item(),
             })
 
-            if step % gradient_accumulation_steps == 0:
-                optim.step()
-                optim.zero_grad()
+            optim.step()
+            optim.zero_grad()
 
-                if is_master and not args.debug:
-                    run.log({
-                        **metrics.to_dict(),
-                        "epoch": epoch + 1,
-                        "step": step + 1,
-                        "lr": scheduler.get_last_lr()[0],
-                    })
+            if is_master and not args.debug:
+                run.log({
+                    **metrics.to_dict(),
+                    "epoch": epoch + 1,
+                    "step": step + 1,
+                    "lr": scheduler.get_last_lr()[0],
+                })
 
-                metrics.reset()
+            metrics.reset()
 
-                scheduler.step()
+            scheduler.step()
 
             progress_bar.set_description(
                 f"Epoch {epoch + 1}, Loss: {output.loss.item():.4f}")
@@ -230,9 +221,8 @@ def main():
 
         if not args.debug:
             # All processes need to participate in creating the state_dict
-            full_state_dict_config = FullStateDictConfig(offload_to_cpu=True, rank0_only=True)
-            with FSDP.state_dict_type(model, StateDictType.FULL_STATE_DICT, full_state_dict_config):
-                state_dict = model.state_dict()
+            state_dict_options = StateDictOptions(full_state_dict=True)
+            state_dict = get_model_state_dict(model, options=state_dict_options)
 
             # But only the master process saves the file
             if is_master:
@@ -240,6 +230,7 @@ def main():
                 logging.info(f"Saving model checkpoint to {checkpoint_path}")
                 torch.save(state_dict, checkpoint_path)
                 logging.info(f"Saved model checkpoint to {checkpoint_path}")
+
         dist.barrier()
 
     # messes with shell script if not protected
