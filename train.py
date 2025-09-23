@@ -158,6 +158,7 @@ def main():
         sampler=DistributedSampler(ds, num_replicas=world_size, rank=rank),
         pin_memory=True,
         num_workers=8,
+        drop_last=True,
     )
 
     dist.barrier() 
