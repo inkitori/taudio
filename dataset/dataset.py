@@ -15,12 +15,7 @@ def get_ds(
     split: str,
     task: BaseTask,
     take_first: Optional[int] = None,
-    sharded: bool = True,
 ) -> Dataset:
-    ds_adapter = create_adapter(infer_adapter_from_repository(
-        repository), sampling_rate=model_adapter.sampling_rate, repository=repository, take_first=take_first)
-
-
     def transform_fn(batch: Dict[str, List[Any]]) -> Dict[str, List[Any]]:
         """
         Processes a batch of examples from the dataset on-the-fly.
@@ -54,30 +49,15 @@ def get_ds(
         }
 
         return processed_batch
-    if sharded:
-        base_ds = ds_adapter.load_split(split).filter(lambda x: not task.skip_example(x, ds_adapter))
-        world_size = dist.get_world_size()
 
-        num_samples = len(base_ds)
-        remainder = num_samples % world_size
-        if remainder != 0:
-            base_ds = base_ds.select(range(num_samples - remainder))
+    ds_adapter = create_adapter(infer_adapter_from_repository(
+        repository), sampling_rate=model_adapter.sampling_rate, repository=repository, take_first=take_first)
 
-        sharded_ds = base_ds.shard(num_shards=dist.get_world_size(), index=dist.get_rank())
-
-        # Apply the transform on-the-fly
-        sharded_ds = sharded_ds.with_transform(transform_fn)
+    base_ds = ds_adapter.load_split(split).filter(lambda x: not task.skip_example(x, ds_adapter))
         
-        dist.barrier()
-
-        return sharded_ds
-    else:
-        base_ds = ds_adapter.load_split(split).filter(lambda x: not task.skip_example(x, ds_adapter))
-            
-        # Apply the transform on-the-fly
-        base_ds = base_ds.with_transform(transform_fn)
-            
-        return base_ds
+    base_ds = base_ds.with_transform(transform_fn)
+        
+    return base_ds
 
 def collate_fn(batch: list) -> Dict[str, torch.Tensor]:
     batch_keys = batch[0].keys()
