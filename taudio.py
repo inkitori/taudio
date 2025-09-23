@@ -3,6 +3,7 @@ from typing import Optional
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 import logging
 from models import create_adapter
@@ -39,7 +40,7 @@ class TAudio(nn.Module):
             for param in self.model_adapter.text_model.parameters():
                 param.requires_grad = False
 
-        self.linear = nn.Linear(self.hidden_dim, 1, dtype=torch.float64)
+        self.linear = nn.Linear(self.hidden_dim, 1, dtype=self.model_adapter.dtype)
 
         if linear_bias is not None:
             with torch.no_grad():
@@ -100,7 +101,11 @@ class TAudio(nn.Module):
             hidden_states = hidden_states.to(torch.float64)
             for example in range(batch_size):
                 audio_hidden_states = hidden_states[example][input_ids[example] == self.model_adapter.audio_id] # (num_audio_tokens, hidden_dim)
-                example_audio_logits = self.linear(audio_hidden_states).squeeze() # (num_audio_tokens)
+                example_audio_logits = F.linear(
+                    audio_hidden_states,
+                    self.linear.weight.to(torch.float64),
+                    self.linear.bias.to(torch.float64) if self.linear.bias is not None else None,
+                ).squeeze() # (num_audio_tokens)
                 audio_logits.append(example_audio_logits)
 
         audio_logits = torch.nn.utils.rnn.pad_sequence(audio_logits, batch_first=True, padding_value=0, padding_side='right') # (batch_size, num_audio_tokens)
