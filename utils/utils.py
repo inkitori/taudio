@@ -2,6 +2,7 @@ import numpy as np
 from datasets import load_dataset
 from datasets import IterableDataset
 import logging
+import torch
 
 def clamp(n, smallest, largest): return max(smallest, min(n, largest))
 
@@ -35,6 +36,9 @@ def patch_dataset_length(dataset, length):
 
 def better_round(n):
     return int(n + 0.5)
+
+def round_timestamp(n):
+    return torch.round(n * 100) / 100
 
 import math
 from datasets import Dataset, DatasetDict, concatenate_datasets
