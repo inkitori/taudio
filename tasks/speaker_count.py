@@ -6,6 +6,7 @@ from utils.poisson import poisson_count_loss, infer_count
 from dataset.base_dataset_adapter import BaseDatasetAdapter
 from models.base_model_adapter import BaseModelAdapter
 import logging
+from accelerate import PartialState
 
 
 class SpeakerCountTask(BaseTask):
@@ -156,7 +157,7 @@ class SpeakerCountTask(BaseTask):
         event: Optional[Dict[str, Any]] = None,
         error_bound: float = 0.1,
     ) -> Dict[str, Any]:
-        speaker_count = ds_adapter.get_num_speakers(example)
+        gt_count = ds_adapter.get_num_speakers(example)
 
         # Build evaluation inputs via build_labels to mirror evaluate.py behavior
         inputs = self.build_labels(
@@ -172,38 +173,33 @@ class SpeakerCountTask(BaseTask):
             hidden_states = outputs.hidden_states[model.audio_layer]
             audio_hidden_states = hidden_states[inputs["input_ids"]
                                                 == model.model_adapter.audio_id]
-            logits = model.linear(audio_hidden_states).squeeze()
-            logits = logits.unsqueeze(0)
+            audio_logits = model.linear(audio_hidden_states).squeeze()
             if model.poisson_loss:
-                aux_pred = infer_count(logits, torch.ones_like(logits)).item()
+                audio_logits = audio_logits.unsqueeze(0)
+                pred_count = infer_count(audio_logits, torch.ones_like(audio_logits)).item()
             else:
-                # probs = torch.sigmoid(logits)
-                # logging.info(f"Sigmoid probs: {probs}")
-                # aux_pred = torch.round(probs.sum()).item()
+                raw_pred_count = audio_logits[0]
 
-                prob = logits[:, -1]
-                aux_pred = torch.round(prob).item()
+                pred_count = torch.round(raw_pred_count).item()
 
-        logging.info(f"Auxiliary prediction: {aux_pred}, GT: {speaker_count}")
+        logging.info(f"Auxiliary prediction: {pred_count}, GT: {gt_count}")
 
         # Metric increments
-        abs_err = abs(aux_pred - speaker_count)
+        abs_err = abs(pred_count - gt_count)
         metrics: Dict[str, float] = {
             "aux_abs_error_sum": abs_err,
-            "aux_correct": 1.0 if aux_pred == speaker_count else 0.0,
+            "aux_correct": 1.0 if pred_count == gt_count else 0.0,
         }
         return metrics
 
     def calculate_loss(self, audio_logits, audio_labels, audio_labels_frame_mask, model_adapter: BaseModelAdapter, use_poisson_loss: bool, class_weighting: bool) -> torch.Tensor:
-        # Get ground truth count with cleanup
-        labels_sum = audio_labels.sum(dim=1)
-        first_gt_count = labels_sum[0].item()
+        gt_counts = audio_labels[:, 0] # (batch,)
 
         if use_poisson_loss:
             logging.info("Poisson loss enabled")
             # Create batched tensors with explicit cleanup
             logits_batched = logits.unsqueeze(0)  # make it look batched
-            counts = labels_sum  # reuse the already computed sum
+            counts = gt_counts  # reuse the already computed sum
             frame_mask = torch.ones_like(logits_batched)
 
             gt_count = counts.item()
@@ -222,20 +218,18 @@ class SpeakerCountTask(BaseTask):
         else:
             logging.info("Bernoulli loss enabled")
 
-            # probs = torch.sigmoid(logits)
-            # logging.info(f"Sigmoid probs: {probs}")
-            # raw_count = probs.sum()
+            raw_pred_counts = audio_logits[:, 0]
+            pred_counts = torch.round(raw_pred_counts)
 
-            raw_count = audio_logits[:, -1]
+            raw_pred_abs_diff = torch.abs(raw_pred_counts - gt_counts)
+            pred_abs_diff = torch.abs(pred_counts - gt_counts)
 
-            first_pred_count = torch.round(raw_count[0]).item()
+            if PartialState().is_main_process:
+                logging.info(f"gt_counts: {gt_counts}, raw_pred_counts: {raw_pred_counts}, raw_pred_abs_diff: {raw_pred_abs_diff}, pred_counts: {pred_counts}, pred_abs_diff: {pred_abs_diff}")
 
-            loss = torch.abs(raw_count - labels_sum).mean()
+            loss = raw_pred_abs_diff.mean()
 
-            logging.info(f"Labels Ground Truth: {first_gt_count}")
-            logging.info(f"Predicted Count: {first_pred_count}")
-
-            return loss, torch.tensor(abs(first_pred_count - first_gt_count)).to(loss.device)
+            return loss, torch.mean(pred_abs_diff).to(loss.device)
 
 	# [min, max)
     def skip_example(self, example: Dict[str, Any], adapter: BaseModelAdapter) -> bool:
