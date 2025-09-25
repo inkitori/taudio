@@ -127,13 +127,7 @@ class SpeakerCountTask(BaseTask):
         )
         inputs = inputs.to(next(model.parameters()).device)
 
-        processor = model.model_adapter.processor
-        with torch.no_grad():
-            tokens = model.generate(
-                **inputs, eos_token_id=processor.tokenizer.eos_token_id
-            )
-        generated_tokens = tokens[0][inputs["input_ids"].shape[1]:-1]
-        generated_string = processor.tokenizer.decode(generated_tokens)
+        generated_string = model.generate(**inputs)
         logging.info(f"Token prediction: {generated_string}, GT: {speaker_count}")
         try:
             token_pred = int(generated_string)
@@ -157,7 +151,7 @@ class SpeakerCountTask(BaseTask):
         event: Optional[Dict[str, Any]] = None,
         error_bound: float = 0.1,
     ) -> Dict[str, Any]:
-        gt_count = ds_adapter.get_num_speakers(example)
+        gt_counts = ds_adapter.get_num_speakers(example)
 
         # Build evaluation inputs via build_labels to mirror evaluate.py behavior
         inputs = self.build_labels(
@@ -169,26 +163,17 @@ class SpeakerCountTask(BaseTask):
         inputs = inputs.to(next(model.parameters()).device)
 
         with torch.no_grad():
-            outputs = model.model_adapter(**inputs, output_hidden_states=True)
-            hidden_states = outputs.hidden_states[model.audio_layer]
-            audio_hidden_states = hidden_states[inputs["input_ids"]
-                                                == model.model_adapter.audio_id]
-            audio_logits = model.linear(audio_hidden_states).squeeze()
-            if model.poisson_loss:
-                audio_logits = audio_logits.unsqueeze(0)
-                pred_count = infer_count(audio_logits, torch.ones_like(audio_logits)).item()
-            else:
-                raw_pred_count = audio_logits[0]
+            outputs = model(**inputs, inference=True)
+            pred_counts = outputs.auxiliary_prediction.item()
 
-                pred_count = torch.round(raw_pred_count).item()
-
-        logging.info(f"Auxiliary prediction: {pred_count}, GT: {gt_count}")
+        logging.info(f"Auxiliary prediction: {pred_counts}, GT: {gt_counts}")
 
         # Metric increments
-        abs_err = abs(pred_count - gt_count)
+        abs_err = abs(pred_counts - gt_counts)
+        logging.info(f"Absolute error: {abs_err}, Error bound: {error_bound}, Correct: {1.0 if pred_counts == gt_counts else 0.0}")
         metrics: Dict[str, float] = {
             "aux_abs_error_sum": abs_err,
-            "aux_correct": 1.0 if pred_count == gt_count else 0.0,
+            "aux_correct": 1.0 if pred_counts == gt_counts else 0.0,
         }
         return metrics
 
@@ -204,7 +189,7 @@ class SpeakerCountTask(BaseTask):
             if PartialState().is_main_process:
                 logging.info(f"gt_counts: {gt_counts}, pred_counts: {pred_counts}, pred_abs_diff: {pred_abs_diff}")
             
-            return loss, pred_abs_diff.mean()
+            return loss, pred_abs_diff.mean(), pred_counts
         else:
             logging.info("Bernoulli loss enabled")
 
@@ -219,7 +204,7 @@ class SpeakerCountTask(BaseTask):
 
             loss = raw_pred_abs_diff.mean()
 
-            return loss, pred_abs_diff.mean()
+            return loss, pred_abs_diff.mean(), pred_counts
 
 	# [min, max)
     def skip_example(self, example: Dict[str, Any], adapter: BaseModelAdapter) -> bool:

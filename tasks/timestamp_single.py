@@ -10,7 +10,7 @@ from dataset.base_dataset_adapter import BaseDatasetAdapter
 from models.base_model_adapter import BaseModelAdapter
 
 from .base_task import BaseTask
-from utils.utils import clamp, better_round
+from utils.utils import clamp, better_round, round_timestamp
 from utils.poisson import poisson_loss, infer_timestamps
 
 STOPS = set(stopwords.words("english"))
@@ -198,13 +198,7 @@ class SingleTimestampTask(BaseTask):
         )
         inputs = inputs.to(next(model.parameters()).device)
 
-        processor = model.model_adapter.processor
-        with torch.no_grad():
-            tokens = model.generate(
-                **inputs, eos_token_id=processor.tokenizer.eos_token_id
-            )
-        generated_tokens = tokens[0][inputs["input_ids"].shape[1]:-1]
-        generated_string = processor.tokenizer.decode(generated_tokens)
+        generated_string = model.generate(**inputs)
         logging.info(f"Token prediction: {generated_string}, GT: {gt}")
         try:
             token_pred = json.loads(generated_string)[name]
@@ -213,7 +207,6 @@ class SingleTimestampTask(BaseTask):
 
         # Metric increments
         abs_err = abs(float(token_pred) - float(gt))
-        abs_err = better_round(abs_err * 100.0) / 100.0
         logging.info(f"Absolute error: {abs_err}, Error bound: {error_bound}, Correct: {1.0 if abs_err <= float(error_bound) else 0.0}")
 
         metrics: Dict[str, float] = {
@@ -239,7 +232,7 @@ class SingleTimestampTask(BaseTask):
             if event is None:
                 return None
 
-        gt = ds_adapter.get_target_seconds(event, self.key)
+        gt_timestamp = ds_adapter.get_target_seconds(event, self.key)
 
         # Build evaluation inputs via build_labels to mirror evaluate.py behavior
         inputs = self.build_labels(
@@ -252,25 +245,13 @@ class SingleTimestampTask(BaseTask):
         inputs = inputs.to(next(model.parameters()).device)
 
         with torch.no_grad():
-            outputs = model.model_adapter(**inputs, output_hidden_states=True)
-            hidden_states = outputs.hidden_states[model.audio_layer]
-            audio_hidden_states = hidden_states[inputs["input_ids"]
-                                                == model.model_adapter.audio_id]
-            logits = model.linear(audio_hidden_states).squeeze()
-            if model.poisson_loss:
-                aux_pred_top_idx = infer_timestamps(
-                    1, logits.cpu().float().numpy())
-            else:
-                aux_pred_top_idx = torch.argmax(logits, dim=0).item()
-                aux_pred_top_idx = aux_pred_top_idx + 0.5 # because we floor timestamps to the frame, we want to have full coverage over the frame
-        aux_pred = float(aux_pred_top_idx) / model.model_adapter.seconds_to_embedding
-        aux_pred = better_round(aux_pred * 100.0) / 100.0
+            outputs = model(**inputs, inference=True)
+            pred_timestamp = outputs.auxiliary_prediction.item()
 
-        logging.info(f"Auxiliary prediction: {aux_pred}, GT: {gt}")
-        print(f"Raw GT: {gt}")
+        logging.info(f"Auxiliary prediction: {pred_timestamp}, GT: {gt_timestamp}")
 
         # Metric increments
-        abs_err = better_round(abs(float(aux_pred) - float(gt)) * 100.0) / 100.0
+        abs_err = abs(pred_timestamp - gt_timestamp)
         logging.info(f"Absolute error: {abs_err}, Error bound: {error_bound}, Correct: {1.0 if abs_err <= float(error_bound) else 0.0}")
         metrics: Dict[str, float] = {
             "aux_abs_error_sum": abs_err,
@@ -279,48 +260,49 @@ class SingleTimestampTask(BaseTask):
         return metrics
 
     def calculate_loss(self, audio_logits, audio_labels, audio_labels_frame_mask, model_adapter: BaseModelAdapter, use_poisson_loss: bool, class_weighting: bool) -> torch.Tensor:
-        first_audio_labels = audio_labels[0]
-        first_audio_logits = audio_logits[0]
-
-        if (first_audio_labels == -100).any():
-            first_neg100_idx = (first_audio_labels == -100).nonzero(as_tuple=True)[0][0].item()
-        else:
-            first_neg100_idx = None
-
-        first_audio_labels = first_audio_labels[:first_neg100_idx]
-        first_audio_logits = first_audio_logits[:first_neg100_idx]
-
-        gt_timestamp = torch.argmax(first_audio_labels).item()
+        batch_size = audio_logits.size(0)
+        gt_timestamps = torch.argmax(audio_labels, dim=1)
+        gt_timestamps = gt_timestamps / model_adapter.seconds_to_embedding
+        gt_timestamps = round_timestamp(gt_timestamps)
 
         if use_poisson_loss:
             loss = poisson_loss(audio_logits, audio_labels, audio_labels_frame_mask).mean()
-            pred_timestamp = infer_timestamps(1, first_audio_logits.cpu().float().detach().numpy())
+
+            predicted_timestamps = torch.zeros(batch_size, device=audio_logits.device)
+            
+            for example in range(batch_size):
+                example_audio_logits = audio_logits[example]
+                example_audio_labels = audio_labels[example]
+
+                if (example_audio_labels == -100).any():
+                    neg_100_idx = (example_audio_labels == -100).nonzero(as_tuple=True)[0][0].item()
+                    example_audio_logits = example_audio_logits[:neg_100_idx]
+                    example_audio_labels = example_audio_labels[:neg_100_idx]
+
+                predicted_timestamps[example] = torch.tensor(infer_timestamps(1, example_audio_logits.cpu().float().detach().numpy()), device=audio_logits.device)
+
+                predicted_timestamps[example] = predicted_timestamps[example] / model_adapter.seconds_to_embedding
+
+                predicted_timestamps[example] = round_timestamp(predicted_timestamps[example])
         else:
-            # DONT FORGET TO HANDLE THE PADDING HERE TOO
-            if class_weighting:
-                num_ones = (labels == 1).sum()
-                num_zeros = (labels == 0).sum()
-                pos_weight = (
-                    num_zeros / num_ones) if num_ones > 0 else 1.0
+            # # DONT FORGET TO HANDLE THE PADDING HERE TOO
+            # if class_weighting:
+            #     num_ones = (labels == 1).sum()
+            #     num_zeros = (labels == 0).sum()
+            #     pos_weight = (
+            #         num_zeros / num_ones) if num_ones > 0 else 1.0
 
-                criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
-            else:
-                criterion = nn.BCEWithLogitsLoss()
+            #     criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
+            # else:
+            #     criterion = nn.BCEWithLogitsLoss()
 
-            loss = criterion(logits, labels)
-            pred_timestamp = torch.argmax(logits).item() 
-            pred_timestamp = pred_timestamp + 0.5 # because we floor timestamps to the frame, we want to have full coverage over the frame
+            # loss = criterion(logits, labels)
+            # pred_timestamp = torch.argmax(logits).item() 
+            # pred_timestamp = pred_timestamp + 0.5 # because we floor timestamps to the frame, we want to have full coverage over the frame
+            pass
 
 
-        pred_timestamp = float(pred_timestamp) / model_adapter.seconds_to_embedding
-        pred_timestamp = better_round(pred_timestamp * 100.0) / 100.0
-
-        gt_timestamp = float(gt_timestamp) / model_adapter.seconds_to_embedding
-
-        logging.info(f"Predicted Timestamp: {pred_timestamp}, GT Timestamp: {gt_timestamp}")
-        abs_err = better_round(abs(pred_timestamp - gt_timestamp) * 100.0) / 100.0
-
-        return loss, torch.tensor(abs_err).to(loss.device)
+        return loss, torch.abs(predicted_timestamps - gt_timestamps).mean(), predicted_timestamps
 
     def skip_example(self, example: Dict[str, Any], adapter: BaseModelAdapter) -> bool:
         events = self._choose_event(events=list(adapter.get_events(example)), ds_adapter=adapter, apply_fallback=False, return_all=True)
