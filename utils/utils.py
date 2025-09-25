@@ -35,3 +35,69 @@ def patch_dataset_length(dataset, length):
 
 def better_round(n):
     return int(n + 0.5)
+
+import math
+from datasets import Dataset, DatasetDict, concatenate_datasets
+
+def reprocess_and_split_dataset(
+    dataset_dict: DatasetDict,
+    train_size: float = 0.8,
+    val_size: float = 0.1,
+    test_size: float = 0.1,
+    seed: int = 42
+) -> DatasetDict:
+    """
+    Combines all splits of a DatasetDict, shuffles, and then splits the result
+    into 'train', 'val', and 'test' splits.
+
+    Args:
+        dataset_dict (DatasetDict): The input dataset dictionary to process.
+                                    It can have any number of existing splits.
+        train_size (float): The proportion of the dataset to allocate to the train split.
+        val_size (float): The proportion of the dataset to allocate to the validation split.
+        test_size (float): The proportion of the dataset to allocate to the test split.
+        seed (int): The random seed for shuffling to ensure reproducibility.
+
+    Returns:
+        DatasetDict: A new dataset dictionary with 'train', 'val', and 'test' splits.
+    """
+    # 1. Validate that the split proportions sum to 1.0
+    if not math.isclose(train_size + val_size + test_size, 1.0):
+        raise ValueError(
+            f"The sum of train_size, val_size, and test_size must be 1.0, "
+            f"but it is {train_size + val_size + test_size}"
+        )
+
+    # 2. Combine all existing splits into a single dataset
+    combined_dataset = concatenate_datasets(list(dataset_dict.values()))
+
+    # 3. Shuffle the combined dataset
+    shuffled_dataset = combined_dataset.shuffle(seed=seed)
+
+    # 4. Perform the first split to separate the training set
+    train_val_test_split = shuffled_dataset.train_test_split(
+        test_size=(val_size + test_size)
+    )
+
+    train_split = train_val_test_split['train']
+    val_test_temp_split = train_val_test_split['test']
+
+    # 5. Perform the second split to separate validation and test sets
+    if val_size + test_size > 0:
+        relative_test_size = test_size / (val_size + test_size)
+        val_test_split = val_test_temp_split.train_test_split(
+            test_size=relative_test_size
+        )
+        val_split = val_test_split['train']
+        test_split = val_test_split['test']
+    else:
+        # Handle the case where val and test sizes are zero
+        val_split = val_test_temp_split.select(range(0))
+        test_split = val_test_temp_split.select(range(0))
+
+    # 6. Create and return the final DatasetDict
+    return DatasetDict({
+        'train': train_split,
+        'val': val_split,
+        'test': test_split
+    })
