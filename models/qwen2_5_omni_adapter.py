@@ -104,47 +104,55 @@ class Qwen2_5OmniAdapter(BaseModelAdapter):
         return self.constants.SECONDS_TO_EMBEDDING
 
     # --- Bidirectional audio mask patching (Qwen-specific) ---
-    def _patch_causal_mask_zero_region(self, start: int, end: int):
+    def _patch_causal_mask_zero_region(self, starts, ends):
         model = self._actual_text_model
         # This is the original method from the Qwen2_5OmniThinkerTextModel class
         original_method = model._update_causal_mask
 
-        model.mask_start = start
-        model.mask_end = end
+        # Persist per-batch start/end indices on the model
+        model.mask_starts = starts
+        model.mask_ends = ends
 
         def patched_update_causal_mask(self_ref, attention_mask, input_tensor, cache_position, past_key_values, output_attentions=False):
             # First, call the original method to get the base causal mask
             causal_mask = original_method(
                 attention_mask, input_tensor, cache_position, past_key_values, output_attentions
             )
+            
+            logging.info(f"Causal mask: {causal_mask.shape}")
+            logging.info(f"Input tensor: {input_tensor.shape}")
 
             if (
                 causal_mask is not None
-                and hasattr(self_ref, 'mask_start') and hasattr(self_ref, 'mask_end')
-                and self_ref.mask_start is not None and self_ref.mask_end is not None
+                and hasattr(self_ref, 'mask_starts') and hasattr(self_ref, 'mask_ends')
+                and self_ref.mask_starts is not None and self_ref.mask_ends is not None
             ):
-                start_idx = self_ref.mask_start
-                end_idx = self_ref.mask_end
-                if (
-                    causal_mask.dim() >= 4
-                    and 0 <= start_idx < causal_mask.shape[2]
-                    and 0 <= end_idx < causal_mask.shape[3]
-                    and start_idx <= end_idx
-                ):
-                    # --- START: THE FIX ---
-                    # 1. Clone the mask to create a new tensor that can be modified safely.
-                    #    This is now an out-of-place operation.
-                    cloned_causal_mask = causal_mask.clone()
+                # Normalize to list for uniform handling
+                mask_starts = self_ref.mask_starts
+                mask_ends = self_ref.mask_ends
+                if not isinstance(mask_starts, (list, tuple)):
+                    mask_starts = [int(mask_starts)] * causal_mask.shape[0]
+                if not isinstance(mask_ends, (list, tuple)):
+                    mask_ends = [int(mask_ends)] * causal_mask.shape[0]
 
-                    # 2. Modify the clone, not the original.
-                    cloned_causal_mask[0, 0, start_idx:end_idx + 1, start_idx:end_idx + 1] = 0
-                    
-                    logging.debug(f"Zeroed out causal mask region [{start_idx}:{
-                                    end_idx + 1}, {start_idx}:{end_idx + 1}]")
-                    
-                    # 3. Return the modified clone.
-                    return cloned_causal_mask
-                    # --- END: THE FIX ---
+                # Clone to safely modify
+                cloned_causal_mask = causal_mask.clone()
+                batch_size = cloned_causal_mask.shape[0]
+
+                for b in range(batch_size):
+                    start_idx = int(mask_starts[b])
+                    end_idx = int(mask_ends[b])
+                    if (
+                        0 <= start_idx < cloned_causal_mask.shape[2]
+                        and 0 <= end_idx < cloned_causal_mask.shape[3]
+                        and start_idx <= end_idx
+                    ):
+                        # Zero region for all heads in this batch element
+                        cloned_causal_mask[b, :, start_idx:end_idx + 1, start_idx:end_idx + 1] = 0
+                    else:
+                        logging.info(f"Start index {start_idx} or end index {end_idx} is out of range for batch {b}")
+
+                return cloned_causal_mask
 
             # If no modifications were made, return the original mask
             return causal_mask
@@ -158,20 +166,19 @@ class Qwen2_5OmniAdapter(BaseModelAdapter):
         model = self._actual_text_model
         original_method = type(model)._update_causal_mask
         model._update_causal_mask = types.MethodType(original_method, model)
-        if hasattr(model, 'mask_start'):
-            delattr(model, 'mask_start')
-        if hasattr(model, 'mask_end'):
-            delattr(model, 'mask_end')
+        if hasattr(model, 'mask_starts'):
+            delattr(model, 'mask_starts')
+        if hasattr(model, 'mask_ends'):
+            delattr(model, 'mask_ends')
         logging.debug(f"Unpatched _update_causal_mask on {
                      type(model).__name__}")
 
     @contextmanager
     def bidirectional_audio_context(self, input_ids: torch.Tensor):
-        start_audio_index, end_audio_index = get_audio_bounds(
+        starts, ends = get_audio_bounds(
             input_ids, self.constants.BEGIN_AUDIO_ID, self.constants.END_AUDIO_ID)
-        self._patch_causal_mask_zero_region(start_audio_index, end_audio_index)
-        logging.debug(f"Enabled bidirectional audio processing for region [{
-                     start_audio_index}:{end_audio_index}]")
+        self._patch_causal_mask_zero_region(starts, ends)
+        logging.debug("Enabled bidirectional audio processing for region(s)")
         try:
             yield
         finally:

@@ -7,11 +7,27 @@ import torch
 def clamp(n, smallest, largest): return max(smallest, min(n, largest))
 
 def get_audio_bounds(input_ids, begin_audio_id, end_audio_id):
-    # for some reason it doesn't seem like the +1 and -1 are being applied?
-    start_audio_index = (input_ids == begin_audio_id).nonzero(as_tuple=True)[-1][0] + 1
-    end_audio_index = (input_ids == end_audio_id).nonzero(as_tuple=True)[-1][0] - 1
+    # Supports both single-sequence (1D) and batched (2D) input_ids.
+    # Returns start/end indices that exclude the special audio boundary tokens.
+    if input_ids.dim() == 1:
+        start_audio_index = (input_ids == begin_audio_id).nonzero(as_tuple=True)[0][0].item() + 1
+        end_audio_index = (input_ids == end_audio_id).nonzero(as_tuple=True)[0][-1].item() - 1
+        return start_audio_index, end_audio_index
 
-    return start_audio_index, end_audio_index
+    # Batched case: compute per-example bounds
+    batch_size = input_ids.size(0)
+    starts = []
+    ends = []
+    for b in range(batch_size):
+        row = input_ids[b]
+        row_begin = (row == begin_audio_id).nonzero(as_tuple=True)[0]
+        row_end = (row == end_audio_id).nonzero(as_tuple=True)[0]
+        # Use first begin and last end to cover the full audio span, excluding boundary tokens
+        start_audio_index = row_begin[0].item() + 1
+        end_audio_index = row_end[-1].item() - 1
+        starts.append(start_audio_index)
+        ends.append(end_audio_index)
+    return starts, ends
 
 def get_dataset_length(repository: str, split: str, task=None, ds_adapter=None):
     dataset = load_dataset(repository, split=split)

@@ -302,6 +302,8 @@ class SingleTimestampTask(BaseTask):
             pass
 
 
+        logging.info(f"Predicted timestamps: {predicted_timestamps}, Ground truth timestamps: {gt_timestamps}")
+        
         return loss, torch.abs(predicted_timestamps - gt_timestamps).mean(), predicted_timestamps
 
     def skip_example(self, example: Dict[str, Any], adapter: BaseModelAdapter) -> bool:
