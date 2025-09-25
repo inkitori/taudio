@@ -197,24 +197,14 @@ class SpeakerCountTask(BaseTask):
 
         if use_poisson_loss:
             logging.info("Poisson loss enabled")
-            # Create batched tensors with explicit cleanup
-            logits_batched = logits.unsqueeze(0)  # make it look batched
-            counts = gt_counts  # reuse the already computed sum
-            frame_mask = torch.ones_like(logits_batched)
+            loss = poisson_count_loss(audio_logits, gt_counts, audio_labels_frame_mask).mean()
+            pred_counts = infer_count(audio_logits, audio_labels_frame_mask)
+            pred_abs_diff = torch.abs(pred_counts - gt_counts)
 
-            gt_count = counts.item()
-            pred_count_tensor = infer_count(logits_batched, frame_mask)
-            pred_count = pred_count_tensor.item()
-
-            logging.info(f"Labels Ground Truth: {gt_count}")
-            logging.info(f"Predicted Count: {pred_count}")
-
-            loss = poisson_count_loss(logits_batched, counts, frame_mask)
+            if PartialState().is_main_process:
+                logging.info(f"gt_counts: {gt_counts}, pred_counts: {pred_counts}, pred_abs_diff: {pred_abs_diff}")
             
-            # Clean up intermediate tensors
-            del logits_batched, frame_mask, pred_count_tensor
-
-            return loss, torch.tensor(abs(pred_count - gt_count)).to(loss.device)
+            return loss, pred_abs_diff.mean()
         else:
             logging.info("Bernoulli loss enabled")
 
@@ -229,7 +219,7 @@ class SpeakerCountTask(BaseTask):
 
             loss = raw_pred_abs_diff.mean()
 
-            return loss, torch.mean(pred_abs_diff).to(loss.device)
+            return loss, pred_abs_diff.mean()
 
 	# [min, max)
     def skip_example(self, example: Dict[str, Any], adapter: BaseModelAdapter) -> bool:
