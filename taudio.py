@@ -98,7 +98,7 @@ class TAudio(nn.Module):
 
         for example in range(batch_size):
             audio_hidden_states = hidden_states[example][input_ids[example] == self.model_adapter.audio_id] # (num_audio_tokens, hidden_dim)
-            example_audio_logits = self.linear(audio_hidden_states).squeeze()
+            example_audio_logits = self.linear(audio_hidden_states).squeeze() # (num_audio_tokens,)
             audio_logits.append(example_audio_logits)
 
         audio_logits = torch.nn.utils.rnn.pad_sequence(audio_logits, batch_first=True, padding_value=0, padding_side='right') # (batch_size, num_audio_tokens)

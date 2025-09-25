@@ -12,3 +12,5 @@ conda_pkgs/
 temp_env/
 .triton_cache/
 *.zip
+dataset_env/
+audioset/
