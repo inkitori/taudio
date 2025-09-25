@@ -56,6 +56,9 @@ def better_round(n):
 def round_timestamp(n):
     return torch.round(n * 100) / 100
 
+def round_timestamp_python(n):
+    return round(n * 100) / 100
+
 import math
 from datasets import Dataset, DatasetDict, concatenate_datasets
 

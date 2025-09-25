@@ -45,3 +45,6 @@ class LibriSpeechAdapter(BaseDatasetAdapter):
 
     def get_speaker_count_prompt(self) -> str:
         return "How many words are spoken in the audio?"
+
+    def get_timestamp_all_prompt(self) -> str:
+        return "How many words are spoken in the audio?"

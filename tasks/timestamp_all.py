@@ -23,9 +23,8 @@ class AllTimestampsTask(BaseTask):
         self.max_time = max_time
         self.min_time = min_time
 
-    def _build_conversation_text(self, *, model_processor: Any, ds_adapter: BaseDatasetAdapter, event: Dict[str, Any], eval_mode: bool) -> str:
-        name = ds_adapter.event_name(event)
-        prompt = ds_adapter.get_timestamp_single_prompt(name)
+    def _build_conversation_text(self, *, model_processor: Any, ds_adapter: BaseDatasetAdapter, event_count, eval_mode: bool) -> str:
+        prompt = ds_adapter.get_timestamp_all_prompt()
 
         conversation = [
             {
@@ -48,13 +47,11 @@ class AllTimestampsTask(BaseTask):
 
         # Training supervision: include expected JSON as assistant text when not in eval
         if not eval_mode:
-            seconds = ds_adapter.get_target_seconds(event, self.key)
-            word_json = '{"%s": %s}' % (name, seconds)
             conversation.append(
                 {
                     "role": "assistant",
                     "content": [
-                        {"type": "text", "text": f"{word_json}"},
+                        {"type": "text", "text": f"{event_count}"},
                     ],
                 }
             )
@@ -68,15 +65,15 @@ class AllTimestampsTask(BaseTask):
         ds_adapter: BaseDatasetAdapter,
         model_adapter: BaseModelAdapter,
         eval_mode: bool,
-        event: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         audio = ds_adapter.get_audio(example)
         events = list(ds_adapter.get_events(example))
+        event_count = ds_adapter.get_num_speakers(example)
 
         # Build prompt text via chat template and prepare inputs using the model adapter's processor
         processor = model_adapter.processor
         prompt_text = self._build_conversation_text(
-            model_processor=processor, ds_adapter=ds_adapter, event=event, eval_mode=eval_mode)
+            model_processor=processor, ds_adapter=ds_adapter, event_count=event_count, eval_mode=eval_mode)
 
         audio_frames = audio["array"]
         assert int(audio["sampling_rate"]) == model_adapter.sampling_rate

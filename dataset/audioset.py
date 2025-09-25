@@ -3,37 +3,49 @@ from datasets import load_dataset
 from datasets.features import Audio
 
 from .base_dataset_adapter import BaseDatasetAdapter
-
+from utils.utils import round_timestamp_python
 
 class AudioSetAdapter(BaseDatasetAdapter):
     def load_streaming_split(self, split: str):
-        # streaming causes some weird utf-8 encoding issues
-        ds = load_dataset(self.repository, split=split, streaming=True, trust_remote_code=True)
+        ds = load_dataset(self.repository, split=split, streaming=True)
         ds = ds.cast_column("audio", Audio(sampling_rate=self.sampling_rate))
         if self.take_first:
             ds = ds.take(self.take_first)
+        return ds
+
+    def load_split(self, split: str):
+        ds = load_dataset(self.repository, split=split)
+        ds = ds.cast_column("audio", Audio(sampling_rate=self.sampling_rate))
+        if self.take_first:
+            ds = ds.select(range(self.take_first))
         return ds
 
     def get_audio(self, example: Dict[str, Any]) -> Dict[str, Any]:
         return example["audio"]
 
     def get_events(self, example: Dict[str, Any]) -> Iterable[Dict[str, Any]]:
-        raise NotImplementedError
+        # The source data uses key 'words', each item has 'word' and timing fields like 'start'/'end'
+        return example["events"]
 
     def event_name(self, event: Dict[str, Any]) -> str:
-        raise NotImplementedError
+        # There are <unk> tokens which the generic pipeline can filter if desired
+        return event.get("event_name", "")
 
     def get_target_seconds(self, event: Dict[str, Any], key: str) -> float:
-        raise NotImplementedError
+        # key could be 'start' or 'end'
+        return round_timestamp_python(float(event[key]))
 
     def get_num_speakers(self, example: Dict[str, Any]) -> int:
-        return len(example["labels"])
+        return len(example['events'])
 
     def unknown_events(self) -> List[str]:
         return []
 
     def get_timestamp_single_prompt(self, event_name: str) -> str:
-        raise NotImplementedError
+        return f"What is the first occurence of the event '{event_name}'?"
 
     def get_speaker_count_prompt(self) -> str:
+        return "How many events are there in the audio?"
+
+    def get_timestamp_all_prompt(self) -> str:
         return "How many events are there in the audio?"
