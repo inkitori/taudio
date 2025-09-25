@@ -4,23 +4,23 @@ model:
   freeze_text_model: false
   audio_layer: -1
   bidirectional_audio: true
-  linear_bias: -6
+  linear_bias: 0
   dtype: "bfloat16"
 
 # Training configuration
 training:
   epochs: 1
-  effective_batch_size: 1
-  learning_rate: 1.0e-6
+  effective_batch_size: 8
+  learning_rate: 5.0e-6
   eta_min_scale: 0.1
- 
+  
 # Dataset configuration
 dataset:
-  split: "train_clean_100"
-  repository: "gilkeyio/librispeech-alignments"
+  split: "train"
+  repository: "enyoukai/libricount"
 
 task:
-  type: "ALL_TIMESTAMPS"
+  type: "SPEAKER_COUNT"
 
 # Loss configuration
 loss:
