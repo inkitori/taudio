@@ -13,6 +13,6 @@ temp_env/
 .triton_cache/
 *.zip
 dataset_env/
-audioset/
+audio_datasets/audioset/
 *.csv
 mixtures_metadata.json
