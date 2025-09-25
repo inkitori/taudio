@@ -10,7 +10,7 @@ from models import create_adapter
 from tasks.base_task import BaseTask
 
 Output = namedtuple(
-    'Output', ['loss', 'token_loss', 'surrogate_loss', 'auxiliary_deviation'])
+    'Output', ['loss', 'token_loss', 'surrogate_loss', 'auxiliary_deviation', 'auxiliary_prediction'])
 
 
 class TAudio(nn.Module):
@@ -65,14 +65,16 @@ class TAudio(nn.Module):
         input_features: torch.Tensor,
         # (batch_size, audio_context_len)
         feature_attention_mask: torch.Tensor,
-        labels: torch.Tensor,  # (batch_size, seq_len)
-        audio_labels: torch.Tensor,  # (batch_size, num_audio_tokens) or (num_audio_tokens)
+        labels: torch.Tensor = None,  # (batch_size, seq_len)
+        audio_labels: torch.Tensor = None,  # (batch_size, num_audio_tokens) or (num_audio_tokens)
+        inference: bool = False,
     ) -> torch.Tensor:
+        if not inference and (labels is None or audio_labels is None):
+            raise ValueError("Labels and audio labels must be provided if not in inference mode")
+
+        
         batch_size = input_ids.size(0)
 
-        if audio_labels.ndim == 1:
-            audio_labels = audio_labels.unsqueeze(0)
-        
         if self.token_loss:
             outputs = self.model_adapter(
                 input_ids=input_ids,
@@ -102,10 +104,14 @@ class TAudio(nn.Module):
             audio_logits.append(example_audio_logits)
 
         audio_logits = torch.nn.utils.rnn.pad_sequence(audio_logits, batch_first=True, padding_value=0, padding_side='right') # (batch_size, num_audio_tokens)
+        
+        if inference:
+            audio_labels = torch.zeros_like(audio_logits)
+
         audio_labels_frame_mask = torch.where(audio_labels == -100, 0, 1) # (batch_size, num_audio_tokens)
 
         if self.surrogate_loss:
-            surrogate_loss, auxiliary_deviation = self.task.calculate_loss(
+            surrogate_loss, auxiliary_deviation, auxiliary_prediction = self.task.calculate_loss(
                 audio_logits=audio_logits, 
                 audio_labels=audio_labels, 
                 audio_labels_frame_mask=audio_labels_frame_mask, 
@@ -118,6 +124,8 @@ class TAudio(nn.Module):
                 0.0, device=audio_logits.device, dtype=audio_logits.dtype)
             auxiliary_deviation = torch.tensor(
                 0.0, device=audio_logits.device, dtype=audio_logits.dtype)
+            auxiliary_prediction = torch.tensor(
+                0.0, device=audio_logits.device, dtype=audio_logits.dtype)
 
         if self.token_loss:
             token_loss = outputs.loss
@@ -127,9 +135,15 @@ class TAudio(nn.Module):
 
         loss = token_loss + self.surrogate_loss_weight * surrogate_loss
 
-        output = Output(loss=loss, surrogate_loss=surrogate_loss, token_loss=token_loss, auxiliary_deviation=auxiliary_deviation)
+        output = Output(loss=loss, surrogate_loss=surrogate_loss, token_loss=token_loss, auxiliary_deviation=auxiliary_deviation, auxiliary_prediction=auxiliary_prediction)
 
         return output
 
     def generate(self, **kwargs):
-        return self.model_adapter.generate(**kwargs)
+        with torch.no_grad():
+            tokens = self.model_adapter.generate(**kwargs, eos_token_id=self.model_adapter.tokenizer.eos_token_id)
+
+            generated_tokens = tokens[0][kwargs["input_ids"].shape[1]:-1]
+            generated_string = self.model_adapter.processor.tokenizer.decode(generated_tokens)
+
+        return generated_string
