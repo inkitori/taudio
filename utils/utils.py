@@ -121,6 +121,13 @@ def reprocess_and_split_dataset(
     # 6. Create and return the final DatasetDict
     return DatasetDict({
         'train': train_split,
-        'val': val_split,
+        'dev': val_split,
         'test': test_split
     })
+
+def remove_indices(dataset, exclude_indices):
+    logging.info(f"Size of dataset: {len(dataset)}")
+    dataset = dataset.select([i for i in range(len(dataset)) if i not in exclude_indices])
+    logging.info(f"Size of dataset after removing indices: {len(dataset)}")
+
+    return dataset

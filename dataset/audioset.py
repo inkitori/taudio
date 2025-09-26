@@ -4,6 +4,10 @@ from datasets.features import Audio
 
 from .base_dataset_adapter import BaseDatasetAdapter
 from utils.utils import round_timestamp_python
+from utils.utils import remove_indices
+
+train_exclude_indices = [16103, 23870, 52776, 58610, 68716]
+eval_exclude_indices = [5929]
 
 class AudioSetAdapter(BaseDatasetAdapter):
     def load_streaming_split(self, split: str):
@@ -14,10 +18,18 @@ class AudioSetAdapter(BaseDatasetAdapter):
         return ds
 
     def load_split(self, split: str):
+        if split == "test":
+            split = "eval"
+
         ds = load_dataset(self.repository, split=split)
         ds = ds.cast_column("audio", Audio(sampling_rate=self.sampling_rate))
         if self.take_first:
             ds = ds.select(range(self.take_first))
+
+        if split == "train":
+            ds = remove_indices(ds, train_exclude_indices)
+        elif split == "eval":
+            ds = remove_indices(ds, eval_exclude_indices)
         return ds
 
     def get_audio(self, example: Dict[str, Any]) -> Dict[str, Any]:

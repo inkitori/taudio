@@ -13,6 +13,13 @@ class LibriSpeechAdapter(BaseDatasetAdapter):
         return ds
 
     def load_split(self, split: str):
+        if split == "train":
+            split = "train_clean_100"
+        if split == "dev":
+            split = "dev_clean"
+        if split == "test":
+            split = "test_clean"
+        
         ds = load_dataset(self.repository, split=split)
         ds = ds.cast_column("audio", Audio(sampling_rate=self.sampling_rate))
         if self.take_first:
