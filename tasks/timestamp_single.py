@@ -10,7 +10,7 @@ from dataset.base_dataset_adapter import BaseDatasetAdapter
 from models.base_model_adapter import BaseModelAdapter
 
 from .base_task import BaseTask
-from utils.utils import clamp, better_round, round_timestamp
+from utils.utils import clamp, better_round, round_timestamp, round_timestamp_python
 from utils.poisson import poisson_loss, infer_timestamps
 
 STOPS = set(stopwords.words("english"))
@@ -206,7 +206,8 @@ class SingleTimestampTask(BaseTask):
             return {"token_correct": 0.0, "parsing_error": 1.0}
 
         # Metric increments
-        abs_err = abs(float(token_pred) - float(gt))
+        token_pred = round_timestamp_python(float(token_pred))
+        abs_err = round_timestamp_python(abs(float(token_pred) - float(gt)))
         logging.info(f"Absolute error: {abs_err}, Error bound: {error_bound}, Correct: {1.0 if abs_err <= float(error_bound) else 0.0}")
 
         metrics: Dict[str, float] = {
@@ -251,7 +252,7 @@ class SingleTimestampTask(BaseTask):
         logging.info(f"Auxiliary prediction: {pred_timestamp}, GT: {gt_timestamp}")
 
         # Metric increments
-        abs_err = abs(pred_timestamp - gt_timestamp)
+        abs_err = round_timestamp_python(abs(pred_timestamp - gt_timestamp))
         logging.info(f"Absolute error: {abs_err}, Error bound: {error_bound}, Correct: {1.0 if abs_err <= float(error_bound) else 0.0}")
         metrics: Dict[str, float] = {
             "aux_abs_error_sum": abs_err,
