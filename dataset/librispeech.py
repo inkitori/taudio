@@ -33,6 +33,10 @@ class LibriSpeechAdapter(BaseDatasetAdapter):
         # The source data uses key 'words', each item has 'word' and timing fields like 'start'/'end'
         return example["words"]
 
+    def get_events_sorted(self, example):
+        sorted_words = sorted(example["words"], key=lambda event: event["start"])
+        return sorted_words
+
     def event_name(self, event: Dict[str, Any]) -> str:
         # There are <unk> tokens which the generic pipeline can filter if desired
         return event.get("word", "")

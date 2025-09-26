@@ -23,7 +23,7 @@ class AllTimestampsTask(BaseTask):
         self.max_time = max_time
         self.min_time = min_time
 
-    def _build_conversation_text(self, *, model_processor: Any, ds_adapter: BaseDatasetAdapter, event_count, eval_mode: bool) -> str:
+    def _build_conversation_text(self, *, model_processor: Any, ds_adapter: BaseDatasetAdapter, sorted_events, eval_mode: bool) -> str:
         prompt = ds_adapter.get_timestamp_all_prompt()
 
         conversation = [
@@ -45,16 +45,28 @@ class AllTimestampsTask(BaseTask):
             },
         ]
 
+        sorted_events_list = []
+        for event in sorted_events:
+            event_name = ds_adapter.event_name(event)
+            event_seconds = ds_adapter.get_target_seconds(event, self.key)
+
+            event_object = {'event': event_name, 'start': event_seconds}
+            sorted_events_list.append(event_object)
+
+        sorted_events_list = json.dumps(sorted_events_list)
+
         # Training supervision: include expected JSON as assistant text when not in eval
         if not eval_mode:
             conversation.append(
                 {
                     "role": "assistant",
                     "content": [
-                        {"type": "text", "text": f"{event_count}"},
+                        {"type": "text", "text": sorted_events_list},
                     ],
                 }
             )
+
+        logging.info(conversation)
 
         return model_processor.apply_chat_template(conversation, tokenize=False, add_generation_prompt=eval_mode)
 
@@ -68,12 +80,12 @@ class AllTimestampsTask(BaseTask):
     ) -> Dict[str, Any]:
         audio = ds_adapter.get_audio(example)
         events = list(ds_adapter.get_events(example))
-        event_count = ds_adapter.get_num_speakers(example)
+        sorted_events = ds_adapter.get_events_sorted(example)
 
         # Build prompt text via chat template and prepare inputs using the model adapter's processor
         processor = model_adapter.processor
         prompt_text = self._build_conversation_text(
-            model_processor=processor, ds_adapter=ds_adapter, event_count=event_count, eval_mode=eval_mode)
+            model_processor=processor, ds_adapter=ds_adapter, sorted_events=sorted_events, eval_mode=eval_mode)
 
         audio_frames = audio["array"]
         assert int(audio["sampling_rate"]) == model_adapter.sampling_rate
@@ -127,7 +139,34 @@ class AllTimestampsTask(BaseTask):
         event: Optional[Dict[str, Any]] = None,
         error_bound: float = 0.1,
     ) -> Dict[str, Any]:
-        raise NotImplementedError
+        gt_count = ds_adapter.get_num_speakers(example)
+        
+        inputs = self.build_labels(
+            example=example,
+            ds_adapter=ds_adapter,
+            model_adapter=model.model_adapter,
+            eval_mode=True,
+        )
+        inputs = inputs.to(next(model.parameters()).device)
+
+        generated_string = model.generate(**inputs)
+        logging.info(generated_string)
+        try:
+            parsed_events = json.loads(generated_string)
+            pred_count = len(parsed_events)
+        except Exception:
+            return {"token_correct": 0.0, "parsing_error": 1.0}
+
+        # Metric increments
+        abs_err = abs(pred_count - gt_count)
+        
+        logging.info(f"Absolute error: {abs_err}, Error bound: {error_bound}, Correct: {1.0 if pred_count == gt_count else 0.0}")
+
+        metrics: Dict[str, float] = {
+            "token_abs_error_sum": abs_err,
+            "token_correct": 1.0 if pred_count == gt_count else 0.0,
+        }
+        return metrics
 
     def evaluate_auxiliary_outputs(
         self,
@@ -168,11 +207,12 @@ class AllTimestampsTask(BaseTask):
         gt_counts = (audio_labels == 1).sum(dim=1)
 
         if use_poisson_loss:
-            loss = poisson_loss(audio_logits, audio_labels, audio_labels_frame_mask).mean()
+            timestamp_loss = poisson_loss(audio_logits, audio_labels, audio_labels_frame_mask).mean()
+            count_loss = poisson_count_loss(audio_logits, gt_counts, audio_labels_frame_mask).mean()
+            
             inferred_counts = infer_count(audio_logits, audio_labels_frame_mask)
 
-            loss = loss
-            
+            loss = timestamp_loss + count_loss
 
             if PartialState().is_main_process:
                 logging.info(f"All Predicted Counts: {inferred_counts}, Ground Truth Counts: {gt_counts}")
