@@ -18,3 +18,4 @@ audio_datasets/audioset/
 mixtures_metadata.json
 pkgs/
 pkgs_dirs/
+.conda_pkgs_dirs/
