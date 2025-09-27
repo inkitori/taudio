@@ -16,3 +16,5 @@ dataset_env/
 audio_datasets/audioset/
 *.csv
 mixtures_metadata.json
+pkgs/
+pkgs_dirs/

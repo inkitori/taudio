@@ -1,6 +1,7 @@
 from typing import Any, Dict, Iterable, List
 from datasets import load_dataset
 from datasets.features import Audio
+import logging
 
 from .base_dataset_adapter import BaseDatasetAdapter
 from utils.utils import round_timestamp_python
@@ -8,6 +9,12 @@ from utils.utils import remove_indices
 
 train_exclude_indices = [16103, 23870, 52776, 58610, 68716]
 eval_exclude_indices = [5929]
+
+def filter_fn(example):
+    for event in example['events']:
+        if event['start'] == 0:
+            return False
+    return True
 
 class AudioSetAdapter(BaseDatasetAdapter):
     def load_streaming_split(self, split: str):
@@ -30,6 +37,10 @@ class AudioSetAdapter(BaseDatasetAdapter):
             ds = remove_indices(ds, train_exclude_indices)
         elif split == "eval":
             ds = remove_indices(ds, eval_exclude_indices)
+        
+        logging.info(f"Size of dataset before filtering: {len(ds)}")
+        ds = ds.filter(filter_fn)
+        logging.info(f"Size of dataset after filtering: {len(ds)}")
         return ds
 
     def get_audio(self, example: Dict[str, Any]) -> Dict[str, Any]:
