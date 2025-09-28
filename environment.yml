@@ -243,4 +243,3 @@ dependencies:
 variables:
   HF_HOME: .cache/huggingface
   TRITON_CACHE_DIR: .triton_cache
-prefix: ./env
