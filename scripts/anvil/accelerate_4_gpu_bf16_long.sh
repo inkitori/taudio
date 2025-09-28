@@ -7,8 +7,8 @@
 #SBATCH --gres=gpu:4
 #SBATCH --time=2:59:00
 #SBATCH --job-name=4_gpu_bf16_long
-#SBATCH --output=/anvil/scratch/x-pkeung/taudio/scripts/logs/%x/%j.out
-#SBATCH --error=/anvil/scratch/x-pkeung/taudio/scripts/logs/%x/%j.err
+#SBATCH --output=scripts/anvil/logs/%x/%j.out
+#SBATCH --error=scripts/anvil/logs/%x/%j.err
 
 export OMP_NUM_THREADS=$(lscpu -b -p=CPU | grep -v '^#' | wc -l)
 
@@ -19,7 +19,6 @@ echo "MASTER_ADDR: $MASTER_ADDR"
 export MASTER_PORT=$(expr 10000 + $(echo -n $SLURM_JOBID | tail -c 4))
 echo "MASTER_PORT: $MASTER_PORT"
 
-cd /anvil/scratch/x-pkeung/taudio
 module load conda
 conda activate ./env
 # Capture the training output to extract the experiment directory
@@ -37,7 +36,7 @@ fi
 echo "Training completed, starting evaluation job"
 echo "Experiment directory: $experiment_dir"
 
-eval_cmd="sbatch scripts/anvil/eval_long.sh $experiment_dir $2"
+eval_cmd="sbatch scripts/anvil/eval.sh $experiment_dir $2"
 
 if [ -n "$3" ]; then
     eval_cmd="$eval_cmd $3"

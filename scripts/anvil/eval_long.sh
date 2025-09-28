@@ -7,10 +7,9 @@
 #SBATCH --gres=gpu:1
 #SBATCH --time=12:00:00
 #SBATCH --job-name=eval_long
-#SBATCH --output=/anvil/scratch/x-pkeung/taudio/scripts/logs/%x/%j.out
-#SBATCH --error=/anvil/scratch/x-pkeung/taudio/scripts/logs/%x/%j.err
+#SBATCH --output=scripts/anvil/logs/%x/%j.out
+#SBATCH --error=scripts/anvil/logs/%x/%j.err
 
-cd /anvil/scratch/x-pkeung/taudio
 module load conda
 conda activate ./env
 

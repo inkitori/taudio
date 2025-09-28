@@ -7,8 +7,8 @@
 #SBATCH --gres=gpu:2
 #SBATCH --time=2:59:00
 #SBATCH --job-name=train_and_eval
-#SBATCH --output=/anvil/scratch/x-pkeung/taudio/scripts/logs/%x/%j.out
-#SBATCH --error=/anvil/scratch/x-pkeung/taudio/scripts/logs/%x/%j.err
+#SBATCH --output=scripts/anvil/logs/%x/%j.out
+#SBATCH --error=scripts/anvil/logs/%x/%j.err
 
 export OMP_NUM_THREADS=96
 
@@ -19,7 +19,6 @@ echo "MASTER_ADDR: $MASTER_ADDR"
 export MASTER_PORT=$(expr 10000 + $(echo -n $SLURM_JOBID | tail -c 4))
 echo "MASTER_PORT: $MASTER_PORT"
 
-cd /anvil/scratch/x-pkeung/taudio
 module load conda
 conda activate ./env
 # Capture the training output to extract the experiment directory

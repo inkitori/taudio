@@ -7,10 +7,10 @@
 #SBATCH --gres=gpu:1
 #SBATCH --time=11:59:00
 #SBATCH --job-name=download_unbalanced_audioset
-#SBATCH --output=/anvil/scratch/x-pkeung/taudio/audio_datasets/logs/%x/%j.out
-#SBATCH --error=/anvil/scratch/x-pkeung/taudio/audio_datasets/logs/%x/%j.err
+#SBATCH --output=audio_datasets/logs/%x/%j.out
+#SBATCH --error=audio_datasets/logs/%x/%j.err
 
-cd /anvil/scratch/x-pkeung/taudio/audio_datasets
+cd audio_datasets
 module load conda
 conda activate ./dataset_env
 

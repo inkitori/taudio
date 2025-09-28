@@ -5,10 +5,10 @@
 #SBATCH --cpus-per-gpu=2
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:4
-#SBATCH --time=59:00
+#SBATCH --time=1:30:00
 #SBATCH --job-name=4_gpu_bf16
-#SBATCH --output=/anvil/scratch/x-pkeung/taudio/scripts/logs/%x/%j.out
-#SBATCH --error=/anvil/scratch/x-pkeung/taudio/scripts/logs/%x/%j.err
+#SBATCH --output=scripts/anvil/logs/%x/%j.out
+#SBATCH --error=scripts/anvil/logs/%x/%j.err
 
 export OMP_NUM_THREADS=$(lscpu -b -p=CPU | grep -v '^#' | wc -l)
 
@@ -19,7 +19,7 @@ echo "MASTER_ADDR: $MASTER_ADDR"
 export MASTER_PORT=$(expr 10000 + $(echo -n $SLURM_JOBID | tail -c 4))
 echo "MASTER_PORT: $MASTER_PORT"
 
-cd /anvil/scratch/x-pkeung/taudio
+cd /anvil/projects/x-nairr250124/x-pkeung/taudio
 module load conda
 conda activate ./env
 # Capture the training output to extract the experiment directory

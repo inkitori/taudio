@@ -5,12 +5,11 @@
 #SBATCH --cpus-per-gpu=1
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:1
-#SBATCH --time=0:30:00
+#SBATCH --time=1:00:00
 #SBATCH --job-name=eval
-#SBATCH --output=/anvil/scratch/x-pkeung/taudio/scripts/logs/%x/%j.out
-#SBATCH --error=/anvil/scratch/x-pkeung/taudio/scripts/logs/%x/%j.err
+#SBATCH --output=scripts/anvil/logs/%x/%j.out
+#SBATCH --error=scripts/anvil/logs/%x/%j.err
 
-cd /anvil/scratch/x-pkeung/taudio
 module load conda
 conda activate ./env
 

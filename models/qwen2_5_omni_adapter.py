@@ -119,8 +119,8 @@ class Qwen2_5OmniAdapter(BaseModelAdapter):
                 attention_mask, input_tensor, cache_position, past_key_values, output_attentions
             )
             
-            logging.info(f"Causal mask: {causal_mask.shape}")
-            logging.info(f"Input tensor: {input_tensor.shape}")
+            logging.debug(f"Causal mask: {causal_mask.shape}")
+            logging.debug(f"Input tensor: {input_tensor.shape}")
 
             if (
                 causal_mask is not None
@@ -150,7 +150,7 @@ class Qwen2_5OmniAdapter(BaseModelAdapter):
                         # Zero region for all heads in this batch element
                         cloned_causal_mask[b, :, start_idx:end_idx + 1, start_idx:end_idx + 1] = 0
                     else:
-                        logging.info(f"Start index {start_idx} or end index {end_idx} is out of range for batch {b}")
+                        logging.debug(f"Start index {start_idx} or end index {end_idx} is out of range for batch {b}")
 
                 return cloned_causal_mask
 

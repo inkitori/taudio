@@ -247,7 +247,7 @@ class SingleTimestampTask(BaseTask):
 
         with torch.no_grad():
             outputs = model(**inputs, inference=True)
-            pred_timestamp = outputs.auxiliary_prediction.item()
+            pred_timestamp = round_timestamp_python(outputs.auxiliary_prediction.item())
 
         logging.info(f"Auxiliary prediction: {pred_timestamp}, GT: {gt_timestamp}")
 
@@ -274,7 +274,8 @@ class SingleTimestampTask(BaseTask):
             for example in range(batch_size):
                 example_audio_logits = audio_logits[example]
                 example_audio_labels = audio_labels[example]
-
+                example_audio_labels = example_audio_labels.to(example_audio_logits.dtype)
+                
                 if (example_audio_labels == -100).any():
                     neg_100_idx = (example_audio_labels == -100).nonzero(as_tuple=True)[0][0].item()
                     example_audio_logits = example_audio_logits[:neg_100_idx]
@@ -286,22 +287,35 @@ class SingleTimestampTask(BaseTask):
 
                 predicted_timestamps[example] = round_timestamp(predicted_timestamps[example])
         else:
-            # # DONT FORGET TO HANDLE THE PADDING HERE TOO
-            # if class_weighting:
-            #     num_ones = (labels == 1).sum()
-            #     num_zeros = (labels == 0).sum()
-            #     pos_weight = (
-            #         num_zeros / num_ones) if num_ones > 0 else 1.0
+            predicted_timestamps = torch.zeros(batch_size, device=audio_logits.device)
+            loss = torch.zeros(batch_size, device=audio_logits.device)
 
-            #     criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
-            # else:
-            #     criterion = nn.BCEWithLogitsLoss()
+            for example in range(batch_size):
+                example_audio_logits = audio_logits[example]
+                example_audio_labels = audio_labels[example]
+                example_audio_labels = example_audio_labels.to(example_audio_logits.dtype)
 
-            # loss = criterion(logits, labels)
-            # pred_timestamp = torch.argmax(logits).item() 
-            # pred_timestamp = pred_timestamp + 0.5 # because we floor timestamps to the frame, we want to have full coverage over the frame
-            pass
+                if (example_audio_labels == -100).any():
+                    neg_100_idx = (example_audio_labels == -100).nonzero(as_tuple=True)[0][0].item()
+                    example_audio_logits = example_audio_logits[:neg_100_idx]
+                    example_audio_labels = example_audio_labels[:neg_100_idx]
 
+                predicted_timestamps[example] = torch.argmax(example_audio_logits)
+                predicted_timestamps[example] = predicted_timestamps[example] + 0.5 # because we floor timestamps to the frame, we want to have full coverage over the frame
+                predicted_timestamps[example] = predicted_timestamps[example] / model_adapter.seconds_to_embedding
+                predicted_timestamps[example] = round_timestamp(predicted_timestamps[example])
+
+                if class_weighting:
+                    num_ones = (example_audio_labels == 1).sum()
+                    num_zeros = (example_audio_labels == 0).sum()
+                    pos_weight = num_zeros / num_ones
+                    criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight.to(example_audio_logits.dtype))
+                else:
+                    criterion = nn.BCEWithLogitsLoss()
+
+                loss[example] = criterion(example_audio_logits, example_audio_labels)
+
+        loss = loss.mean()
 
         logging.info(f"Predicted timestamps: {predicted_timestamps}, Ground truth timestamps: {gt_timestamps}")
         
