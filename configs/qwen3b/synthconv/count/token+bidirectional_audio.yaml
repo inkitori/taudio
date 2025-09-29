@@ -17,7 +17,7 @@ training:
 # Dataset configuration
 dataset:
   split: "train"
-  repository: "wjiaqi/taudio"
+  repository: "wenjiaqi/taudio"
 
 task:
   type: "SPEAKER_COUNT"

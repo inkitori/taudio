@@ -1,30 +1,29 @@
 # Model configuration
 model:
   model_id: "Qwen/Qwen2.5-Omni-3B"
-  load_in_8bit: false
   freeze_text_model: false
   audio_layer: -1
   bidirectional_audio: true
-  linear_bias: -5
+  linear_bias: -6
   dtype: "auto"
 
 # Training configuration
 training:
   epochs: 1
-  batch_size: 1
-  grad_accumulation_steps: 8
-  learning_rate: 7.0e-6
+  effective_batch_size: 8
+  learning_rate: 5.0e-6
   eta_min_scale: 0.1
-  optim_8bit: false
-  
+ 
 # Dataset configuration
 dataset:
   split: "train"
-  repository: "wjiaqi/taudio"
-  padding: 0
+  repository: "enyoukai/AudioSet-Strong"
 
 task:
-  type: "SPEAKER_COUNT"
+  type: "SINGLE_WORD_TIMESTAMP"
+  kwargs:
+    key: "start"
+    max_time: 6.0
 
 # Loss configuration
 loss:
