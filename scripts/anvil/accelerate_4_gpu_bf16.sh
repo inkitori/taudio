@@ -19,7 +19,6 @@ echo "MASTER_ADDR: $MASTER_ADDR"
 export MASTER_PORT=$(expr 10000 + $(echo -n $SLURM_JOBID | tail -c 4))
 echo "MASTER_PORT: $MASTER_PORT"
 
-cd /anvil/projects/x-nairr250124/x-pkeung/taudio
 module load conda
 conda activate ./env
 # Capture the training output to extract the experiment directory
