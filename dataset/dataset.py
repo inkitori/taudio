@@ -15,6 +15,7 @@ def get_ds(
     split: str,
     task: BaseTask,
     take_first: Optional[int] = None,
+    left_padding: int = 0,
 ) -> Dataset:
     def transform_fn(batch: Dict[str, List[Any]]) -> Dict[str, List[Any]]:
         """
@@ -51,7 +52,7 @@ def get_ds(
         return processed_batch
 
     ds_adapter = create_adapter(infer_adapter_from_repository(
-        repository), sampling_rate=model_adapter.sampling_rate, repository=repository, take_first=take_first)
+        repository), sampling_rate=model_adapter.sampling_rate, repository=repository, take_first=take_first, left_padding=left_padding)
 
     base_ds = ds_adapter.load_split(split).filter(lambda x: not task.skip_example(x, ds_adapter))
         

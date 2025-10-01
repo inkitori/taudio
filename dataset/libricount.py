@@ -1,8 +1,10 @@
 from typing import Any, Dict, Iterable, List
 from datasets import load_dataset
 from datasets.features import Audio
+import numpy as np
+import logging
 
-from utils.utils import reprocess_and_split_dataset, round_timestamp_python
+from utils.utils import round_timestamp_python
 
 from .base_dataset_adapter import BaseDatasetAdapter
 
@@ -24,8 +26,15 @@ class LibriCountAdapter(BaseDatasetAdapter):
             ds = ds.select(range(self.take_first))
         return ds
 
-    def get_audio(self, example: Dict[str, Any]) -> Dict[str, Any]:
-        return example["audio"]
+    def get_audio_frames(self, example: Dict[str, Any]) -> Dict[str, Any]:
+        audio = example["audio"]["array"]
+        logging.info(f"Audio shape: {audio.shape}")
+        pad_samples = int(self.left_padding * self.sampling_rate)
+        if pad_samples > 0:
+            zeros = np.zeros(pad_samples, dtype=audio.dtype)
+            audio = np.concatenate([zeros, audio], axis=0)
+        logging.info(f"Audio shape after padding: {audio.shape}")
+        return audio
 
     def get_events(self, example: Dict[str, Any]) -> Iterable[Dict[str, Any]]:
         events = []
@@ -45,7 +54,8 @@ class LibriCountAdapter(BaseDatasetAdapter):
         if key == 'end':
             raise ValueError("End key not supported for LibriCount")
 
-        return round_timestamp_python(float(event['start']))
+        fixed_start = round_timestamp_python(float(event['start']) + self.left_padding)
+        return fixed_start
 
     def get_num_speakers(self, example: Dict[str, Any]) -> int:
         return example["k"]

@@ -105,7 +105,7 @@ class SingleTimestampTask(BaseTask):
         eval_mode: bool,
         event: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
-        audio = ds_adapter.get_audio(example)
+        audio_frames = ds_adapter.get_audio_frames(example)
         events = list(ds_adapter.get_events(example))
 
         if len(events) == 0:
@@ -125,9 +125,6 @@ class SingleTimestampTask(BaseTask):
         processor = model_adapter.processor
         prompt_text = self._build_conversation_text(
             model_processor=processor, ds_adapter=ds_adapter, event=event, eval_mode=eval_mode)
-
-        audio_frames = audio["array"]
-        assert int(audio["sampling_rate"]) == model_adapter.sampling_rate
 
         inputs = processor(
             text=prompt_text,

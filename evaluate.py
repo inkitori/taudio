@@ -124,6 +124,7 @@ def main():
         infer_adapter_from_repository(dataset_config['repository']),
         repository=dataset_config['repository'],
         sampling_rate=model.model_adapter.sampling_rate,
+        left_padding=dataset_config.get('left_padding', 0),
     )
     base_ds = adapter.load_split(args.split)
     base_ds = base_ds.shuffle(seed=SEED)

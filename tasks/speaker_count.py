@@ -59,16 +59,13 @@ class SpeakerCountTask(BaseTask):
         model_adapter: BaseModelAdapter,
         eval_mode: bool,
     ) -> Dict[str, Any]:
-        audio = ds_adapter.get_audio(example)
+        audio_frames = ds_adapter.get_audio_frames(example)
         speaker_count = ds_adapter.get_num_speakers(example)
 
         # Build prompt text via chat template and prepare inputs using the model adapter's processor
         processor = model_adapter.processor
         prompt_text = self._build_conversation_text(
             model_processor=processor, ds_adapter=ds_adapter, speaker_count=speaker_count, eval_mode=eval_mode)
-
-        audio_frames = audio["array"]
-        assert int(audio["sampling_rate"]) == model_adapter.sampling_rate
 
         inputs = processor(
             text=prompt_text,
@@ -193,7 +190,8 @@ class SpeakerCountTask(BaseTask):
         else:
             logging.info("Bernoulli loss enabled")
 
-            raw_pred_counts = audio_logits[:, 0]
+            audio_logits = torch.sigmoid(audio_logits)
+            raw_pred_counts = torch.sum(audio_logits, dim=1)
             pred_counts = torch.round(raw_pred_counts)
 
             raw_pred_abs_diff = torch.abs(raw_pred_counts - gt_counts)

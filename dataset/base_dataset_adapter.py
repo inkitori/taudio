@@ -15,11 +15,11 @@ class BaseDatasetAdapter(ABC):
 
     repository: Optional[str]
 
-    def __init__(self, sampling_rate: int, repository: Optional[str] = None, take_first: Optional[int] = None) -> None:
+    def __init__(self, sampling_rate: int, repository: Optional[str] = None, take_first: Optional[int] = None, left_padding: int = 0) -> None:
         self.repository = repository
         self.sampling_rate = sampling_rate
         self.take_first = take_first
-
+        self.left_padding = left_padding
     @abstractmethod
     def load_streaming_split(self, split: str):
         """Return an iterable/streaming dataset for this repository and split."""
@@ -29,7 +29,7 @@ class BaseDatasetAdapter(ABC):
         """Return a non-streaming dataset for this repository and split."""
 
     @abstractmethod
-    def get_audio(self, example: Dict[str, Any]) -> Dict[str, Any]:
+    def get_audio_frames(self, example: Dict[str, Any]) -> Dict[str, Any]:
         """Return dict with keys: array (1D float32) and sampling_rate (int)."""
 
     @abstractmethod

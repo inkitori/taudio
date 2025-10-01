@@ -26,8 +26,8 @@ class LibriSpeechAdapter(BaseDatasetAdapter):
             ds = ds.select(range(self.take_first))
         return ds
 
-    def get_audio(self, example: Dict[str, Any]) -> Dict[str, Any]:
-        return example["audio"]
+    def get_audio_frames(self, example: Dict[str, Any]) -> Dict[str, Any]:
+        return example["audio"]["array"]
 
     def get_events(self, example: Dict[str, Any]) -> Iterable[Dict[str, Any]]:
         # The source data uses key 'words', each item has 'word' and timing fields like 'start'/'end'

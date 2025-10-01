@@ -119,6 +119,7 @@ def main():
         split=dataset_config['split'],
         task=task,
         take_first=dataset_config.get('take_first', None),
+        left_padding=dataset_config.get('left_padding', 0),
     )
 
     accelerator.wait_for_everyone()
