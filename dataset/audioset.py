@@ -33,10 +33,11 @@ class AudioSetAdapter(BaseDatasetAdapter):
         if self.take_first:
             ds = ds.select(range(self.take_first))
 
-        if split == "train":
-            ds = remove_indices(ds, train_exclude_indices)
-        elif split == "eval":
-            ds = remove_indices(ds, eval_exclude_indices)
+        if self.repository == "enyoukai/AudioSet-Strong":
+            if split == "train":
+                ds = remove_indices(ds, train_exclude_indices)
+            elif split == "eval":
+                ds = remove_indices(ds, eval_exclude_indices)
         
         logging.info(f"Size of dataset before filtering: {len(ds)}")
         ds = ds.filter(filter_fn)
