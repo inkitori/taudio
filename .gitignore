@@ -19,3 +19,5 @@ mixtures_metadata.json
 pkgs/
 pkgs_dirs/
 .conda_pkgs_dirs/
+mixtures_start_0/
+mixtures_start_random/
