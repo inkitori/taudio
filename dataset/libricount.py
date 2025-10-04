@@ -1,6 +1,6 @@
 from typing import Any, Dict, Iterable, List
 from datasets import load_dataset
-from datasets.features import Audio
+from datasets.features import Audio, ClassLabel
 import numpy as np
 import logging
 
@@ -18,7 +18,8 @@ class LibriCountAdapter(BaseDatasetAdapter):
 
     def load_split(self, split: str):
         ds = load_dataset(self.repository, split='train')
-        ds = ds.train_test_split(test_size=0.1, seed=42)
+        ds = ds.cast_column('k', ClassLabel(names=[str(i) for i in range(1, 11)]))
+        ds = ds.train_test_split(test_size=0.1, seed=42, stratify_by_column='k')
         ds = ds[split]
         
         ds = ds.cast_column("audio", Audio(sampling_rate=self.sampling_rate))
