@@ -17,12 +17,12 @@ training:
 # Dataset configuration
 dataset:
   split: "train"
-  repository: "enyoukai/libricount-timings"
+  repository: "enyoukai/AudioSet-Strong-Music"
 
 task:
   type: "SINGLE_WORD_TIMESTAMP"
   kwargs:
-    key: "start"
+    key: "end"
 
 # Loss configuration
 loss:

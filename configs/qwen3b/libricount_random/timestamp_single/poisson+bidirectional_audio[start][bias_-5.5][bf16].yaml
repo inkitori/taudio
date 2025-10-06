@@ -17,7 +17,7 @@ training:
 # Dataset configuration
 dataset:
   split: "train"
-  repository: "enyoukai/libricount-timings-random"
+  repository: "enyoukai/libricount-timings"
 
 task:
   type: "SINGLE_WORD_TIMESTAMP"
