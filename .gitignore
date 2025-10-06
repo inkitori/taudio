@@ -21,3 +21,7 @@ pkgs_dirs/
 .conda_pkgs_dirs/
 mixtures_start_0/
 mixtures_start_random/
+mixtures_start_random_test/
+audioset_eval_strong.tsv
+audioset_train_strong.tsv
+ontology.json
