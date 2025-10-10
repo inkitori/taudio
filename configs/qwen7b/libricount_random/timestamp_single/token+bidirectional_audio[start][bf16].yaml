@@ -1,6 +1,6 @@
 # Model configuration
 model:
-  model_id: "Qwen/Qwen2.5-Omni-3B"
+  model_id: "Qwen/Qwen2.5-Omni-7B"
   freeze_text_model: false
   audio_layer: -1
   bidirectional_audio: true
@@ -26,10 +26,10 @@ task:
 
 # Loss configuration
 loss:
-  token_loss: false
-  surrogate_loss: true
-  surrogate_loss_weight: 1.0
-  class_weighting: true
+  token_loss: true
+  surrogate_loss: false
+  surrogate_loss_weight: 0.0
+  class_weighting: false
   poisson_loss: false
 
 # System configuration
