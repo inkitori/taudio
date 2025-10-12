@@ -1,165 +1,182 @@
-"""Utility for pushing the LibriCount audio mixtures to the Hugging Face Hub.
-
-This script reads the `mixtures_metadata.json` file that accompanies the
-LibriCount mixtures and constructs a Hugging Face dataset with the following
-schema:
-
-    - audio: the mixture audio file
-    - k: the number of speakers in the mixture
-    - components: metadata for each component utterance sorted by
-      `first_word_start_sec`
-
-The resulting dataset is uploaded to the Hub repository specified by
-`--repo-id` (defaults to `enyoukai/libricount-timings`).
-"""
-
-from __future__ import annotations
-
-import argparse
-import json
 import os
-from pathlib import Path
-from typing import Dict, Iterable, Iterator, List
+import json
+import math
+import random
+from collections import defaultdict
+from typing import List
 
-from datasets import Audio, Dataset, DatasetDict, Features, Sequence, Value
+import numpy as np
+from scipy.io import wavfile
+from datasets import load_dataset, Audio
 
+# ---------------------------
+# Configurable parameters
+# ---------------------------
+OUTPUT_DIR = "mixtures_start_random_test"
+METADATA_JSON = os.path.join(OUTPUT_DIR, "mixtures_metadata.json")
+SAMPLE_RATE = 16000
+MIX_DURATION_SEC = 10.0
+N_PER_K = 200
+KS = list(range(1, 11))
+SEED = 12345
+NORMALIZE_HEADROOM = 0.95
+# ---------------------------
 
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description=__doc__)
-    default_root = Path(__file__).resolve().parent
-    parser.add_argument(
-        "--metadata-path",
-        type=Path,
-        default=default_root / "mixtures_start_0" / "mixtures_metadata.json",
-        help="Path to the LibriCount mixtures metadata JSON file.",
-    )
-    parser.add_argument(
-        "--audio-root",
-        type=Path,
-        default=default_root,
-        help=(
-            "Directory that acts as the root for relative audio paths in the "
-            "metadata. Defaults to the directory containing this script."
-        ),
-    )
-    parser.add_argument(
-        "--repo-id",
-        type=str,
-        default="enyoukai/libricount-timings",
-        help="Target Hugging Face Hub repository ID (e.g. 'user/dataset').",
-    )
-    parser.add_argument(
-        "--split",
-        type=str,
-        default="train",
-        help="Name of the dataset split to create.",
-    )
-    parser.add_argument(
-        "--max-shard-size",
-        type=str,
-        default="2GB",
-        help="Maximum shard size used when pushing the dataset to the Hub.",
-    )
-    parser.add_argument(
-        "--token",
-        type=str,
-        default=os.getenv("HUGGINGFACEHUB_API_TOKEN")
-        or os.getenv("HF_TOKEN"),
-        help=(
-            "Hugging Face access token. Defaults to the value in the "
-            "HUGGINGFACEHUB_API_TOKEN or HF_TOKEN environment variables if "
-            "present."
-        ),
-    )
-    return parser.parse_args()
+def load_example_dataset(split: str = "test_clean", sample_rate: int = 16000):
+    """
+    Load gilkeyio/librispeech-alignments lazily from Hugging Face.
+    Audio is decoded only when accessed.
+    """
+    ds = load_dataset("gilkeyio/librispeech-alignments", split=split)
+    ds = ds.cast_column("audio", Audio(sampling_rate=sample_rate))
+    return ds
 
+def _to_mono(arr: np.ndarray) -> np.ndarray:
+    return arr if arr.ndim == 1 else np.mean(arr, axis=-1)
 
-def load_metadata(metadata_path: Path) -> List[Dict[str, object]]:
-    if not metadata_path.exists():
-        raise FileNotFoundError(f"Metadata file not found: {metadata_path}")
-    with metadata_path.open("r", encoding="utf-8") as f:
-        return json.load(f)
+def _astype_float01(arr: np.ndarray) -> np.ndarray:
+    if np.issubdtype(arr.dtype, np.integer):
+        return arr.astype(np.float32) / 32768.0
+    return arr.astype(np.float32)
 
+def _float_to_int16(arr: np.ndarray) -> np.ndarray:
+    return (np.clip(arr, -1.0, 1.0) * 32767).astype(np.int16)
 
-def sort_components(components: Iterable[Dict[str, object]]) -> List[Dict[str, object]]:
-    return sorted(
-        (
-            {
-                "speaker_id": str(component["speaker_id"]),
-                "utterance_id": str(component["utterance_id"]),
-                "utterance_length_sec": float(component["utterance_length_sec"]),
-                "first_word_start_sec": float(component["first_word_start_sec"]),
-            }
-            for component in components
-        ),
-        key=lambda item: item["first_word_start_sec"],
-    )
+def prepare_candidate_index(dataset, min_duration_sec: float, sample_rate: int):
+    """Return mapping speaker_id -> list of row indices with utterances >= min_duration_sec."""
+    min_samples = int(math.ceil(min_duration_sec * sample_rate))
+    speaker_map = defaultdict(list)
+    for idx in range(len(dataset)):
+        n_samples = dataset[idx]["audio"]["array"].shape[0]
+        if n_samples >= min_samples:
+            speaker_id = dataset[idx]["id"].split("-")[0]
+            speaker_map[speaker_id].append(idx)
+    return speaker_map
 
+def extract_first_10s_clip(example, sample_rate: int, duration_sec: float = 10.0):
+    """
+    Take the first 10s segment (t=0.0 to 10.0).
+    Return float32 audio and the time of the first word onset if available.
+    """
+    audio = example["audio"]["array"]
+    clip_len = int(round(duration_sec * sample_rate))
+    segment = audio[:clip_len]
+    segment = _astype_float01(_to_mono(segment))
 
-def make_features() -> Features:
-    return Features(
-        {
-            "audio": Audio(),
-            "k": Value("int32"),
-            "components": Sequence(
-                {
-                    "speaker_id": Value("string"),
-                    "utterance_id": Value("string"),
-                    "utterance_length_sec": Value("float32"),
-                    "first_word_start_sec": Value("float32"),
-                }
-            ),
-        }
-    )
+    # First word start time if available
+    first_word_start = None
+    if "words" in example and example["words"]:
+        # filter words that are real (exclude <unk>)
+        valid_words = [w for w in example["words"] if "start" in w and isinstance(w["start"], (int, float))]
+        if valid_words:
+            first_word_start = float(valid_words[0]["start"])
 
+    return segment, first_word_start
 
-def dataset_generator(
-    metadata: List[Dict[str, object]],
-    audio_root: Path,
-) -> Iterator[Dict[str, object]]:
-    for record in metadata:
-        mixture_path = Path(record["mixture_path"])
-        if not mixture_path.is_absolute():
-            mixture_path = audio_root / mixture_path
+def mix_clips(clips: List[np.ndarray], headroom: float = NORMALIZE_HEADROOM) -> np.ndarray:
+    stacked = np.stack(clips, axis=0)
+    mixture = stacked.sum(axis=0)
+    max_abs = np.max(np.abs(mixture))
+    if max_abs > headroom:
+        mixture *= headroom / max_abs
+    return np.clip(mixture, -1.0, 1.0).astype(np.float32)
 
-        if not mixture_path.exists():
-            raise FileNotFoundError(f"Audio file referenced in metadata not found: {mixture_path}")
+def write_wav(path: str, sample_rate: int, array_int16: np.ndarray):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    wavfile.write(path, sample_rate, array_int16)
 
-        yield {
-            "audio": str(mixture_path),
-            "k": int(record["k"]),
-            "components": sort_components(record["components"]),
-        }
+def create_mixtures(dataset,
+                    output_dir: str = OUTPUT_DIR,
+                    sample_rate: int = SAMPLE_RATE,
+                    mix_duration_sec: float = MIX_DURATION_SEC,
+                    n_per_k: int = N_PER_K,
+                    ks: List[int] = KS,
+                    seed: int = SEED):
 
+    rng = random.Random(seed)
+    print(f"Filtering utterances shorter than {mix_duration_sec:.1f}s...")
+    speaker_map = prepare_candidate_index(dataset, min_duration_sec=mix_duration_sec, sample_rate=sample_rate)
+    speaker_ids = list(speaker_map.keys())
+    print(f"Found {len(speaker_ids)} eligible speakers.")
 
-def build_dataset(metadata_path: Path, audio_root: Path) -> Dataset:
-    metadata = load_metadata(metadata_path)
+    metadata = []
+    global_count = 0
 
-    def generator() -> Iterator[Dict[str, object]]:
-        return dataset_generator(metadata, audio_root)
+    for k in ks:
+        print(f"\nCreating {n_per_k} mixtures with k = {k} speakers each...")
+        for idx in range(n_per_k):
+            chosen_speakers = rng.sample(speaker_ids, k)
+            clips, components = [], []
 
-    dataset = Dataset.from_generator(generator)
-    dataset = dataset.cast_column("audio", Audio())
+            for j, spk in enumerate(chosen_speakers):
+                rec_idx = rng.choice(speaker_map[spk])
+                rec = dataset[rec_idx]
+                clip, first_word_start = extract_first_10s_clip(
+                    rec, sample_rate, duration_sec=mix_duration_sec
+                )
 
-    return dataset
+                if j == 0:
+                    # First speaker always starts at time 0
+                    offset_sec = 0.0
+                else:
+                    # Random offset between 0 and k seconds
+                    offset_sec = rng.uniform(0.0, 4.0)
 
+                offset_samples = int(round(offset_sec * sample_rate))
+                if offset_samples > 0:
+                    pad = np.zeros(offset_samples, dtype=np.float32)
+                    clip = np.concatenate([pad, clip])
+                    clip = clip[: int(mix_duration_sec * sample_rate)]  # trim back to 10s
+                    if first_word_start is not None:
+                        first_word_start = round(first_word_start + offset_sec, 3)
 
-def push_dataset(dataset: Dataset, repo_id: str, split: str, max_shard_size: str, token: str | None) -> None:
-    dataset_dict = DatasetDict({split: dataset})
-    dataset_dict.push_to_hub(repo_id, token=token, max_shard_size=max_shard_size)
+                clips.append(clip)
+                components.append({
+                    "speaker_id": spk,
+                    "utterance_id": rec["id"],
+                    "utterance_length_sec": len(rec["audio"]["array"]) / sample_rate,
+                    "first_word_start_sec": first_word_start,
+                    "offset_sec": offset_sec
+                })
+                
+            mixture_float = mix_clips(clips, headroom=NORMALIZE_HEADROOM)
+            mixture_int16 = _float_to_int16(mixture_float)
 
+            global_count += 1
+            fname = f"mixture_k{k}_{idx:04d}.wav"
+            fpath = os.path.join(output_dir, fname)
+            write_wav(fpath, sample_rate, mixture_int16)
 
-def main() -> None:
-    args = parse_args()
+            metadata.append({
+                "mixture_filename": fname,
+                "mixture_path": fpath,
+                "k": k,
+                "components": components
+            })
 
-    os.environ.setdefault("HF_HUB_ENABLE_HF_TRANSFER", "1")
+            if (idx + 1) % 500 == 0:
+                print(f"  {idx+1}/{n_per_k} done for k={k}")
 
-    dataset = build_dataset(args.metadata_path, args.audio_root)
-    push_dataset(dataset, args.repo_id, args.split, args.max_shard_size, args.token)
-
+    with open(METADATA_JSON, "w") as f:
+        json.dump(metadata, f, indent=2)
+    print(f"\nDone. Wrote {global_count} mixtures. Metadata in {METADATA_JSON}")
 
 if __name__ == "__main__":
-    main()
+    # Example: If your dataset is a pandas DataFrame called `df` loaded from somewhere,
+    # convert it to list-of-dicts: records = df.to_dict(orient="records")
+    #
+    # For demonstration here's a placeholder load function. Replace with your loader:
 
+    # Replace this with actual dataset load:
+    dataset = load_example_dataset()
 
-
+    if len(dataset) == 0:
+        print("Dataset is empty in this example. Replace load_example_dataset() with actual loader.")
+    else:
+        create_mixtures(dataset,
+                        output_dir=OUTPUT_DIR,
+                        sample_rate=SAMPLE_RATE,
+                        mix_duration_sec=MIX_DURATION_SEC,
+                        n_per_k=N_PER_K,
+                        ks=KS,
+                        seed=SEED)

@@ -5,7 +5,7 @@
 #SBATCH --cpus-per-gpu=2
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:4
-#SBATCH --time=2:59:00
+#SBATCH --time=3:00:00
 #SBATCH --job-name=4_gpu_bf16_long
 #SBATCH --output=scripts/anvil/logs/%x/%j.out
 #SBATCH --error=scripts/anvil/logs/%x/%j.err
@@ -36,7 +36,7 @@ fi
 echo "Training completed, starting evaluation job"
 echo "Experiment directory: $experiment_dir"
 
-eval_cmd="sbatch scripts/anvil/eval.sh $experiment_dir $2"
+eval_cmd="sbatch scripts/anvil/eval_long.sh $experiment_dir $2"
 
 if [ -n "$3" ]; then
     eval_cmd="$eval_cmd $3"

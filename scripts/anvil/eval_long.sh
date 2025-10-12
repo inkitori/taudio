@@ -5,7 +5,7 @@
 #SBATCH --cpus-per-gpu=1
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:1
-#SBATCH --time=12:00:00
+#SBATCH --time=3:00:00
 #SBATCH --job-name=eval_long
 #SBATCH --output=scripts/anvil/logs/%x/%j.out
 #SBATCH --error=scripts/anvil/logs/%x/%j.err

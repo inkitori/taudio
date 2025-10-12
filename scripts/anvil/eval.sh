@@ -5,7 +5,7 @@
 #SBATCH --cpus-per-gpu=1
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:1
-#SBATCH --time=1:00:00
+#SBATCH --time=3:00:00
 #SBATCH --job-name=eval
 #SBATCH --output=scripts/anvil/logs/%x/%j.out
 #SBATCH --error=scripts/anvil/logs/%x/%j.err
@@ -14,7 +14,7 @@ module load conda
 conda activate ./env
 
 # Build the evaluate command with optional arguments
-eval_cmd="python evaluate.py --experiment $1 --split $2"
+eval_cmd="python evaluate.py --experiment $1 --split $2" # --k-errs"
 
 if [ -n "$3" ]; then
     eval_cmd="$eval_cmd --min-time $3"
