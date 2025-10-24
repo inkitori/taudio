@@ -15,7 +15,6 @@ from tasks import create_task
 from utils.metrics import AverageMetrics
 import numpy as np
 from transformers import set_seed
-
 def main():
     logging.getLogger().setLevel(logging.INFO)
 
@@ -126,13 +125,17 @@ def main():
         sampling_rate=model.model_adapter.sampling_rate,
         left_padding=dataset_config.get('left_padding', 0),
     )
+    task.rounding_factor = adapter.timestamp_rounding_factor()
+
     base_ds = adapter.load_split(args.split)
-    base_ds = base_ds.shuffle(seed=SEED)
+    # base_ds = base_ds.shuffle(seed=SEED)
 
     # Metrics aggregator (running averages)
     metrics = AverageMetrics()
 
     logging.info(f"Evaluating on {args.split} split")
+
+    model.eval()
 
     for example in base_ds:
         if task.skip_example(example, adapter):

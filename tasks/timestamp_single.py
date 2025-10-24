@@ -21,6 +21,7 @@ class SingleTimestampTask(BaseTask):
         self.key = key
         self.max_time = max_time
         self.min_time = min_time
+        self.rounding_factor = None
 
     def _choose_event(self, *, events: Iterable[Dict[str, Any]], ds_adapter: BaseDatasetAdapter, apply_fallback: bool, return_all: bool = False) -> Dict[str, Any]:
         seen_names = set()
@@ -60,7 +61,7 @@ class SingleTimestampTask(BaseTask):
 
     def _build_conversation_text(self, *, model_processor: Any, ds_adapter: BaseDatasetAdapter, event: Dict[str, Any], eval_mode: bool) -> str:
         name = ds_adapter.event_name(event)
-        prompt = ds_adapter.get_timestamp_single_prompt(name)
+        prompt = ds_adapter.get_timestamp_single_prompt(name, self.key)
 
         conversation = [
             {
@@ -115,6 +116,8 @@ class SingleTimestampTask(BaseTask):
         if event is None:
             event = self._choose_event(
                 events=events, ds_adapter=ds_adapter, apply_fallback=not eval_mode)
+        logging.info(f"Events: {events}")
+        logging.info(f"Event: {event}")
 
         # Logging for traceability
         name = ds_adapter.event_name(event)
@@ -125,6 +128,8 @@ class SingleTimestampTask(BaseTask):
         processor = model_adapter.processor
         prompt_text = self._build_conversation_text(
             model_processor=processor, ds_adapter=ds_adapter, event=event, eval_mode=eval_mode)
+
+        logging.info(f"Prompt text: {prompt_text}")
 
         inputs = processor(
             text=prompt_text,
@@ -141,12 +146,14 @@ class SingleTimestampTask(BaseTask):
         input_features = inputs["input_features"]
         feature_attention_mask = inputs["feature_attention_mask"]
 
-        # Labels aligned to <AUDIO> embeddings (40 ms per embedding for Qwen2.5 Omni)
-        audio_labels_size = int((input_ids == model_adapter.audio_id).sum().item())
+        # Labels aligned to <AUDIO> embeddings (now 10 ms per frame: 4 frames per 40ms embedding)
+        num_unscaled_frames = int((input_ids == model_adapter.audio_id).sum().item())
+        audio_labels_size = num_unscaled_frames * model_adapter.scaling_factor  # 4 x 10ms frames per 40ms token
         audio_labels = torch.zeros(audio_labels_size, device=input_ids.device)
 
+        # Convert timestamp to 10ms frame index (100 frames per second)
         event_idx = clamp(math.floor(
-            t_sec * (model_adapter.seconds_to_embedding)), 0, audio_labels_size - 1)
+            t_sec * (model_adapter.seconds_to_embedding * model_adapter.scaling_factor)), 0, audio_labels_size - 1)
         audio_labels[event_idx] = 1.0
 
         # Mask out everything up to and including the assistant token
@@ -200,16 +207,26 @@ class SingleTimestampTask(BaseTask):
         try:
             token_pred = json.loads(generated_string)[name]
         except Exception:
-            return {"token_correct": 0.0, "parsing_error": 1.0}
+            abs_err = ds_adapter.get_audio_frames(example).size / (2 * model.model_adapter.sampling_rate)
+            return {"token_abs_error_sum": abs_err, "token_correct": 0.0, "parsing_error": 1.0} 
 
         # Metric increments
-        token_pred = round_timestamp_python(float(token_pred))
-        abs_err = round_timestamp_python(abs(float(token_pred) - float(gt)))
+        token_pred = round_timestamp_python(float(token_pred), self.rounding_factor)
+        abs_err = round_timestamp_python(abs(float(token_pred) - float(gt)), self.rounding_factor)
         logging.info(f"Absolute error: {abs_err}, Error bound: {error_bound}, Correct: {1.0 if abs_err <= float(error_bound) else 0.0}")
+
+        logging.info(f"Audio frames half size: {ds_adapter.get_audio_frames(example).size / (2 * model.model_adapter.sampling_rate)}")
 
         metrics: Dict[str, float] = {
             "token_abs_error_sum": abs_err,
-            "token_correct": 1.0 if abs_err <= float(error_bound) else 0.0,
+            "token_correct_5ms": 1.0 if abs_err <= 0.005 else 0.0,
+            "token_correct_10ms": 1.0 if abs_err <= 0.010 else 0.0,
+            "token_correct_20ms": 1.0 if abs_err <= 0.020 else 0.0,
+            "token_correct_40ms": 1.0 if abs_err <= 0.040 else 0.0,
+            "token_correct_50ms": 1.0 if abs_err <= 0.050 else 0.0,
+            "token_correct_80ms": 1.0 if abs_err <= 0.080 else 0.0,
+            "token_correct_100ms": 1.0 if abs_err <= 0.100 else 0.0,
+            "token_correct_200ms": 1.0 if abs_err <= 0.200 else 0.0,
         }
         return metrics
 
@@ -244,26 +261,70 @@ class SingleTimestampTask(BaseTask):
 
         with torch.no_grad():
             outputs = model(**inputs, inference=True)
-            pred_timestamp = round_timestamp_python(outputs.auxiliary_prediction.item())
+            pred_timestamp = round_timestamp_python(outputs.auxiliary_prediction.item(), self.rounding_factor)
 
         logging.info(f"Auxiliary prediction: {pred_timestamp}, GT: {gt_timestamp}")
 
         # Metric increments
-        abs_err = round_timestamp_python(abs(pred_timestamp - gt_timestamp))
+        abs_err = round_timestamp_python(abs(pred_timestamp - gt_timestamp), self.rounding_factor)
         logging.info(f"Absolute error: {abs_err}, Error bound: {error_bound}, Correct: {1.0 if abs_err <= float(error_bound) else 0.0}")
         metrics: Dict[str, float] = {
             "aux_abs_error_sum": abs_err,
-            "aux_correct": 1.0 if abs_err <= float(error_bound) else 0.0,
+            "aux_correct_5ms": 1.0 if abs_err <= 0.005 else 0.0,
+            "aux_correct_10ms": 1.0 if abs_err <= 0.010 else 0.0,
+            "aux_correct_20ms": 1.0 if abs_err <= 0.020 else 0.0,
+            "aux_correct_40ms": 1.0 if abs_err <= 0.040 else 0.0,
+            "aux_correct_50ms": 1.0 if abs_err <= 0.050 else 0.0,
+            "aux_correct_80ms": 1.0 if abs_err <= 0.080 else 0.0,
+            "aux_correct_100ms": 1.0 if abs_err <= 0.100 else 0.0,
+            "aux_correct_200ms": 1.0 if abs_err <= 0.200 else 0.0,
         }
         return metrics
 
-    def calculate_loss(self, audio_logits, audio_labels, audio_labels_frame_mask, model_adapter: BaseModelAdapter, use_poisson_loss: bool, class_weighting: bool) -> torch.Tensor:
+    def calculate_loss(self, audio_logits, audio_labels, audio_labels_frame_mask, model_adapter: BaseModelAdapter, use_poisson_loss: bool, class_weighting: bool, ds_adapter: BaseDatasetAdapter, audio_logits_2 = None) -> torch.Tensor:
         batch_size = audio_logits.size(0)
         gt_timestamps = torch.argmax(audio_labels, dim=1)
-        gt_timestamps = gt_timestamps / model_adapter.seconds_to_embedding
-        gt_timestamps = round_timestamp(gt_timestamps)
+        # Convert from 10ms frame index to seconds (100 frames per second)
+        gt_timestamps = gt_timestamps / (model_adapter.seconds_to_embedding * model_adapter.scaling_factor)
+        gt_timestamps = round_timestamp(gt_timestamps, self.rounding_factor)
 
-        if use_poisson_loss:
+        if use_poisson_loss and class_weighting:
+            p_loss = poisson_loss(audio_logits, audio_labels, audio_labels_frame_mask).mean()
+
+            # When both Poisson loss and class weighting are enabled, predict timestamp
+            # as the average of Poisson-inferred and binary-argmax timestamps.
+            predicted_timestamps = torch.zeros(batch_size, device=audio_logits.device)
+
+            for example in range(batch_size):
+                example_audio_logits = audio_logits[example]
+                example_audio_labels = audio_labels[example]
+                example_audio_labels = example_audio_labels.to(example_audio_logits.dtype)
+
+                if (example_audio_labels == -100).any():
+                    neg_100_idx = (example_audio_labels == -100).nonzero(as_tuple=True)[0][0].item()
+                    example_audio_logits = example_audio_logits[:neg_100_idx]
+                    example_audio_labels = example_audio_labels[:neg_100_idx]
+
+                # Poisson timestamp (frame index)
+                poisson_frame_idx = infer_timestamps(1, example_audio_logits.cpu().float().detach().numpy())[0]
+                poisson_frame_idx = torch.tensor(poisson_frame_idx, device=audio_logits.device, dtype=audio_logits.dtype)
+                poisson_seconds = poisson_frame_idx / (model_adapter.seconds_to_embedding * model_adapter.scaling_factor)
+                poisson_seconds = round_timestamp(poisson_seconds, self.rounding_factor)
+
+                # Binary timestamp (frame index) with bias subtraction
+                biased_logits = example_audio_logits # - linear_bias
+                binary_frame_idx = torch.argmax(biased_logits).to(audio_logits.dtype)
+                binary_frame_idx = binary_frame_idx + 0.5  # cover full frame width
+                binary_seconds = binary_frame_idx / (model_adapter.seconds_to_embedding * model_adapter.scaling_factor)
+                binary_seconds = round_timestamp(binary_seconds, self.rounding_factor)
+
+                # Average in seconds, then round to final grid
+                avg_seconds = (poisson_seconds + binary_seconds) / 2
+                predicted_timestamps[example] = round_timestamp(avg_seconds, self.rounding_factor)
+
+            loss = p_loss
+
+        elif use_poisson_loss:
             loss = poisson_loss(audio_logits, audio_labels, audio_labels_frame_mask).mean()
 
             predicted_timestamps = torch.zeros(batch_size, device=audio_logits.device)
@@ -278,11 +339,12 @@ class SingleTimestampTask(BaseTask):
                     example_audio_logits = example_audio_logits[:neg_100_idx]
                     example_audio_labels = example_audio_labels[:neg_100_idx]
 
-                predicted_timestamps[example] = torch.tensor(infer_timestamps(1, example_audio_logits.cpu().float().detach().numpy()), device=audio_logits.device)
+                predicted_timestamps[example] = infer_timestamps(1, example_audio_logits.cpu().float().detach().numpy())[0]
 
-                predicted_timestamps[example] = predicted_timestamps[example] / model_adapter.seconds_to_embedding
+                # Convert from 10ms frame index to seconds (100 frames per second)
+                predicted_timestamps[example] = predicted_timestamps[example] / (model_adapter.seconds_to_embedding * model_adapter.scaling_factor)
 
-                predicted_timestamps[example] = round_timestamp(predicted_timestamps[example])
+                predicted_timestamps[example] = round_timestamp(predicted_timestamps[example], self.rounding_factor)
         else:
             predicted_timestamps = torch.zeros(batch_size, device=audio_logits.device)
             loss = torch.zeros(batch_size, device=audio_logits.device)
@@ -299,8 +361,9 @@ class SingleTimestampTask(BaseTask):
 
                 predicted_timestamps[example] = torch.argmax(example_audio_logits)
                 predicted_timestamps[example] = predicted_timestamps[example] + 0.5 # because we floor timestamps to the frame, we want to have full coverage over the frame
-                predicted_timestamps[example] = predicted_timestamps[example] / model_adapter.seconds_to_embedding
-                predicted_timestamps[example] = round_timestamp(predicted_timestamps[example])
+                # Convert from 10ms frame index to seconds (100 frames per second)
+                predicted_timestamps[example] = predicted_timestamps[example] / (model_adapter.seconds_to_embedding * model_adapter.scaling_factor)
+                predicted_timestamps[example] = round_timestamp(predicted_timestamps[example], self.rounding_factor)
 
                 if class_weighting:
                     num_ones = (example_audio_labels == 1).sum()

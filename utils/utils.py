@@ -53,11 +53,11 @@ def patch_dataset_length(dataset, length):
 def better_round(n):
     return int(n + 0.5)
 
-def round_timestamp(n):
-    return torch.round(n * 1000) / 1000
+def round_timestamp(n, rounding_factor):
+    return torch.round(n * rounding_factor) / rounding_factor
 
-def round_timestamp_python(n):
-    return round(n * 1000) / 1000
+def round_timestamp_python(n, rounding_factor):
+    return round(n * rounding_factor) / rounding_factor
 
 import math
 from datasets import Dataset, DatasetDict, concatenate_datasets

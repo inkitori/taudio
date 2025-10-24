@@ -36,7 +36,7 @@ fi
 echo "Training completed, starting evaluation job"
 echo "Experiment directory: $experiment_dir"
 
-eval_cmd="sbatch scripts/anvil/eval_long.sh $experiment_dir $2"
+eval_cmd="sbatch scripts/anvil/eval.sh $experiment_dir $2"
 
 if [ -n "$3" ]; then
     eval_cmd="$eval_cmd $3"

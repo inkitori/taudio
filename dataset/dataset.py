@@ -58,7 +58,7 @@ def get_ds(
         
     base_ds = base_ds.with_transform(transform_fn)
         
-    return base_ds
+    return base_ds, ds_adapter
 
 def collate_fn(batch: list) -> Dict[str, torch.Tensor]:
     batch_keys = batch[0].keys()

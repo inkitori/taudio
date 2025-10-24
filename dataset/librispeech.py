@@ -51,7 +51,7 @@ class LibriSpeechAdapter(BaseDatasetAdapter):
     def unknown_events(self) -> List[str]:
         return ["<unk>"]
 
-    def get_timestamp_single_prompt(self, event_name: str) -> str:
+    def get_timestamp_single_prompt(self, event_name: str, key: str) -> str:
         return f"What is the first occurence of the word '{event_name}'?"
 
     def get_speaker_count_prompt(self) -> str:
@@ -59,3 +59,6 @@ class LibriSpeechAdapter(BaseDatasetAdapter):
 
     def get_timestamp_all_prompt(self) -> str:
         return "How many words are spoken in the audio?"
+
+    def timestamp_rounding_factor(self) -> int:
+        return 100

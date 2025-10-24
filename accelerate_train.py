@@ -113,7 +113,7 @@ def main():
 
     accelerator = Accelerator()
 
-    ds = get_ds(
+    ds, ds_adapter = get_ds(
         model_adapter=model.model_adapter,
         repository=dataset_config['repository'],
         split=dataset_config['split'],
@@ -121,6 +121,8 @@ def main():
         take_first=dataset_config.get('take_first', None),
         left_padding=dataset_config.get('left_padding', 0),
     )
+
+    task.rounding_factor = ds_adapter.timestamp_rounding_factor()
 
     accelerator.wait_for_everyone()
 

@@ -17,7 +17,7 @@ from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 
 
 class Qwen2_5OmniAdapter(BaseModelAdapter):
-    def __init__(self, model_id: str, bidirectional_audio: bool, dtype: str) -> None:
+    def __init__(self, model_id: str, bidirectional_audio: bool, dtype: str, scaling_factor: int) -> None:
         super().__init__()
         self.base_model = Qwen2_5OmniThinkerForConditionalGeneration.from_pretrained(
             model_id,
@@ -27,6 +27,7 @@ class Qwen2_5OmniAdapter(BaseModelAdapter):
         # Convenience references
         self._processor = Qwen2_5OmniProcessor.from_pretrained(model_id)
         self.bidirectional_audio = bidirectional_audio
+        self.scaling_factor = scaling_factor
 
         if model_id.lower() == "qwen/qwen2.5-omni-3b":
             self.constants = qwen_3b_constants

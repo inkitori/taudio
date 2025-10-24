@@ -10,7 +10,7 @@ from utils.utils import remove_indices
 train_exclude_indices = [16103, 23870, 52776, 58610, 68716]
 eval_exclude_indices = [5929]
 
-def filter_fn(example):
+def start_filter_fn(example):
     for event in example['events']:
         if event['start'] == 0:
             return False
@@ -39,9 +39,8 @@ class AudioSetAdapter(BaseDatasetAdapter):
             elif split == "eval":
                 ds = remove_indices(ds, eval_exclude_indices)
         
-        logging.info(f"Size of dataset before filtering: {len(ds)}")
-        ds = ds.filter(filter_fn)
-        logging.info(f"Size of dataset after filtering: {len(ds)}")
+        if self.key == "start":
+            ds = ds.filter(start_filter_fn)
         return ds
 
     def get_audio_frames(self, example: Dict[str, Any]) -> Dict[str, Any]:
@@ -49,7 +48,10 @@ class AudioSetAdapter(BaseDatasetAdapter):
 
     def get_events(self, example: Dict[str, Any]) -> Iterable[Dict[str, Any]]:
         # The source data uses key 'words', each item has 'word' and timing fields like 'start'/'end'
-        return example["events"]
+        if self.key == "end":
+            return [event for event in example["events"] if event.get('end') != 10]
+        else:
+            return example['events']
 
     def event_name(self, event: Dict[str, Any]) -> str:
         # There are <unk> tokens which the generic pipeline can filter if desired
@@ -65,8 +67,11 @@ class AudioSetAdapter(BaseDatasetAdapter):
     def unknown_events(self) -> List[str]:
         return []
 
-    def get_timestamp_single_prompt(self, event_name: str) -> str:
-        return f"What is the first occurence of the event '{event_name}'?"
+    def get_timestamp_single_prompt(self, event_name: str, key: str) -> str:
+        if key == "start":
+            return f"When did the first occurence of the sound '{event_name}' start?"
+        elif key == "end":
+            return f"When did the first occurence of the sound '{event_name}' end?"
 
     def get_speaker_count_prompt(self) -> str:
         return "How many events are there in the audio?"
