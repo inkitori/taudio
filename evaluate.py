@@ -124,6 +124,7 @@ def main():
         repository=dataset_config['repository'],
         sampling_rate=model.model_adapter.sampling_rate,
         left_padding=dataset_config.get('left_padding', 0),
+        key=task.key,
     )
     task.rounding_factor = adapter.timestamp_rounding_factor()
 

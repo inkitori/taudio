@@ -281,7 +281,7 @@ class SingleTimestampTask(BaseTask):
         }
         return metrics
 
-    def calculate_loss(self, audio_logits, audio_labels, audio_labels_frame_mask, model_adapter: BaseModelAdapter, use_poisson_loss: bool, class_weighting: bool, ds_adapter: BaseDatasetAdapter, audio_logits_2 = None) -> torch.Tensor:
+    def calculate_loss(self, audio_logits, audio_labels, audio_labels_frame_mask, model_adapter: BaseModelAdapter, use_poisson_loss: bool, class_weighting: bool) -> torch.Tensor:
         batch_size = audio_logits.size(0)
         gt_timestamps = torch.argmax(audio_labels, dim=1)
         # Convert from 10ms frame index to seconds (100 frames per second)

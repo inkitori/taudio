@@ -3,6 +3,7 @@ from datasets import load_dataset
 from datasets.features import Audio
 
 from .base_dataset_adapter import BaseDatasetAdapter
+from utils.utils import round_timestamp_python
 
 class LibriSpeechAdapter(BaseDatasetAdapter):
     def load_streaming_split(self, split: str):
@@ -43,7 +44,7 @@ class LibriSpeechAdapter(BaseDatasetAdapter):
 
     def get_target_seconds(self, event: Dict[str, Any], key: str) -> float:
         # key could be 'start' or 'end'
-        return float(event[key])
+        return round_timestamp_python(float(event[key]), self.timestamp_rounding_factor())
 
     def get_num_speakers(self, example: Dict[str, Any]) -> int:
         return len(example['words'])

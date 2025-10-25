@@ -52,7 +52,7 @@ class LibriCountAdapter(BaseDatasetAdapter):
         if key == 'end':
             raise ValueError("End key not supported for LibriCount")
 
-        fixed_start = round_timestamp_python(float(event['start']) + self.left_padding)
+        fixed_start = round_timestamp_python(float(event['start']) + self.left_padding, self.timestamp_rounding_factor())
         return fixed_start
 
     def get_num_speakers(self, example: Dict[str, Any]) -> int:
@@ -67,3 +67,6 @@ class LibriCountAdapter(BaseDatasetAdapter):
 
     def get_speaker_count_prompt(self) -> str:
         return "How many speakers are there in the audio?"
+
+    def timestamp_rounding_factor(self) -> int:
+        return 1000
