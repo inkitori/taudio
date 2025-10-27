@@ -4,8 +4,9 @@ model:
   freeze_text_model: false
   audio_layer: -1
   bidirectional_audio: true
-  linear_bias: -5.5
+  linear_bias: -6.9
   dtype: "auto"
+  scaling_factor: 4
 
 # Training configuration
 training:
@@ -18,7 +19,6 @@ training:
 dataset:
   split: "train"
   repository: "enyoukai/libricount-timings"
-  left_padding: 1
 
 task:
   type: "SINGLE_WORD_TIMESTAMP"

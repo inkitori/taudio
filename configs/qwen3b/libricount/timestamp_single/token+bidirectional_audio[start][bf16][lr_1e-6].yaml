@@ -5,22 +5,24 @@ model:
   audio_layer: -1
   bidirectional_audio: true
   linear_bias: 0
-  dtype: "bfloat16"
+  dtype: "auto"
 
 # Training configuration
 training:
   epochs: 1
   effective_batch_size: 8
-  learning_rate: 5.0e-6
+  learning_rate: 1.0e-6
   eta_min_scale: 0.1
   
 # Dataset configuration
 dataset:
   split: "train"
-  repository: "enyoukai/libricount"
+  repository: "enyoukai/libricount-timings"
 
 task:
-  type: "SPEAKER_COUNT"
+  type: "SINGLE_WORD_TIMESTAMP"
+  kwargs:
+    key: "start"
 
 # Loss configuration
 loss:

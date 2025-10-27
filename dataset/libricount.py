@@ -63,7 +63,11 @@ class LibriCountAdapter(BaseDatasetAdapter):
 
     def get_timestamp_single_prompt(self, event_name: str, key: str) -> str:
         suffix = 'st' if event_name == "1" else 'nd' if event_name == "2" else 'rd' if event_name == "3" else 'th'
-        return f"When does the {event_name}{suffix} speaker start speaking?"
+
+        if key == "start":
+            return f"When did the {event_name}{suffix} speaker start speaking?"
+        elif key == "end":
+            raise ValueError("End key not supported for LibriCount")
 
     def get_speaker_count_prompt(self) -> str:
         return "How many speakers are there in the audio?"
