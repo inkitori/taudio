@@ -68,10 +68,7 @@ class AudioSetAdapter(BaseDatasetAdapter):
         return []
 
     def get_timestamp_single_prompt(self, event_name: str, key: str) -> str:
-        if key == "start":
-            return f"When did the first occurence of the sound '{event_name}' start?"
-        elif key == "end":
-            return f"When did the first occurence of the sound '{event_name}' end?"
+        return f"What is the first occurence of the event '{event_name}'?"
 
     def get_speaker_count_prompt(self) -> str:
         return "How many events are there in the audio?"

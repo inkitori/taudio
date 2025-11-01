@@ -6,12 +6,13 @@ model:
   bidirectional_audio: true
   linear_bias: 0
   dtype: "auto"
+  scaling_factor: 4
 
 # Training configuration
 training:
   epochs: 1
   effective_batch_size: 8
-  learning_rate: 1.0e-6
+  learning_rate: 5.0e-6
   eta_min_scale: 0.1
   
 # Dataset configuration
@@ -26,10 +27,10 @@ task:
 
 # Loss configuration
 loss:
-  token_loss: true
-  surrogate_loss: false
-  surrogate_loss_weight: 0.0
-  class_weighting: false
+  token_loss: false
+  surrogate_loss: true
+  surrogate_loss_weight: 1.0
+  class_weighting: true
   poisson_loss: false
 
 # System configuration

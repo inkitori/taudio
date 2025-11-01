@@ -9,15 +9,15 @@ model:
 
 # Training configuration
 training:
-  epochs: 1
+  epochs: 3
   effective_batch_size: 8
-  learning_rate: 1.0e-5
-  eta_min_scale: 0.1
+  learning_rate: 1.0e-6
+  eta_min_scale: 1.0
   
 # Dataset configuration
 dataset:
   split: "train"
-  repository: "enyoukai/AudioSet-Strong-Human-Sounds"
+  repository: "enyoukai/libricount-timings"
 
 task:
   type: "SINGLE_WORD_TIMESTAMP"
