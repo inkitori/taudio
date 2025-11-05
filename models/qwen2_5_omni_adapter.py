@@ -14,6 +14,7 @@ from models.base_model_adapter import BaseModelAdapter
 from contextlib import nullcontext
 # Import FSDP to check for it
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+from utils.utils import ensure_audio_path
 
 
 class Qwen2_5OmniAdapter(BaseModelAdapter):
@@ -94,11 +95,19 @@ class Qwen2_5OmniAdapter(BaseModelAdapter):
                 **kwargs,
             )
 
-    def generate(self, **kwargs):
+    def generate(self, decode_tokens: bool = False, **kwargs):
         with self.bidirectional_audio_context(kwargs["input_ids"]) if self.bidirectional_audio else nullcontext():
             logging.debug(f"Using bidirectional audio context: {
                          self.bidirectional_audio}")
-            return self.base_model.generate(**kwargs)
+
+            tokens = self.base_model.generate(**kwargs)
+
+            if decode_tokens:
+                generated_tokens = tokens[0][kwargs["input_ids"].shape[1]:-1]
+                generated_string = self.processor.tokenizer.decode(generated_tokens)
+                return generated_string
+            else:
+                return tokens
 
     @property
     def seconds_to_embedding(self) -> int:
@@ -185,3 +194,35 @@ class Qwen2_5OmniAdapter(BaseModelAdapter):
         finally:
             self._unpatch_causal_mask()
             logging.debug("Restored original causal mask settings")
+    
+    def build_base_inputs(self, prompt: str, audio):
+        # audio_path = ensure_audio_path(audio)
+        conversation = [
+            {
+                "role": "system",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": "You are Qwen, a virtual human developed by the Qwen Team, Alibaba Group, capable of perceiving auditory and visual inputs, as well as generating text and speech.",
+                    }
+                ],
+            },
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": prompt},
+                    {"type": "audio", "audio": "PLACEHOLDER"},
+                ],
+            },
+        ]
+
+        conversation_template = self.processor.apply_chat_template(conversation, tokenize=False, add_generation_prompt=True)
+
+        inputs = self.processor(
+            text=conversation_template,
+            audio=audio["array"],
+            return_tensors="pt",
+            padding=True,
+        )
+
+        return inputs

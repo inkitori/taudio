@@ -236,5 +236,5 @@ class AllTimestampsTask(BaseTask):
 
         return loss, (inferred_counts - gt_counts).abs().mean(), inferred_counts
 
-    def skip_example(self, example: Dict[str, Any], adapter: BaseModelAdapter) -> bool:
+    def skip_example(self, example: Dict[str, Any], adapter: BaseDatasetAdapter) -> bool:
         return False

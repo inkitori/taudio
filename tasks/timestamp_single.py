@@ -6,6 +6,8 @@ from nltk.corpus import stopwords
 import json
 import torch.nn as nn
 import math
+import re
+
 from dataset.base_dataset_adapter import BaseDatasetAdapter
 from models.base_model_adapter import BaseModelAdapter
 
@@ -386,3 +388,44 @@ class SingleTimestampTask(BaseTask):
         if len(events) == 0:
             return True
         return False
+    
+    def evaluate_tokens_base(self, example: Dict[str, Any], ds_adapter: BaseDatasetAdapter, model_adapter: BaseModelAdapter) -> Dict[str, Any]:
+        events = list(ds_adapter.get_events(example))
+        event = self._choose_event(
+            events=events, ds_adapter=ds_adapter, apply_fallback=False)
+
+        name = ds_adapter.event_name(event)
+        gt = ds_adapter.get_target_seconds(event, self.key)
+        audio = ds_adapter.get_audio(example)
+
+        prompt = ds_adapter.get_timestamp_single_base_prompt(name)
+        inputs = model_adapter.build_base_inputs(prompt, audio)
+
+        inputs = inputs.to(torch.cuda.current_device())
+
+        generated_string = model_adapter.generate(**inputs, max_new_tokens=32, decode_tokens=True)
+        logging.info(f"Generated string: {generated_string}")
+        match = re.findall(r'\d+\.\d+', generated_string)
+        if match:
+            token_pred = float(match[-1])
+            logging.info(f"Token prediction: {str(token_pred)}, GT: {str(gt)}")
+        else:
+            token_pred = float(audio["array"].size / (2 * audio["sampling_rate"]))
+            logging.info(f"Falling back to half the audio frames size: {token_pred}")
+            
+        # Metric increments
+        token_pred = round_timestamp_python(float(token_pred), 1000)
+        abs_err = round_timestamp_python(abs(float(token_pred) - float(gt)), 1000)
+
+        metrics: Dict[str, float] = {
+            "token_abs_error_sum": abs_err,
+            "token_correct_5ms": 1.0 if abs_err <= 0.005 else 0.0,
+            "token_correct_10ms": 1.0 if abs_err <= 0.010 else 0.0,
+            "token_correct_20ms": 1.0 if abs_err <= 0.020 else 0.0,
+            "token_correct_40ms": 1.0 if abs_err <= 0.040 else 0.0,
+            "token_correct_50ms": 1.0 if abs_err <= 0.050 else 0.0,
+            "token_correct_80ms": 1.0 if abs_err <= 0.080 else 0.0,
+            "token_correct_100ms": 1.0 if abs_err <= 0.100 else 0.0,
+            "token_correct_200ms": 1.0 if abs_err <= 0.200 else 0.0,
+        }
+        return metrics

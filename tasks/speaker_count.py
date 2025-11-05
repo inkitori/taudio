@@ -205,7 +205,7 @@ class SpeakerCountTask(BaseTask):
             return loss, pred_abs_diff.mean(), pred_counts
 
 	# [min, max)
-    def skip_example(self, example: Dict[str, Any], adapter: BaseModelAdapter) -> bool:
+    def skip_example(self, example: Dict[str, Any], adapter: BaseDatasetAdapter) -> bool:
         if self.min_time is not None and adapter.get_num_speakers(example) < self.min_time:
             return True
         if self.max_time is not None and adapter.get_num_speakers(example) >= self.max_time: 

@@ -131,3 +131,21 @@ def remove_indices(dataset, exclude_indices):
     logging.info(f"Size of dataset after removing indices: {len(dataset)}")
 
     return dataset
+
+
+import tempfile
+def ensure_audio_path(audio) -> str:
+    samples = np.asarray(audio["array"], dtype=np.float32)
+    sr = int(audio["sampling_rate"])
+
+    logging.info(f"Audio shape: {samples.shape}")
+    # Write to a temporary WAV file
+    tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
+    path = tmp.name
+    try:
+        import soundfile as sf  # type: ignore
+        sf.write(path, samples, sr)
+    finally:
+        tmp.close()
+
+    return path

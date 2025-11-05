@@ -39,5 +39,5 @@ class BaseTask(ABC):
         """Calculate the loss for the task."""
 
     @abstractmethod
-    def skip_example(self, example: Dict[str, Any], adapter: BaseModelAdapter) -> bool:
+    def skip_example(self, example: Dict[str, Any], adapter: BaseDatasetAdapter) -> bool:
         """Skip the example if it is not suitable for the task."""

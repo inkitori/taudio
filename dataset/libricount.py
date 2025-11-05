@@ -33,6 +33,9 @@ class LibriCountAdapter(BaseDatasetAdapter):
             audio = np.concatenate([zeros, audio], axis=0)
         logging.info(f"Audio shape after padding: {audio.shape}")
         return audio
+    
+    def get_audio(self, example: Dict[str, Any]) -> Dict[str, Any]:
+        return example["audio"]
 
     def get_events(self, example: Dict[str, Any]) -> Iterable[Dict[str, Any]]:
         events = []
@@ -74,3 +77,8 @@ class LibriCountAdapter(BaseDatasetAdapter):
 
     def timestamp_rounding_factor(self) -> int:
         return 1000
+
+    def get_timestamp_single_base_prompt(self, event_name: str) -> str:
+        suffix = 'st' if event_name == "1" else 'nd' if event_name == "2" else 'rd' if event_name == "3" else 'th'
+
+        return f"State exactly the timestamp in seconds when the {event_name}{suffix} speaker starts speaking. The format should be as follows: '2.435', with the seconds followed by a decimal point and the milliseconds."

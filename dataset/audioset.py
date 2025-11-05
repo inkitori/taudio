@@ -45,6 +45,9 @@ class AudioSetAdapter(BaseDatasetAdapter):
 
     def get_audio_frames(self, example: Dict[str, Any]) -> Dict[str, Any]:
         return example["audio"]["array"]
+    
+    def get_audio(self, example: Dict[str, Any]) -> Dict[str, Any]:
+        return example["audio"]
 
     def get_events(self, example: Dict[str, Any]) -> Iterable[Dict[str, Any]]:
         # The source data uses key 'words', each item has 'word' and timing fields like 'start'/'end'
@@ -78,3 +81,6 @@ class AudioSetAdapter(BaseDatasetAdapter):
 
     def timestamp_rounding_factor(self) -> int:
         return 1000
+
+    def get_timestamp_single_base_prompt(self, event_name: str) -> str:
+        return f"State exactly the timestamp in seconds when the first occurence of the event '{event_name}' occurs. The format should be as follows: '2.435', with the seconds followed by a decimal point and the milliseconds."
