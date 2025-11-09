@@ -87,8 +87,8 @@ EXCLUDE_NODES="--exclude=h012"
 # joint_token_poisson audioset_humans
 # sbatch $EXCLUDE_NODES scripts/anvil/accelerate_4_gpu_bf16.sh configs/qwen3b/audioset_humans/timestamp_single/token+poisson+bidirectional_audio[start][bias_-6.9][bf16][lr_5e-6][weight_1.0].yaml test
 
-sbatch scripts/anvil/accelerate_4_gpu_bf16_run.sh configs/qwen3b/audioset_humans/timestamp_single/token+bidirectional_audio[start][bf16][lr_5e-6].yaml
-sbatch scripts/anvil/accelerate_4_gpu_bf16_run.sh configs/qwen3b/audioset_humans/timestamp_single/poisson+bidirectional_audio[start][bias_-6.9][bf16][lr_5e-6].yaml
-sbatch scripts/anvil/accelerate_4_gpu_bf16_run.sh configs/qwen3b/audioset_humans/timestamp_single/poisson+bidirectional_audio[start][bias_-6.9][bf16][upscale_4][lr_5e-6].yaml
-sbatch scripts/anvil/accelerate_4_gpu_bf16_run.sh configs/qwen3b/audioset_humans/timestamp_single/bernoulli+class_weighting+bidirectional_audio[start][bf16][lr_5e-6].yaml
-sbatch scripts/anvil/accelerate_4_gpu_bf16_run.sh configs/qwen3b/audioset_humans/timestamp_single/bernoulli+class_weighting+bidirectional_audio[start][bf16][upscale_4][lr_5e-6].yaml
+sbatch $EXCLUDE_NODES scripts/anvil/accelerate_4_gpu_bf16_run.sh configs/qwen3b/audioset_humans/timestamp_single/token+bidirectional_audio[start][bf16][lr_5e-6].yaml
+sbatch $EXCLUDE_NODES scripts/anvil/accelerate_4_gpu_bf16_run.sh configs/qwen3b/audioset_humans/timestamp_single/poisson+bidirectional_audio[start][bias_-6.9][bf16][lr_5e-6].yaml
+sbatch $EXCLUDE_NODES scripts/anvil/accelerate_4_gpu_bf16_run.sh configs/qwen3b/audioset_humans/timestamp_single/poisson+bidirectional_audio[start][bias_-6.9][bf16][upscale_4][lr_5e-6].yaml
+sbatch $EXCLUDE_NODES scripts/anvil/accelerate_4_gpu_bf16_run.sh configs/qwen3b/audioset_humans/timestamp_single/bernoulli+class_weighting+bidirectional_audio[start][bf16][lr_5e-6].yaml
+sbatch $EXCLUDE_NODES scripts/anvil/accelerate_4_gpu_bf16_run.sh configs/qwen3b/audioset_humans/timestamp_single/bernoulli+class_weighting+bidirectional_audio[start][bf16][upscale_4][lr_5e-6].yaml
