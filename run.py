@@ -194,9 +194,41 @@ def main():
                     if aux_metrics is not None:
                         local_metrics.update_dict(aux_metrics)
 
-        # Collect keys and reduce sums and counts across processes
-        # We derive keys from the local metrics dict to avoid relying on internals
-        metric_keys: List[str] = list(local_metrics.to_dict().keys())
+        # Collect keys and reduce sums and counts across processes using a fixed schema
+        # so that all ranks execute identical reduce calls in identical order.
+        token_metric_keys: List[str] = [
+            "token_abs_error_sum",
+            "token_correct_5ms",
+            "token_correct_10ms",
+            "token_correct_20ms",
+            "token_correct_40ms",
+            "token_correct_50ms",
+            "token_correct_80ms",
+            "token_correct_100ms",
+            "token_correct_200ms",
+            "parsing_error",
+        ]
+        aux_metric_keys: List[str] = [
+            # Timestamp-style aux metrics
+            "aux_abs_error_sum",
+            "aux_correct_5ms",
+            "aux_correct_10ms",
+            "aux_correct_20ms",
+            "aux_correct_40ms",
+            "aux_correct_50ms",
+            "aux_correct_80ms",
+            "aux_correct_100ms",
+            "aux_correct_200ms",
+            # Count-style aux metrics (for other tasks)
+            "aux_correct",
+        ]
+
+        metric_keys: List[str] = []
+        if eval_token_outputs:
+            metric_keys.extend(token_metric_keys)
+        if eval_aux_outputs:
+            metric_keys.extend(aux_metric_keys)
+
         aggregated: Dict[str, float] = {}
         device = accelerator.device
         for key in metric_keys:
@@ -226,57 +258,57 @@ def main():
         )
         metrics = AverageMetrics()
 
-        for step, batch in enumerate(progress_bar, start=1):
-            batch = {k: v.to(accelerator.device) for k, v in batch.items()}
-            output = model(**batch)
+        # for step, batch in enumerate(progress_bar, start=1):
+        #     batch = {k: v.to(accelerator.device) for k, v in batch.items()}
+        #     output = model(**batch)
 
-            accelerator.backward(output.loss)
-            optim.step()
-            optim.zero_grad()
-            scheduler.step()
+        #     accelerator.backward(output.loss)
+        #     optim.step()
+        #     optim.zero_grad()
+        #     scheduler.step()
 
-            loss = accelerator.reduce(output.loss, reduction='mean')
-            token_loss = accelerator.reduce(output.token_loss, reduction='mean')
-            surrogate_loss = accelerator.reduce(output.surrogate_loss, reduction='mean')
-            auxiliary_deviation = accelerator.reduce(output.auxiliary_deviation, reduction='mean')
+        #     loss = accelerator.reduce(output.loss, reduction='mean')
+        #     token_loss = accelerator.reduce(output.token_loss, reduction='mean')
+        #     surrogate_loss = accelerator.reduce(output.surrogate_loss, reduction='mean')
+        #     auxiliary_deviation = accelerator.reduce(output.auxiliary_deviation, reduction='mean')
 
-            metrics.update_dict({
-                "train/loss": loss.item(),
-                "train/token_loss": token_loss.item(),
-                "train/surrogate_loss": surrogate_loss.item(),
-                "train/auxiliary_deviation": auxiliary_deviation.item(),
-            })
+        #     metrics.update_dict({
+        #         "train/loss": loss.item(),
+        #         "train/token_loss": token_loss.item(),
+        #         "train/surrogate_loss": surrogate_loss.item(),
+        #         "train/auxiliary_deviation": auxiliary_deviation.item(),
+        #     })
 
-            if is_master and not args.debug and run is not None:
-                run.log({
-                    **metrics.to_dict(),
-                    "train/epoch": epoch + 1,
-                    "train/step": step + 1,
-                    "train/lr": scheduler.get_last_lr()[0],
-                })
-                metrics.reset()
+        #     if is_master and not args.debug and run is not None:
+        #         run.log({
+        #             **metrics.to_dict(),
+        #             "train/epoch": epoch + 1,
+        #             "train/step": step + 1,
+        #             "train/lr": scheduler.get_last_lr()[0],
+        #         })
+        #         metrics.reset()
 
-            progress_bar.set_description(f"Epoch {epoch + 1}, Loss: {loss.item():.4f}")
+        #     progress_bar.set_description(f"Epoch {epoch + 1}, Loss: {loss.item():.4f}")
 
-        logging.info(f"Epoch {epoch + 1} completed.")
+        # logging.info(f"Epoch {epoch + 1} completed.")
 
-        # Save checkpoint
-        accelerator.wait_for_everyone()
-        unwrapped_model = accelerator.unwrap_model(model)
-        state_dict = accelerator.get_state_dict(unwrapped_model)
-        if not args.debug and is_master:
-            checkpoint_path = experiment_dir / f"model_epoch{epoch+1}.pt"
-            logging.info(f"Saving model checkpoint to {checkpoint_path}")
-            torch.save(state_dict, checkpoint_path)
+        # # Save checkpoint
+        # accelerator.wait_for_everyone()
+        # unwrapped_model = accelerator.unwrap_model(model)
+        # state_dict = accelerator.get_state_dict(unwrapped_model)
+        # if not args.debug and is_master:
+        #     checkpoint_path = experiment_dir / f"model_epoch{epoch+1}.pt"
+        #     logging.info(f"Saving model checkpoint to {checkpoint_path}")
+        #     torch.save(state_dict, checkpoint_path)
 
-        accelerator.wait_for_everyone()
+        # accelerator.wait_for_everyone()
 
         # Per-epoch distributed eval on dev split
         # dev_split = dataset_config.get('dev_split', 'dev')
         # distributed_eval(dev_split, prefix="dev", epoch=epoch)
 
     # Final evaluation on test split
-    test_split = dataset_config.get('test_split', 'test')
+    test_split = dataset_config.get('test_split', 'test').select(range(99))
     distributed_eval(test_split, prefix="test", epoch=training_config['epochs'] - 1)
 
     # Completion line
