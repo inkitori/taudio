@@ -150,6 +150,7 @@ def main():
         # Build a plain, unwrapped eval model to avoid DTensor/Tensor mixing during generation
         # Get a consolidated state dict from the wrapped model
         model.eval()
+        unwrapped_model = accelerator.unwrap_model(model)
 
         # Use raw dataset through adapter and shard across processes
         adapter = create_adapter(
@@ -178,7 +179,7 @@ def main():
                     token_metrics = task.evaluate_tokens(
                         example=example,
                         ds_adapter=adapter,
-                        model=model,
+                        model=unwrapped_model,
                         error_bound=0.1,
                     )
                     if token_metrics is not None:
@@ -187,7 +188,7 @@ def main():
                     aux_metrics = task.evaluate_auxiliary_outputs(
                         example=example,
                         ds_adapter=adapter,
-                        model=model,
+                        model=unwrapped_model,
                         error_bound=0.1,
                     )
                     if aux_metrics is not None:
