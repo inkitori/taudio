@@ -60,8 +60,3 @@ class BaseDatasetAdapter(ABC):
     @abstractmethod
     def get_speaker_count_prompt(self) -> str:
         """Return the prompt for the speaker count task."""
-
-    @abstractmethod
-    def timestamp_rounding_factor(self) -> int:
-        """Return the rounding factor for the timestamp in seconds."""
-        return 1000

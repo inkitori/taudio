@@ -127,4 +127,4 @@ def relative_path_to_project_name(config_path: str, eval: bool) -> str:
         directories = config_path_parts[1:-1]  # All parts except filename and configs/
 
     # Format as [dir1][dir2][dir3]
-    return "".join(f"[{dir}]" for dir in directories) + f"[{"Eval" if eval else "Train"}]"
+    return "".join(f"[{dir}]" for dir in directories) # + f"[{"Eval" if eval else "Train"}]"

@@ -23,7 +23,6 @@ class SingleTimestampTask(BaseTask):
         self.key = key
         self.max_time = max_time
         self.min_time = min_time
-        self.rounding_factor = None
 
     def _choose_event(self, *, events: Iterable[Dict[str, Any]], ds_adapter: BaseDatasetAdapter, apply_fallback: bool, return_all: bool = False) -> Dict[str, Any]:
         seen_names = set()
@@ -213,8 +212,8 @@ class SingleTimestampTask(BaseTask):
             return {"token_abs_error_sum": abs_err, "token_correct": 0.0, "parsing_error": 1.0} 
 
         # Metric increments
-        token_pred = round_timestamp_python(float(token_pred), self.rounding_factor)
-        abs_err = round_timestamp_python(abs(float(token_pred) - float(gt)), self.rounding_factor)
+        token_pred = round_timestamp_python(float(token_pred))
+        abs_err = round_timestamp_python(abs(float(token_pred) - float(gt)))
         logging.info(f"Absolute error: {abs_err}, Error bound: {error_bound}, Correct: {1.0 if abs_err <= float(error_bound) else 0.0}")
 
         logging.info(f"Audio frames half size: {ds_adapter.get_audio_frames(example).size / (2 * model.model_adapter.sampling_rate)}")
@@ -263,12 +262,12 @@ class SingleTimestampTask(BaseTask):
 
         with torch.no_grad():
             outputs = model(**inputs, inference=True)
-            pred_timestamp = round_timestamp_python(outputs.auxiliary_prediction.item(), self.rounding_factor)
+            pred_timestamp = round_timestamp_python(outputs.auxiliary_prediction.item())
 
         logging.info(f"Auxiliary prediction: {pred_timestamp}, GT: {gt_timestamp}")
 
         # Metric increments
-        abs_err = round_timestamp_python(abs(pred_timestamp - gt_timestamp), self.rounding_factor)
+        abs_err = round_timestamp_python(abs(pred_timestamp - gt_timestamp))
         logging.info(f"Absolute error: {abs_err}, Error bound: {error_bound}, Correct: {1.0 if abs_err <= float(error_bound) else 0.0}")
         metrics: Dict[str, float] = {
             "aux_abs_error_sum": abs_err,
@@ -288,7 +287,7 @@ class SingleTimestampTask(BaseTask):
         gt_timestamps = torch.argmax(audio_labels, dim=1)
         # Convert from 10ms frame index to seconds (100 frames per second)
         gt_timestamps = gt_timestamps / (model_adapter.seconds_to_embedding * model_adapter.scaling_factor)
-        gt_timestamps = round_timestamp(gt_timestamps, self.rounding_factor)
+        gt_timestamps = round_timestamp(gt_timestamps)
 
         if use_poisson_loss and class_weighting:
             p_loss = poisson_loss(audio_logits, audio_labels, audio_labels_frame_mask).mean()
@@ -311,18 +310,18 @@ class SingleTimestampTask(BaseTask):
                 poisson_frame_idx = infer_timestamps(1, example_audio_logits.cpu().float().detach().numpy())[0]
                 poisson_frame_idx = torch.tensor(poisson_frame_idx, device=audio_logits.device, dtype=audio_logits.dtype)
                 poisson_seconds = poisson_frame_idx / (model_adapter.seconds_to_embedding * model_adapter.scaling_factor)
-                poisson_seconds = round_timestamp(poisson_seconds, self.rounding_factor)
+                poisson_seconds = round_timestamp(poisson_seconds)
 
                 # Binary timestamp (frame index) with bias subtraction
                 biased_logits = example_audio_logits # - linear_bias
                 binary_frame_idx = torch.argmax(biased_logits).to(audio_logits.dtype)
                 binary_frame_idx = binary_frame_idx + 0.5  # cover full frame width
                 binary_seconds = binary_frame_idx / (model_adapter.seconds_to_embedding * model_adapter.scaling_factor)
-                binary_seconds = round_timestamp(binary_seconds, self.rounding_factor)
+                binary_seconds = round_timestamp(binary_seconds)
 
                 # Average in seconds, then round to final grid
                 avg_seconds = (poisson_seconds + binary_seconds) / 2
-                predicted_timestamps[example] = round_timestamp(avg_seconds, self.rounding_factor)
+                predicted_timestamps[example] = round_timestamp(avg_seconds)
 
             loss = p_loss
 
@@ -346,7 +345,7 @@ class SingleTimestampTask(BaseTask):
                 # Convert from 10ms frame index to seconds (100 frames per second)
                 predicted_timestamps[example] = predicted_timestamps[example] / (model_adapter.seconds_to_embedding * model_adapter.scaling_factor)
 
-                predicted_timestamps[example] = round_timestamp(predicted_timestamps[example], self.rounding_factor)
+                predicted_timestamps[example] = round_timestamp(predicted_timestamps[example])
         else:
             predicted_timestamps = torch.zeros(batch_size, device=audio_logits.device)
             loss = torch.zeros(batch_size, device=audio_logits.device)
@@ -365,7 +364,7 @@ class SingleTimestampTask(BaseTask):
                 predicted_timestamps[example] = predicted_timestamps[example] + 0.5 # because we floor timestamps to the frame, we want to have full coverage over the frame
                 # Convert from 10ms frame index to seconds (100 frames per second)
                 predicted_timestamps[example] = predicted_timestamps[example] / (model_adapter.seconds_to_embedding * model_adapter.scaling_factor)
-                predicted_timestamps[example] = round_timestamp(predicted_timestamps[example], self.rounding_factor)
+                predicted_timestamps[example] = round_timestamp(predicted_timestamps[example])
 
                 if class_weighting:
                     num_ones = (example_audio_labels == 1).sum()
@@ -414,8 +413,8 @@ class SingleTimestampTask(BaseTask):
             logging.info(f"Falling back to half the audio frames size: {token_pred}")
             
         # Metric increments
-        token_pred = round_timestamp_python(float(token_pred), 1000)
-        abs_err = round_timestamp_python(abs(float(token_pred) - float(gt)), 1000)
+        token_pred = round_timestamp_python(float(token_pred))
+        abs_err = round_timestamp_python(abs(float(token_pred) - float(gt)))
 
         metrics: Dict[str, float] = {
             "token_abs_error_sum": abs_err,

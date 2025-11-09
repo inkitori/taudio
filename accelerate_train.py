@@ -122,8 +122,6 @@ def main():
         left_padding=dataset_config.get('left_padding', 0),
     )
 
-    task.rounding_factor = ds_adapter.timestamp_rounding_factor()
-
     accelerator.wait_for_everyone()
 
     dataloader = DataLoader(

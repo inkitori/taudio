@@ -126,7 +126,6 @@ def main():
         left_padding=dataset_config.get('left_padding', 0),
         key=task.key,
     )
-    task.rounding_factor = adapter.timestamp_rounding_factor()
 
     base_ds = adapter.load_split(args.split)
     # base_ds = base_ds.shuffle(seed=SEED)

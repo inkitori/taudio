@@ -62,7 +62,7 @@ class AudioSetAdapter(BaseDatasetAdapter):
 
     def get_target_seconds(self, event: Dict[str, Any], key: str) -> float:
         # key could be 'start' or 'end'
-        return round_timestamp_python(float(event[key]), self.timestamp_rounding_factor())
+        return round_timestamp_python(float(event[key]))
 
     def get_num_speakers(self, example: Dict[str, Any]) -> int:
         return len(example['events'])
@@ -78,9 +78,6 @@ class AudioSetAdapter(BaseDatasetAdapter):
 
     def get_timestamp_all_prompt(self) -> str:
         return "How many events are there in the audio?"
-
-    def timestamp_rounding_factor(self) -> int:
-        return 1000
 
     def get_timestamp_single_base_prompt(self, event_name: str) -> str:
         return f"State exactly the timestamp in seconds when the first occurence of the event '{event_name}' occurs. The format should be as follows: '2.435', with the seconds followed by a decimal point and the milliseconds."

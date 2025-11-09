@@ -25,3 +25,4 @@ mixtures_start_random_test/
 audioset_eval_strong.tsv
 audioset_train_strong.tsv
 ontology.json
+*.tar.gz
