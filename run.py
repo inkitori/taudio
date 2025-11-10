@@ -12,6 +12,9 @@ import wandb
 from transformers import set_seed
 
 from accelerate import Accelerator, PartialState
+import torch.distributed as dist
+from torch.distributed.fsdp import FullyShardedDataParallel as FSDP, StateDictType, FullStateDictConfig
+from torch.distributed.checkpoint.state_dict import StateDictOptions, get_model_state_dict
 
 from dataset.dataset import collate_fn, get_ds
 from dataset import create_adapter, infer_adapter_from_repository
@@ -149,8 +152,14 @@ def main():
     def distributed_eval(split_name: str, prefix: str, epoch: int = None) -> Dict[str, float]:
         # Build a plain, unwrapped eval model to avoid DTensor/Tensor mixing during generation
         # Get a consolidated state dict from the wrapped model
-        model.eval()
         unwrapped_model = accelerator.unwrap_model(model)
+
+        full_state_dict = get_model_state_dict(unwrapped_model, options=StateDictOptions(full_state_dict=True, broadcast_from_rank0=True))
+
+        eval_model = TAudio(**taudio_config)
+        eval_model.load_state_dict(full_state_dict, strict=True)
+        eval_model.to(accelerator.device)
+        eval_model.eval()
 
         # Use raw dataset through adapter and shard across processes
         adapter = create_adapter(
@@ -160,6 +169,7 @@ def main():
             left_padding=dataset_config.get('left_padding', 0),
             key=task.key,
         )
+
         base_ds = adapter.load_split(split_name)
 
         # Shard across processes using Accelerate context manager
@@ -179,7 +189,7 @@ def main():
                     token_metrics = task.evaluate_tokens(
                         example=example,
                         ds_adapter=adapter,
-                        model=unwrapped_model,
+                        model=eval_model,
                         error_bound=0.1,
                     )
                     if token_metrics is not None:
@@ -188,7 +198,7 @@ def main():
                     aux_metrics = task.evaluate_auxiliary_outputs(
                         example=example,
                         ds_adapter=adapter,
-                        model=unwrapped_model,
+                        model=eval_model,
                         error_bound=0.1,
                     )
                     if aux_metrics is not None:
@@ -245,8 +255,6 @@ def main():
                 log_payload["train/epoch"] = epoch + 1
             run.log(log_payload)
 
-        model.train()
-
         return aggregated
 
     # Training loop
@@ -258,48 +266,48 @@ def main():
         )
         metrics = AverageMetrics()
 
-        # for step, batch in enumerate(progress_bar, start=1):
-        #     batch = {k: v.to(accelerator.device) for k, v in batch.items()}
-        #     output = model(**batch)
+        for step, batch in enumerate(progress_bar, start=1):
+            batch = {k: v.to(accelerator.device) for k, v in batch.items()}
+            output = model(**batch)
 
-        #     accelerator.backward(output.loss)
-        #     optim.step()
-        #     optim.zero_grad()
-        #     scheduler.step()
+            accelerator.backward(output.loss)
+            optim.step()
+            optim.zero_grad()
+            scheduler.step()
 
-        #     loss = accelerator.reduce(output.loss, reduction='mean')
-        #     token_loss = accelerator.reduce(output.token_loss, reduction='mean')
-        #     surrogate_loss = accelerator.reduce(output.surrogate_loss, reduction='mean')
-        #     auxiliary_deviation = accelerator.reduce(output.auxiliary_deviation, reduction='mean')
+            loss = accelerator.reduce(output.loss, reduction='mean')
+            token_loss = accelerator.reduce(output.token_loss, reduction='mean')
+            surrogate_loss = accelerator.reduce(output.surrogate_loss, reduction='mean')
+            auxiliary_deviation = accelerator.reduce(output.auxiliary_deviation, reduction='mean')
 
-        #     metrics.update_dict({
-        #         "train/loss": loss.item(),
-        #         "train/token_loss": token_loss.item(),
-        #         "train/surrogate_loss": surrogate_loss.item(),
-        #         "train/auxiliary_deviation": auxiliary_deviation.item(),
-        #     })
+            metrics.update_dict({
+                "train/loss": loss.item(),
+                "train/token_loss": token_loss.item(),
+                "train/surrogate_loss": surrogate_loss.item(),
+                "train/auxiliary_deviation": auxiliary_deviation.item(),
+            })
 
-        #     if is_master and not args.debug and run is not None:
-        #         run.log({
-        #             **metrics.to_dict(),
-        #             "train/epoch": epoch + 1,
-        #             "train/step": step + 1,
-        #             "train/lr": scheduler.get_last_lr()[0],
-        #         })
-        #         metrics.reset()
+            if is_master and not args.debug and run is not None:
+                run.log({
+                    **metrics.to_dict(),
+                    "train/epoch": epoch + 1,
+                    "train/step": step + 1,
+                    "train/lr": scheduler.get_last_lr()[0],
+                })
+                metrics.reset()
 
-        #     progress_bar.set_description(f"Epoch {epoch + 1}, Loss: {loss.item():.4f}")
+            progress_bar.set_description(f"Epoch {epoch + 1}, Loss: {loss.item():.4f}")
 
-        # logging.info(f"Epoch {epoch + 1} completed.")
+        logging.info(f"Epoch {epoch + 1} completed.")
 
-        # # Save checkpoint
-        # accelerator.wait_for_everyone()
-        # unwrapped_model = accelerator.unwrap_model(model)
-        # state_dict = accelerator.get_state_dict(unwrapped_model)
-        # if not args.debug and is_master:
-        #     checkpoint_path = experiment_dir / f"model_epoch{epoch+1}.pt"
-        #     logging.info(f"Saving model checkpoint to {checkpoint_path}")
-        #     torch.save(state_dict, checkpoint_path)
+        # Save checkpoint
+        accelerator.wait_for_everyone()
+        unwrapped_model = accelerator.unwrap_model(model)
+        state_dict = accelerator.get_state_dict(unwrapped_model)
+        if not args.debug and is_master:
+            checkpoint_path = experiment_dir / f"model_epoch{epoch+1}.pt"
+            logging.info(f"Saving model checkpoint to {checkpoint_path}")
+            torch.save(state_dict, checkpoint_path)
 
         # accelerator.wait_for_everyone()
 
@@ -308,7 +316,7 @@ def main():
         # distributed_eval(dev_split, prefix="dev", epoch=epoch)
 
     # Final evaluation on test split
-    test_split = dataset_config.get('test_split', 'test').select(range(99))
+    test_split = dataset_config.get('test_split', 'test')
     distributed_eval(test_split, prefix="test", epoch=training_config['epochs'] - 1)
 
     # Completion line
