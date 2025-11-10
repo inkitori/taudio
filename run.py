@@ -229,8 +229,6 @@ def main():
             "aux_correct_80ms",
             "aux_correct_100ms",
             "aux_correct_200ms",
-            # Count-style aux metrics (for other tasks)
-            "aux_correct",
         ]
 
         metric_keys: List[str] = []

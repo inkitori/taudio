@@ -81,3 +81,12 @@ class AudioSetAdapter(BaseDatasetAdapter):
 
     def get_timestamp_single_base_prompt(self, event_name: str) -> str:
         return f"State exactly the timestamp in seconds when the first occurence of the event '{event_name}' occurs. The format should be as follows: '2.435', with the seconds followed by a decimal point and the milliseconds."
+
+    def get_timestamp_single_any_prompt(self, event_name: str, key: str, ordinal: int) -> str:
+        suffix = 'st' if ordinal == 1 else 'nd' if ordinal == 2 else 'rd' if ordinal == 3 else 'th'
+        if key == "start":
+            return f"When does the {ordinal}{suffix} occurrence of the event '{event_name}' occur?"
+        elif key == "end":
+            return f"When does the {ordinal}{suffix} occurrence of the event '{event_name}' end?"
+        else:
+            raise ValueError(f"Invalid key: {key}")

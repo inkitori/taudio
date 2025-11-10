@@ -60,3 +60,7 @@ class BaseDatasetAdapter(ABC):
     @abstractmethod
     def get_speaker_count_prompt(self) -> str:
         """Return the prompt for the speaker count task."""
+
+    @abstractmethod
+    def get_timestamp_single_any_prompt(self, event_name: str, key: str, ordinal: int) -> str:
+        """Return the prompt for the Nth occurrence timestamp single-any task."""
