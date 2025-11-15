@@ -6,6 +6,7 @@ from .audiotime import AudioTimeAdapter
 from .audioset import AudioSetAdapter
 from .synthconv import SynthConvAdapter
 from .libricount import LibriCountAdapter
+from .groove_midi import GrooveMIDIAdapter
 
 _ADAPTERS: Dict[str, Type[BaseDatasetAdapter]] = {
     "librispeech": LibriSpeechAdapter,
@@ -13,6 +14,7 @@ _ADAPTERS: Dict[str, Type[BaseDatasetAdapter]] = {
     "audioset": AudioSetAdapter,
     "synthconv": SynthConvAdapter,
     "libricount": LibriCountAdapter,
+    "groove_midi": GrooveMIDIAdapter,
 }
 
 
@@ -35,5 +37,7 @@ def infer_adapter_from_repository(repository: str) -> str:
         return "synthconv"
     if "libricount" in repo:
         return "libricount"
+    if "groove_midi" in repo:
+        return "groove_midi"
     raise ValueError(f"Cannot infer adapter from repository: {repository}")
 
