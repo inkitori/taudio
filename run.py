@@ -266,6 +266,14 @@ def main():
         task.min_time = original_min_time
         task.max_time = original_max_time
 
+        # cleanup
+        del eval_model
+        del full_state_dict
+        del adapter
+        del base_ds
+        import gc; gc.collect()
+        torch.cuda.empty_cache()
+
         return aggregated
 
     # Training loop

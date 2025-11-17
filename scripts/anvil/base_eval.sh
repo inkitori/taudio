@@ -12,4 +12,4 @@
 
 module load conda
 conda activate ./env
-python evaluate_base.py --model-id $1 --repository $2 --split $3
+python evaluate_base.py --model-id $1 --repository $2 --split $3 --task $4
