@@ -157,9 +157,10 @@ def main():
         original_min_time = task.min_time
         original_max_time = task.max_time
 
-        if min_time is not None:
+        # If either bound is specified for this eval, explicitly set both,
+        # allowing None to clear prior training-time constraints.
+        if min_time is not None or max_time is not None:
             task.min_time = min_time
-        if max_time is not None:
             task.max_time = max_time
 
         unwrapped_model = accelerator.unwrap_model(model)
