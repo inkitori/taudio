@@ -24,6 +24,8 @@ def main():
                         help='Hugging Face model id, e.g. Qwen/Qwen2.5-Omni-3B')
     parser.add_argument('--repository', type=str, required=True,
                         help='Hugging Face dataset repository to evaluate on')
+    parser.add_argument('--task', type=str, required=True,
+                        help='Task to evaluate on, e.g. SINGLE_WORD_TIMESTAMP, SINGLE_WORD_TIMESTAMP_ANY, ALL_TIMESTAMPS, SPEAKER_COUNT')
     parser.add_argument('--split', type=str, default='test',
                         help='Dataset split to evaluate on')
     parser.add_argument('--seed', type=int, default=80,
@@ -33,10 +35,11 @@ def main():
     run = wandb.init(
         entity="taudio",
         project="Base Evaluations",
-        name=f"[{args.model_id}][{args.repository}][{args.split}]",
+        name=f"[{args.model_id}][{args.repository}][{args.task}][{args.split}]",
         config={
             "model_id": args.model_id,
             "repository": args.repository,
+            "task": args.task,
             "split": args.split,
             "seed": args.seed,
         },
@@ -60,7 +63,7 @@ def main():
     task_kwargs = {
         'key': 'start',
     }
-    task = create_task(task_type='SINGLE_WORD_TIMESTAMP', **task_kwargs)
+    task = create_task(task_type=args.task, **task_kwargs)
 
 
     # Load dataset

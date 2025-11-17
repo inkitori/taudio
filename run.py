@@ -36,6 +36,10 @@ def main():
     parser.add_argument('--config', type=str, required=True, help='Path to the config file')
     parser.add_argument('--no-timestamp', action='store_true', help='Don\'t add timestamp to output directory name')
     parser.add_argument('--debug', action='store_true', help='Don\'t log to wandb or experiment directory, and don\'t save model checkpoints')
+
+    parser.add_argument('--eval-min-time', type=float, default=None, help='Minimum time for evaluating on test split')
+    parser.add_argument('--eval-max-time', type=float, default=None, help='Maximum time for evaluating on test split')
+
     args = parser.parse_args()
 
     # Initialize config manager
@@ -149,9 +153,15 @@ def main():
     eval_aux_outputs = bool(loss_config.get('surrogate_loss', False))
 
     # Helper: distributed evaluation
-    def distributed_eval(split_name: str, prefix: str, epoch: int = None) -> Dict[str, float]:
-        # Build a plain, unwrapped eval model to avoid DTensor/Tensor mixing during generation
-        # Get a consolidated state dict from the wrapped model
+    def distributed_eval(split_name: str, prefix: str, epoch: int = None, min_time: float = None, max_time: float = None) -> Dict[str, float]:
+        original_min_time = task.min_time
+        original_max_time = task.max_time
+
+        if min_time is not None:
+            task.min_time = min_time
+        if max_time is not None:
+            task.max_time = max_time
+
         unwrapped_model = accelerator.unwrap_model(model)
 
         full_state_dict = get_model_state_dict(unwrapped_model, options=StateDictOptions(full_state_dict=True, broadcast_from_rank0=True))
@@ -252,6 +262,9 @@ def main():
             if epoch is not None:
                 log_payload["train/epoch"] = epoch + 1
             run.log(log_payload)
+        
+        task.min_time = original_min_time
+        task.max_time = original_max_time
 
         return aggregated
 
@@ -314,8 +327,16 @@ def main():
         # distributed_eval(dev_split, prefix="dev", epoch=epoch)
 
     # Final evaluation on test split
+
     test_split = dataset_config.get('test_split', 'test')
-    distributed_eval(test_split, prefix="test", epoch=training_config['epochs'] - 1)
+    distributed_eval(test_split, prefix="test", epoch=training_config['epochs'] - 1) # first do evaluation on the constraints imposed during training
+
+    accelerator.wait_for_everyone()
+
+    if args.eval_min_time is not None or args.eval_max_time is not None:
+        distributed_eval(test_split, prefix="test_ood", epoch=training_config['epochs'] - 1, min_time=args.eval_min_time, max_time=args.eval_max_time)
+    
+    accelerator.wait_for_everyone()
 
     # Completion line
     if is_master:

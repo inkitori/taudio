@@ -454,3 +454,50 @@ class SingleTimestampAnyTask(BaseTask):
         if len(events) == 0:
             return True
         return False
+
+    def evaluate_tokens_base(self, example: Dict[str, Any], ds_adapter: BaseDatasetAdapter, model_adapter: BaseModelAdapter) -> Dict[str, Any]:
+        events = list(ds_adapter.get_events(example))
+        event = self._choose_event(events=events, ds_adapter=ds_adapter, apply_fallback=False)
+
+        name = ds_adapter.event_name(event)
+        gt = ds_adapter.get_target_seconds(event, self.key)
+        audio = ds_adapter.get_audio(example)
+
+        # Compute ordinal of this event among same-name occurrences
+        ordinal = self._compute_ordinal(all_events=events, ds_adapter=ds_adapter, selected_event=event)
+
+        # Build a base prompt suitable for token-level decoding
+        base_question = ds_adapter.get_timestamp_single_any_prompt(name, self.key, ordinal)
+        prompt = f"{base_question} Respond with only the timestamp in seconds, like '2.435'."
+
+        logging.info(f"[ANY] Prompt: {prompt}")
+
+        inputs = model_adapter.build_base_inputs(prompt, audio)
+        inputs = inputs.to(torch.cuda.current_device())
+
+        generated_string = model_adapter.generate(**inputs, max_new_tokens=32, decode_tokens=True)
+        logging.info(f"[ANY] Generated string: {generated_string}")
+        match = re.findall(r'\d+\.\d+', generated_string)
+        if match:
+            token_pred = float(match[-1])
+            logging.info(f"[ANY] Token prediction: {str(token_pred)}, GT: {str(gt)}")
+        else:
+            token_pred = float(audio["array"].size / (2 * audio["sampling_rate"]))
+            logging.info(f"[ANY] Falling back to half the audio frames size: {token_pred}")
+
+        # Metric increments
+        token_pred = round_timestamp_python(float(token_pred))
+        abs_err = round_timestamp_python(abs(float(token_pred) - float(gt)))
+
+        metrics: Dict[str, float] = {
+            "token_abs_error_sum": abs_err,
+            "token_correct_5ms": 1.0 if abs_err <= 0.005 else 0.0,
+            "token_correct_10ms": 1.0 if abs_err <= 0.010 else 0.0,
+            "token_correct_20ms": 1.0 if abs_err <= 0.020 else 0.0,
+            "token_correct_40ms": 1.0 if abs_err <= 0.040 else 0.0,
+            "token_correct_50ms": 1.0 if abs_err <= 0.050 else 0.0,
+            "token_correct_80ms": 1.0 if abs_err <= 0.080 else 0.0,
+            "token_correct_100ms": 1.0 if abs_err <= 0.100 else 0.0,
+            "token_correct_200ms": 1.0 if abs_err <= 0.200 else 0.0,
+        }
+        return metrics

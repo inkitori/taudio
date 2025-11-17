@@ -79,3 +79,11 @@ class LibriCountAdapter(BaseDatasetAdapter):
         suffix = 'st' if event_name == "1" else 'nd' if event_name == "2" else 'rd' if event_name == "3" else 'th'
 
         return f"State exactly the timestamp in seconds when the {event_name}{suffix} speaker starts speaking. The format should be as follows: '2.435', with the seconds followed by a decimal point and the milliseconds."
+
+    def get_timestamp_single_any_prompt(self, event_name: str, key: str, ordinal: int) -> str:
+        # For LibriCount, each speaker has a single start; ordinal is effectively 1
+        suffix = 'st' if event_name == "1" else 'nd' if event_name == "2" else 'rd' if event_name == "3" else 'th'
+        if key == "start":
+            return f"When does the {event_name}{suffix} speaker start speaking?"
+        elif key == "end":
+            raise ValueError("End key not supported for LibriCount")

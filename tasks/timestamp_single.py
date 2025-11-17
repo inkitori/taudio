@@ -399,7 +399,6 @@ class SingleTimestampTask(BaseTask):
 
         prompt = ds_adapter.get_timestamp_single_base_prompt(name)
         inputs = model_adapter.build_base_inputs(prompt, audio)
-
         inputs = inputs.to(torch.cuda.current_device())
 
         generated_string = model_adapter.generate(**inputs, max_new_tokens=32, decode_tokens=True)
