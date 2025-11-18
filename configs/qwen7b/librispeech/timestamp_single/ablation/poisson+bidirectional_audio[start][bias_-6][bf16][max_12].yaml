@@ -20,10 +20,10 @@ dataset:
   repository: "gilkeyio/librispeech-alignments"
 
 task:
-  type: "SINGLE_WORD_TIMESTAMP_ANY"
+  type: "SINGLE_WORD_TIMESTAMP"
   kwargs:
     key: "start"
-    max_time: 20.0
+    max_time: 12.0
 
 # Loss configuration
 loss:

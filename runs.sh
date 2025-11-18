@@ -126,7 +126,7 @@ EXCLUDE_NODES="--exclude=h012"
 # sbatch $EXCLUDE_NODES scripts/anvil/accelerate_4_gpu_bf16_run.sh configs/qwen3b/librispeech/timestamp_any/ablation/bernoulli+bidirectional_audio+class_weighting[start][bf16][max_20].yaml
 
 
-# qwen 3b librispeech (no ablations)
+# qwen 3b librispeech (no ablations) any
 # sbatch $EXCLUDE_NODES scripts/anvil/accelerate_4_gpu_bf16_run.sh configs/qwen3b/librispeech/timestamp_any/token+bidirectional_audio[start][bf16].yaml
 # sbatch $EXCLUDE_NODES scripts/anvil/accelerate_4_gpu_bf16_run.sh configs/qwen3b/librispeech/timestamp_any/token+poisson+bidirectional_audio[start][bias_-6][bf16].yaml
 # sbatch $EXCLUDE_NODES scripts/anvil/accelerate_4_gpu_bf16_run.sh configs/qwen3b/librispeech/timestamp_any/poisson+bidirectional_audio[start][bias_-6][bf16].yaml
@@ -134,7 +134,7 @@ EXCLUDE_NODES="--exclude=h012"
 # sbatch $EXCLUDE_NODES scripts/anvil/accelerate_4_gpu_bf16_run.sh configs/qwen3b/librispeech/timestamp_any/bernoulli+bidirectional_audio+class_weighting[start][bf16].yaml
 # sbatch $EXCLUDE_NODES scripts/anvil/accelerate_4_gpu_bf16_run.sh configs/qwen3b/librispeech/timestamp_any/bernoulli+bidirectional_audio+class_weighting[start][bf16][upscale_4].yaml
 
-# qwen 7b librispeech (no ablations)
+# qwen 7b librispeech (no ablations) any
 # sbatch $EXCLUDE_NODES scripts/anvil/accelerate_4_gpu_bf16_run.sh configs/qwen7b/librispeech/timestamp_any/token+bidirectional_audio[start][bf16].yaml
 # sbatch $EXCLUDE_NODES scripts/anvil/accelerate_4_gpu_bf16_run.sh configs/qwen7b/librispeech/timestamp_any/token+poisson+bidirectional_audio[start][bias_-6][bf16].yaml
 # sbatch $EXCLUDE_NODES scripts/anvil/accelerate_4_gpu_bf16_run.sh configs/qwen7b/librispeech/timestamp_any/poisson+bidirectional_audio[start][bias_-6][bf16].yaml
@@ -142,7 +142,7 @@ EXCLUDE_NODES="--exclude=h012"
 # sbatch $EXCLUDE_NODES scripts/anvil/accelerate_4_gpu_bf16_run.sh configs/qwen7b/librispeech/timestamp_any/bernoulli+bidirectional_audio+class_weighting[start][bf16].yaml
 # sbatch $EXCLUDE_NODES scripts/anvil/accelerate_4_gpu_bf16_run.sh configs/qwen7b/librispeech/timestamp_any/bernoulli+bidirectional_audio+class_weighting[start][bf16][upscale_4].yaml
 
-# qwen 3b librispeech ablations
+# qwen 3b librispeech ablations any
 # sbatch $EXCLUDE_NODES scripts/anvil/accelerate_4_gpu_bf16_run.sh configs/qwen3b/librispeech/timestamp_any/ablation/token+bidirectional_audio[start][bf16][max_4].yaml 4 8
 # sbatch $EXCLUDE_NODES scripts/anvil/accelerate_4_gpu_bf16_run.sh configs/qwen3b/librispeech/timestamp_any/ablation/token+bidirectional_audio[start][bf16][max_8].yaml 8 12
 # sbatch $EXCLUDE_NODES scripts/anvil/accelerate_4_gpu_bf16_run.sh configs/qwen3b/librispeech/timestamp_any/ablation/token+bidirectional_audio[start][bf16][max_12].yaml 12 16
@@ -161,7 +161,7 @@ EXCLUDE_NODES="--exclude=h012"
 # sbatch $EXCLUDE_NODES scripts/anvil/accelerate_4_gpu_bf16_run.sh configs/qwen3b/librispeech/timestamp_any/ablation/bernoulli+bidirectional_audio+class_weighting[start][bf16][max_16].yaml 16 20
 # sbatch $EXCLUDE_NODES scripts/anvil/accelerate_4_gpu_bf16_run.sh configs/qwen3b/librispeech/timestamp_any/ablation/bernoulli+bidirectional_audio+class_weighting[start][bf16][max_20].yaml 20
 
-# qwen 7b librispeech ablations
+# qwen 7b librispeech ablations any
 sbatch $EXCLUDE_NODES scripts/anvil/accelerate_4_gpu_bf16_run.sh configs/qwen7b/librispeech/timestamp_any/ablation/token+bidirectional_audio[start][bf16][max_4].yaml 4 8
 sbatch $EXCLUDE_NODES scripts/anvil/accelerate_4_gpu_bf16_run.sh configs/qwen7b/librispeech/timestamp_any/ablation/token+bidirectional_audio[start][bf16][max_8].yaml 8 12
 sbatch $EXCLUDE_NODES scripts/anvil/accelerate_4_gpu_bf16_run.sh configs/qwen7b/librispeech/timestamp_any/ablation/token+bidirectional_audio[start][bf16][max_12].yaml 12 16
@@ -179,3 +179,10 @@ sbatch $EXCLUDE_NODES scripts/anvil/accelerate_4_gpu_bf16_run.sh configs/qwen7b/
 # sbatch $EXCLUDE_NODES scripts/anvil/accelerate_4_gpu_bf16_run.sh configs/qwen7b/librispeech/timestamp_any/ablation/bernoulli+bidirectional_audio+class_weighting[start][bf16][max_12].yaml 12 16
 # sbatch $EXCLUDE_NODES scripts/anvil/accelerate_4_gpu_bf16_run.sh configs/qwen7b/librispeech/timestamp_any/ablation/bernoulli+bidirectional_audio+class_weighting[start][bf16][max_16].yaml 16 20
 # sbatch $EXCLUDE_NODES scripts/anvil/accelerate_4_gpu_bf16_run.sh configs/qwen7b/librispeech/timestamp_any/ablation/bernoulli+bidirectional_audio+class_weighting[start][bf16][max_20].yaml 20
+
+# qwen 7b librispeech ablations single
+sbatch $EXCLUDE_NODES scripts/anvil/accelerate_4_gpu_bf16_run.sh configs/qwen7b/librispeech/timestamp_single/ablation/token+bidirectional_audio[start][bf16][max_4].yaml 4 8
+sbatch $EXCLUDE_NODES scripts/anvil/accelerate_4_gpu_bf16_run.sh configs/qwen7b/librispeech/timestamp_single/ablation/token+bidirectional_audio[start][bf16][max_8].yaml 8 12
+sbatch $EXCLUDE_NODES scripts/anvil/accelerate_4_gpu_bf16_run.sh configs/qwen7b/librispeech/timestamp_single/ablation/token+bidirectional_audio[start][bf16][max_12].yaml 12 16
+sbatch $EXCLUDE_NODES scripts/anvil/accelerate_4_gpu_bf16_run.sh configs/qwen7b/librispeech/timestamp_single/ablation/token+bidirectional_audio[start][bf16][max_16].yaml 16 20
+sbatch $EXCLUDE_NODES scripts/anvil/accelerate_4_gpu_bf16_run.sh configs/qwen7b/librispeech/timestamp_single/ablation/token+bidirectional_audio[start][bf16][max_20].yaml 20
