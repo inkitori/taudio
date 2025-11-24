@@ -6,7 +6,7 @@
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:4
 #SBATCH --time=1:00:00
-#SBATCH --job-name=4_gpu_bf16
+#SBATCH --job-name=4_gpu_fp16
 #SBATCH --output=scripts/anvil/logs/%x/%j.out
 #SBATCH --error=scripts/anvil/logs/%x/%j.err
 
@@ -34,4 +34,4 @@ if [ -n "$3" ]; then
 EVAL_MAX_ARG="--eval-max-time $3"
 fi
 
-accelerate launch --config_file accelerate_configs/4_gpu_bf16.yaml run.py --config "$1" $EVAL_MIN_ARG $EVAL_MAX_ARG
+accelerate launch --config_file accelerate_configs/4_gpu_fp16.yaml run.py --config "$1" $EVAL_MIN_ARG $EVAL_MAX_ARG
