@@ -2,6 +2,7 @@ from typing import Any, Dict, Iterable, List
 from datasets import load_dataset
 from datasets.features import Audio
 import logging
+import numpy as np
 
 from .base_dataset_adapter import BaseDatasetAdapter
 from utils.utils import round_timestamp_python
@@ -56,7 +57,12 @@ class AudioSetAdapter(BaseDatasetAdapter):
         return ds
 
     def get_audio_frames(self, example: Dict[str, Any]) -> Dict[str, Any]:
-        return example["audio"]["array"]
+        audio = example["audio"]["array"]
+        pad_samples = int(self.left_padding * self.sampling_rate)
+        if pad_samples > 0:
+            zeros = np.zeros(pad_samples, dtype=audio.dtype)
+            audio = np.concatenate([zeros, audio], axis=0)
+        return audio
     
     def get_audio(self, example: Dict[str, Any]) -> Dict[str, Any]:
         return example["audio"]
@@ -74,7 +80,7 @@ class AudioSetAdapter(BaseDatasetAdapter):
 
     def get_target_seconds(self, event: Dict[str, Any], key: str) -> float:
         # key could be 'start' or 'end'
-        return round_timestamp_python(float(event[key]))
+        return round_timestamp_python(float(event[key]) + self.left_padding)
 
     def get_num_speakers(self, example: Dict[str, Any]) -> int:
         return len(example['events'])
