@@ -4,16 +4,17 @@ model:
   freeze_text_model: false
   audio_layer: -1
   bidirectional_audio: true
-  linear_bias: 0
+  linear_bias: -6.9
   dtype: "auto"
+  scaling_factor: 4
 
 # Training configuration
 training:
-  epochs: 1
+  epochs: 8
   effective_batch_size: 8
   learning_rate: 5.0e-6
-  eta_min_scale: 1.0
-  
+  eta_min_scale: 0.1
+ 
 # Dataset configuration
 dataset:
   split: "train"
@@ -26,11 +27,11 @@ task:
 
 # Loss configuration
 loss:
-  token_loss: true
-  surrogate_loss: false
-  surrogate_loss_weight: 0.0
+  token_loss: false
+  surrogate_loss: true
+  surrogate_loss_weight: 1.0
   class_weighting: false
-  poisson_loss: false
+  poisson_loss: true
 
 # System configuration
 system:
