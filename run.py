@@ -296,7 +296,7 @@ def main():
     # Training loop
     epochs = 0 if args.load_checkpoint else training_config['epochs']
 
-    best_metric = -float('inf')
+    best_metric = float('inf') # infinite abs error is worst case
     best_checkpoint_path = None
 
     for epoch in range(epochs):
@@ -364,7 +364,7 @@ def main():
                 
             current_metric = metrics.get(target_metric, -1.0)
             logging.info(f"Current model achieved {target_metric}: {best_metric}")
-            if current_metric > best_metric:
+            if current_metric < best_metric: # abs error should be lower
                 best_metric = current_metric
                 best_checkpoint_path = checkpoint_path
                 if is_master:
