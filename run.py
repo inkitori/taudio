@@ -358,9 +358,9 @@ def main():
             dev_split = dataset_config.get('dev_split', 'dev')
             metrics = distributed_eval(dev_split, prefix="dev", epoch=epoch, state_dict_path=checkpoint_path)
             
-            target_metric = "dev/token_correct_100ms"
+            target_metric = "dev/token_abs_error_sum"
             if not eval_token_outputs and eval_aux_outputs:
-                target_metric = "dev/aux_correct_100ms"
+                target_metric = "dev/aux_abs_error_sum"
                 
             current_metric = metrics.get(target_metric, -1.0)
             logging.info(f"Current model achieved {target_metric}: {best_metric}")

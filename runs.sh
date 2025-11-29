@@ -305,8 +305,12 @@ sbatch $EXCLUDE_NODES scripts/anvil/accelerate_4_gpu_bf16_run.sh configs/qwen3b/
 sbatch $EXCLUDE_NODES scripts/anvil/accelerate_4_gpu_bf16_run.sh configs/qwen3b/libricount/timestamp_single/tuning/token+bidirectional_audio[start][bf16][lr_5e-6][epoch_5].yaml
 sbatch $EXCLUDE_NODES scripts/anvil/accelerate_4_gpu_bf16_run.sh configs/qwen3b/libricount/timestamp_single/tuning/poisson+bidirectional_audio[start][bias_-6.9][bf16][lr_5e-6][epoch_5].yaml
 sbatch $EXCLUDE_NODES scripts/anvil/accelerate_4_gpu_bf16_run.sh configs/qwen3b/libricount/timestamp_single/tuning/poisson+bidirectional_audio[start][bias_-6.9][bf16][upscale_4][lr_5e-6][epoch_5].yaml
+sbatch $EXCLUDE_NODES scripts/anvil/accelerate_4_gpu_bf16_run.sh configs/qwen3b/audioset_humans/timestamp_any/tuning/poisson+bidirectional_audio[start][bias_-6.9][bf16][lr_5e-6][epoch_5][pad_0.5].yaml
+sbatch $EXCLUDE_NODES scripts/anvil/accelerate_4_gpu_bf16_run.sh configs/qwen3b/audioset_humans/timestamp_any/tuning/poisson+bidirectional_audio[start][bias_-6.9][bf16][upscale_4][lr_5e-6][epoch_5][pad_0.5].yaml
 
 # audioset_humans
 sbatch $EXCLUDE_NODES scripts/anvil/accelerate_4_gpu_bf16_run.sh configs/qwen3b/audioset_humans/timestamp_any/tuning/token+bidirectional_audio[start][bf16][lr_5e-6][epoch_5].yaml
 sbatch $EXCLUDE_NODES scripts/anvil/accelerate_4_gpu_bf16_run.sh configs/qwen3b/audioset_humans/timestamp_any/tuning/poisson+bidirectional_audio[start][bias_-6.9][bf16][lr_5e-6][epoch_5].yaml
 sbatch $EXCLUDE_NODES scripts/anvil/accelerate_4_gpu_bf16_run.sh configs/qwen3b/audioset_humans/timestamp_any/tuning/poisson+bidirectional_audio[start][bias_-6.9][bf16][upscale_4][lr_5e-6][epoch_5].yaml
+sbatch $EXCLUDE_NODES scripts/anvil/accelerate_4_gpu_bf16_run.sh configs/qwen3b/libricount/timestamp_single/tuning/poisson+bidirectional_audio[start][bias_-6.9][bf16][lr_5e-6][epoch_5][pad_0.5].yaml
+sbatch $EXCLUDE_NODES scripts/anvil/accelerate_4_gpu_bf16_run.sh configs/qwen3b/libricount/timestamp_single/tuning/poisson+bidirectional_audio[start][bias_-6.9][bf16][upscale_4][lr_5e-6][epoch_5][pad_0.5].yaml
