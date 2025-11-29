@@ -28,16 +28,28 @@ class AudioSetAdapter(BaseDatasetAdapter):
         if split == "test":
             split = "eval"
 
-        ds = load_dataset(self.repository, split=split)
+        effective_split = split
+        if split == 'dev':
+            effective_split = 'train'
+
+        ds = load_dataset(self.repository, split=effective_split)
+        
+        if self.repository == "enyoukai/AudioSet-Strong":
+            if effective_split == "train":
+                ds = remove_indices(ds, train_exclude_indices)
+            elif effective_split == "eval":
+                ds = remove_indices(ds, eval_exclude_indices)
+        
+        if split in ['train', 'dev']:
+            ds = ds.train_test_split(test_size=0.05, seed=42)
+            if split == 'train':
+                ds = ds['train']
+            else:
+                ds = ds['test']
+
         ds = ds.cast_column("audio", Audio(sampling_rate=self.sampling_rate))
         if self.take_first:
             ds = ds.select(range(self.take_first))
-
-        if self.repository == "enyoukai/AudioSet-Strong":
-            if split == "train":
-                ds = remove_indices(ds, train_exclude_indices)
-            elif split == "eval":
-                ds = remove_indices(ds, eval_exclude_indices)
         
         if self.key == "start":
             ds = ds.filter(start_filter_fn)

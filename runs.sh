@@ -262,7 +262,13 @@ sbatch $EXCLUDE_NODES scripts/anvil/accelerate_4_gpu_bf16_run.sh configs/qwen7b/
 # poisson
 sbatch $EXCLUDE_NODES scripts/anvil/accelerate_4_gpu_bf16_run.sh configs/qwen7b/libricount/timestamp_any/tuning/poisson+bidirectional_audio[start][bias_-6.9][bf16][lr_1e-6][no_schedule].yaml
 sbatch $EXCLUDE_NODES scripts/anvil/accelerate_4_gpu_bf16_run.sh configs/qwen7b/libricount/timestamp_any/tuning/poisson+bidirectional_audio[start][bias_-6.9][bf16][lr_2e-6][no_schedule].yaml
+sbatch $EXCLUDE_NODES scripts/anvil/accelerate_4_gpu_bf16_run.sh configs/qwen7b/libricount/timestamp_any/tuning/poisson+bidirectional_audio[start][bias_-6.9][bf16][lr_3e-6][no_schedule].yaml
+sbatch $EXCLUDE_NODES scripts/anvil/accelerate_4_gpu_bf16_run.sh configs/qwen7b/libricount/timestamp_any/tuning/poisson+bidirectional_audio[start][bias_-6.9][bf16][lr_4e-6][no_schedule].yaml
 sbatch $EXCLUDE_NODES scripts/anvil/accelerate_4_gpu_bf16_run.sh configs/qwen7b/libricount/timestamp_any/tuning/poisson+bidirectional_audio[start][bias_-6.9][bf16][lr_5e-6][no_schedule].yaml
+sbatch $EXCLUDE_NODES scripts/anvil/accelerate_4_gpu_bf16_run.sh configs/qwen7b/libricount/timestamp_any/tuning/poisson+bidirectional_audio[start][bias_-6.9][bf16][lr_6e-6][no_schedule].yaml
+sbatch $EXCLUDE_NODES scripts/anvil/accelerate_4_gpu_bf16_run.sh configs/qwen7b/libricount/timestamp_any/tuning/poisson+bidirectional_audio[start][bias_-6.9][bf16][lr_7e-6][no_schedule].yaml
+sbatch $EXCLUDE_NODES scripts/anvil/accelerate_4_gpu_bf16_run.sh configs/qwen7b/libricount/timestamp_any/tuning/poisson+bidirectional_audio[start][bias_-6.9][bf16][lr_8e-6][no_schedule].yaml
+sbatch $EXCLUDE_NODES scripts/anvil/accelerate_4_gpu_bf16_run.sh configs/qwen7b/libricount/timestamp_any/tuning/poisson+bidirectional_audio[start][bias_-6.9][bf16][lr_9e-6][no_schedule].yaml
 # fp16
 sbatch $EXCLUDE_NODES scripts/anvil/accelerate_4_gpu_fp16_run.sh configs/qwen7b/libricount/timestamp_any/tuning/poisson+bidirectional_audio[start][bias_-6.9][bf16][lr_2e-6][no_schedule][fp16].yaml
 
@@ -275,3 +281,16 @@ sbatch $EXCLUDE_NODES scripts/anvil/accelerate_4_gpu_bf16_run.sh configs/qwen7b/
 sbatch $EXCLUDE_NODES scripts/anvil/accelerate_4_gpu_bf16_run.sh configs/qwen7b/libricount/timestamp_any/tuning/token+bidirectional_audio[start][bf16][lr_1e-6][no_schedule].yaml
 sbatch $EXCLUDE_NODES scripts/anvil/accelerate_4_gpu_bf16_run.sh configs/qwen7b/libricount/timestamp_any/tuning/token+bidirectional_audio[start][bf16][lr_2e-6][no_schedule].yaml
 sbatch $EXCLUDE_NODES scripts/anvil/accelerate_4_gpu_bf16_run.sh configs/qwen7b/libricount/timestamp_any/tuning/token+bidirectional_audio[start][bf16][lr_5e-6][no_schedule].yaml
+
+# qwen 3b libricount any
+sbatch $EXCLUDE_NODES scripts/anvil/accelerate_4_gpu_bf16_run.sh configs/qwen3b/libricount/timestamp_single/token+bidirectional_audio[start][bf16][lr_5e-6].yaml
+sbatch $EXCLUDE_NODES scripts/anvil/accelerate_4_gpu_bf16_run.sh configs/qwen3b/libricount/timestamp_single/poisson+bidirectional_audio[start][bias_-6.9][bf16][lr_5e-6].yaml
+sbatch $EXCLUDE_NODES scripts/anvil/accelerate_4_gpu_bf16_run.sh configs/qwen3b/libricount/timestamp_single/poisson+bidirectional_audio[start][bias_-6.9][bf16][upscale_4][lr_5e-6].yaml
+sbatch $EXCLUDE_NODES scripts/anvil/accelerate_4_gpu_bf16_run.sh configs/qwen3b/libricount/timestamp_single/bernoulli+class_weighting+bidirectional_audio[start][bf16][lr_5e-6].yaml
+sbatch $EXCLUDE_NODES scripts/anvil/accelerate_4_gpu_bf16_run.sh configs/qwen3b/libricount/timestamp_single/bernoulli+class_weighting+bidirectional_audio[start][bf16][upscale_4][lr_5e-6].yaml
+sbatch $EXCLUDE_NODES scripts/anvil/accelerate_4_gpu_bf16_run.sh configs/qwen3b/libricount/timestamp_single/token+poisson+bidirectional_audio[start][bias_-6.9][bf16][lr_5e-6][weight_1.0].yaml
+
+# qwen 7b libricount any tuning (epochs)
+sbatch $EXCLUDE_NODES scripts/anvil/accelerate_4_gpu_bf16_run.sh configs/qwen7b/libricount/timestamp_any/tuning/token+bidirectional_audio[start][bf16][lr_5e-6][epoch_5].yaml
+sbatch $EXCLUDE_NODES scripts/anvil/accelerate_4_gpu_bf16_run.sh configs/qwen7b/libricount/timestamp_any/tuning/poisson+bidirectional_audio[start][bias_-6.9][bf16][lr_5e-6][epoch_5].yaml
+sbatch $EXCLUDE_NODES scripts/anvil/accelerate_4_gpu_bf16_run.sh configs/qwen7b/libricount/timestamp_any/tuning/poisson+bidirectional_audio[start][bias_-6.9][bf16][lr_5e-6][upscale_4][epoch_5].yaml

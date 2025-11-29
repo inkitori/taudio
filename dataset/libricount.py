@@ -17,7 +17,15 @@ class LibriCountAdapter(BaseDatasetAdapter):
         return ds
 
     def load_split(self, split: str):
-        ds = load_dataset(self.repository, split=split)
+        if split in ['train', 'dev']:
+            ds = load_dataset(self.repository, split='train')
+            ds = ds.train_test_split(test_size=0.05, seed=42)
+            if split == 'train':
+                ds = ds['train']
+            else:
+                ds = ds['test']
+        else:
+            ds = load_dataset(self.repository, split=split)
         
         ds = ds.cast_column("audio", Audio(sampling_rate=self.sampling_rate))
         if self.take_first:

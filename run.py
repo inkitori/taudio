@@ -1,5 +1,6 @@
 import argparse
 import logging
+import os
 import random
 from pathlib import Path
 from typing import Dict, List
@@ -39,6 +40,7 @@ def main():
 
     parser.add_argument('--eval-min-time', type=float, default=None, help='Minimum time for evaluating on test split')
     parser.add_argument('--eval-max-time', type=float, default=None, help='Maximum time for evaluating on test split')
+    parser.add_argument('--load-checkpoint', type=str, default=None, help='Path to a checkpoint to load for evaluation only')
 
     args = parser.parse_args()
 
@@ -110,50 +112,61 @@ def main():
         "task": task
     }
     model = TAudio(**taudio_config)
+
+    if args.load_checkpoint:
+        logging.info(f"Loading checkpoint from {args.load_checkpoint}")
+        state_dict = torch.load(args.load_checkpoint, map_location='cpu')
+        model.load_state_dict(state_dict)
+
     model.train()
 
     accelerator = Accelerator()
 
-    # Build training dataset/dataloader
-    ds, ds_adapter = get_ds(
-        model_adapter=model.model_adapter,
-        repository=dataset_config['repository'],
-        split=dataset_config['split'],
-        task=task,
-        take_first=dataset_config.get('take_first', None),
-        left_padding=dataset_config.get('left_padding', 0),
-    )
+    if args.load_checkpoint:
+        # When using FSDP2, we need to pass an optimizer to prepare even for inference
+        dummy_optimizer = torch.optim.SGD(model.parameters(), lr=1e-3)
+        model, dummy_optimizer = accelerator.prepare(model, dummy_optimizer)
+    else:
+        # Build training dataset/dataloader
+        ds, ds_adapter = get_ds(
+            model_adapter=model.model_adapter,
+            repository=dataset_config['repository'],
+            split=dataset_config['split'],
+            task=task,
+            take_first=dataset_config.get('take_first', None),
+            left_padding=dataset_config.get('left_padding', 0),
+        )
 
-    accelerator.wait_for_everyone()
+        accelerator.wait_for_everyone()
 
-    dataloader = DataLoader(
-        ds,
-        batch_size=batch_size_per_device,
-        drop_last=True,
-        pin_memory=True,
-        num_workers=8,
-        collate_fn=collate_fn,
-        shuffle=True
-    )
+        dataloader = DataLoader(
+            ds,
+            batch_size=batch_size_per_device,
+            drop_last=True,
+            pin_memory=True,
+            num_workers=8,
+            collate_fn=collate_fn,
+            shuffle=True
+        )
 
-    optim = torch.optim.AdamW(model.parameters(), lr=training_config['learning_rate'])
-    num_optim_steps = len(dataloader)
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-        optim,
-        T_max=num_optim_steps,
-        eta_min=training_config['learning_rate'] * training_config['eta_min_scale'],
-    )
+        optim = torch.optim.AdamW(model.parameters(), lr=training_config['learning_rate'])
+        num_optim_steps = len(dataloader) * training_config['epochs']
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+            optim,
+            T_max=num_optim_steps,
+            eta_min=training_config['learning_rate'] * training_config['eta_min_scale'],
+        )
 
-    model, optim, scheduler, dataloader = accelerator.prepare(model, optim, scheduler, dataloader)
-    logging.info(f"Number of optimizer steps: {num_optim_steps}")
-    logging.info(f"Dataloader length: {len(dataloader)}")
+        model, optim, scheduler, dataloader = accelerator.prepare(model, optim, scheduler, dataloader)
+        logging.info(f"Number of optimizer steps: {num_optim_steps}")
+        logging.info(f"Dataloader length: {len(dataloader)}")
 
     # Flags for what to evaluate
     eval_token_outputs = bool(loss_config.get('token_loss', False))
     eval_aux_outputs = bool(loss_config.get('surrogate_loss', False))
 
     # Helper: distributed evaluation
-    def distributed_eval(split_name: str, prefix: str, epoch: int = None, min_time: float = None, max_time: float = None) -> Dict[str, float]:
+    def distributed_eval(split_name: str, prefix: str, epoch: int = None, min_time: float = None, max_time: float = None, state_dict_path: str = None) -> Dict[str, float]:
         original_min_time = task.min_time
         original_max_time = task.max_time
 
@@ -163,9 +176,11 @@ def main():
             task.min_time = min_time
             task.max_time = max_time
 
-        unwrapped_model = accelerator.unwrap_model(model)
-
-        full_state_dict = get_model_state_dict(unwrapped_model, options=StateDictOptions(full_state_dict=True, broadcast_from_rank0=True))
+        if state_dict_path is not None:
+            full_state_dict = torch.load(state_dict_path, map_location='cpu')
+        else:
+            unwrapped_model = accelerator.unwrap_model(model)
+            full_state_dict = get_model_state_dict(unwrapped_model, options=StateDictOptions(full_state_dict=True, broadcast_from_rank0=True))
 
         eval_model = TAudio(**taudio_config)
         eval_model.load_state_dict(full_state_dict, strict=True)
@@ -179,6 +194,7 @@ def main():
             sampling_rate=model.model_adapter.sampling_rate,
             left_padding=dataset_config.get('left_padding', 0),
             key=task.key,
+            take_first=dataset_config.get('take_first', None),
         )
 
         base_ds = adapter.load_split(split_name)
@@ -260,8 +276,8 @@ def main():
 
         if is_master and not args.debug and run is not None:
             log_payload = dict(aggregated)
-            if epoch is not None:
-                log_payload["train/epoch"] = epoch + 1
+            # if epoch is not None:
+            #     log_payload["train/epoch"] = epoch + 1
             run.log(log_payload)
         
         task.min_time = original_min_time
@@ -278,7 +294,12 @@ def main():
         return aggregated
 
     # Training loop
-    for epoch in range(training_config['epochs']):
+    epochs = 0 if args.load_checkpoint else training_config['epochs']
+
+    best_metric = -float('inf')
+    best_checkpoint_path = None
+
+    for epoch in range(epochs):
         progress_bar = tqdm(
             dataloader,
             desc=f"Epoch {epoch + 1}",
@@ -329,21 +350,41 @@ def main():
             logging.info(f"Saving model checkpoint to {checkpoint_path}")
             torch.save(state_dict, checkpoint_path)
 
-        # accelerator.wait_for_everyone()
+        accelerator.wait_for_everyone()
 
         # Per-epoch distributed eval on dev split
-        # dev_split = dataset_config.get('dev_split', 'dev')
-        # distributed_eval(dev_split, prefix="dev", epoch=epoch)
+        if not args.debug:
+            checkpoint_path = experiment_dir / f"model_epoch{epoch+1}.pt"
+            dev_split = dataset_config.get('dev_split', 'dev')
+            metrics = distributed_eval(dev_split, prefix="dev", epoch=epoch, state_dict_path=checkpoint_path)
+            
+            target_metric = "dev/token_correct_100ms"
+            if not eval_token_outputs and eval_aux_outputs:
+                target_metric = "dev/aux_correct_100ms"
+                
+            current_metric = metrics.get(target_metric, -1.0)
+            logging.info(f"Current model achieved {target_metric}: {best_metric}")
+            if current_metric > best_metric:
+                best_metric = current_metric
+                best_checkpoint_path = checkpoint_path
+                if is_master:
+                    logging.info(f"New best model found with {target_metric}: {best_metric}")
+        
+        accelerator.wait_for_everyone()
 
     # Final evaluation on test split
 
+    final_checkpoint = best_checkpoint_path if best_checkpoint_path else args.load_checkpoint
+    if final_checkpoint:
+        logging.info(f"Evaluating with checkpoint: {final_checkpoint}")
+
     test_split = dataset_config.get('test_split', 'test')
-    distributed_eval(test_split, prefix="test", epoch=training_config['epochs'] - 1) # first do evaluation on the constraints imposed during training
+    distributed_eval(test_split, prefix="test", epoch=training_config['epochs'] - 1, state_dict_path=final_checkpoint) # first do evaluation on the constraints imposed during training
 
     accelerator.wait_for_everyone()
 
     if args.eval_min_time is not None or args.eval_max_time is not None:
-        distributed_eval(test_split, prefix="test_ood", epoch=training_config['epochs'] - 1, min_time=args.eval_min_time, max_time=args.eval_max_time)
+        distributed_eval(test_split, prefix="test_ood", epoch=training_config['epochs'] - 1, min_time=args.eval_min_time, max_time=args.eval_max_time, state_dict_path=final_checkpoint)
     
     accelerator.wait_for_everyone()
 
