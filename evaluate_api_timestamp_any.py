@@ -40,6 +40,25 @@ DATASET_REPOS: Dict[str, str] = {
 
 FLOAT_PATTERN = re.compile(r"\d+(?:\.\d+)?")
 TIMECODE_PATTERN = re.compile(r"(\d+):(\d+(?:\.\d+)?)")
+THIRD_PARTY_LOGGERS = (
+    "httpx",
+    "google",
+    "google.api_core",
+    "google.auth",
+    "google.cloud",
+    "google.genai",
+    "google.generativeai",
+    "google_genai",
+    "google_genai.models",
+)
+def _silence_third_party_logs(level: int = logging.WARNING) -> None:
+    """Silence noisy SDK loggers without touching application logging."""
+    for name in THIRD_PARTY_LOGGERS:
+        logger = logging.getLogger(name)
+        logger.setLevel(level)
+        logger.propagate = False
+        if not logger.handlers:
+            logger.addHandler(logging.NullHandler())
 
 
 class TimestampPredictor(Protocol):
@@ -55,40 +74,37 @@ class GeminiTimestampClient:
     def __init__(self, api_key: str, model: str, timeout: Optional[int]) -> None:
         self.name = "gemini"
         try:
-            import google.generativeai as genai  # type: ignore
+            from google import genai  # type: ignore
         except ImportError as exc:  # pragma: no cover - dependency hint
             raise RuntimeError(
-                "google-generativeai is required. Install via `pip install google-generativeai`."
+                "google-genai is required. Install via `pip install google-genai`."
             ) from exc
 
         if not api_key:
             raise ValueError("Missing Gemini API key. Set --gemini-api-key or GEMINI_API_KEY.")
 
-        genai.configure(api_key=api_key)
-        self._genai = genai
-        self._model = genai.GenerativeModel(model)
+        self._client = genai.Client(api_key=api_key)
+        self._model = model
         self._timeout = timeout
-        self._gen_config = {"temperature": 0.0, "max_output_tokens": 64}
+        self._gen_config = {"temperature": 0.0, "max_output_tokens": 256}
 
     def predict_timestamp(self, prompt: str, audio: Dict[str, object]) -> str:
         audio_path = ensure_audio_path(audio)
         uploaded_file = None
         try:
-            uploaded_file = self._genai.upload_file(path=audio_path, mime_type="audio/wav")
-            request_kwargs = {"generation_config": self._gen_config}
+            uploaded_file = self._client.files.upload(
+                file=audio_path,
+            )
+            request_kwargs = {"config": self._gen_config}
             if self._timeout:
                 request_kwargs["request_options"] = {"timeout": self._timeout}
 
-            contents = [
-                {
-                    "role": "user",
-                    "parts": [
-                        prompt,
-                        uploaded_file,
-                    ],
-                }
-            ]
-            response = self._model.generate_content(contents=contents, **request_kwargs)
+            contents = [prompt, uploaded_file]
+            response = self._client.models.generate_content(
+                model=self._model,
+                contents=contents,
+                **request_kwargs,
+            )
             return _extract_gemini_text(response)
         finally:
             try:
@@ -97,7 +113,7 @@ class GeminiTimestampClient:
                 logging.warning("Could not remove temporary audio file %s", audio_path)
             if uploaded_file:
                 try:
-                    self._genai.delete_file(uploaded_file.name)
+                    self._client.files.delete(name=uploaded_file.name)
                 except Exception:
                     logging.warning("Failed to delete Gemini uploaded file %s", uploaded_file.name)
 
@@ -165,7 +181,8 @@ def _extract_gemini_text(response: object) -> str:
         content = getattr(candidate, "content", None)
         if not content:
             continue
-        for part in getattr(content, "parts", []):
+        parts = getattr(content, "parts", []) or []
+        for part in parts:
             part_text = getattr(part, "text", None)
             if part_text:
                 texts.append(str(part_text))
@@ -276,11 +293,23 @@ def evaluate_dataset(
         except ValueError:
             continue
 
+        logging.info(f"Prompt: " + prompt)
         raw_text = predictor.predict_timestamp(prompt, audio)
+        logging.info(
+            "[%s][%s] Model response: %s | Ground truth: %.3f",
+            predictor.name,
+            repository,
+            raw_text,
+            gt,
+        )
         parsed = _parse_timestamp(raw_text)
         if parsed is None:
             parsed = _fallback_timestamp(audio)
+        
+        logging.info(f"Parsed timestamp: " + str(parsed))
         example_metrics = _metrics_from_prediction(parsed, gt)
+        logging.info(f"Current metrics: ")
+        logging.info(example_metrics)
         metrics.update_dict(example_metrics)
         processed += 1
 
@@ -315,7 +344,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--sampling-rate", type=int, default=16000, help="Target sampling rate for audio casting.")
     parser.add_argument("--left-padding", type=float, default=0.0, help="Seconds of left padding to mirror training setup.")
 
-    parser.add_argument("--gemini-model", default="gemini-1.5-flash-002")
+    parser.add_argument("--gemini-model", default="gemini-2.5-flash")
     parser.add_argument("--gemini-api-key", default=os.environ.get("GEMINI_API_KEY"))
     parser.add_argument("--chatgpt-model", default="gpt-4o-mini-transcribe")
     parser.add_argument(
@@ -343,6 +372,7 @@ def build_predictor(name: str, args: argparse.Namespace) -> TimestampPredictor:
 def main() -> None:
     args = parse_args()
     logging.basicConfig(level=logging.INFO)
+    _silence_third_party_logs()
 
     random.seed(args.seed)
     np.random.seed(args.seed)
@@ -395,4 +425,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
