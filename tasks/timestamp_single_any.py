@@ -475,6 +475,8 @@ class SingleTimestampAnyTask(BaseTask):
         inputs = model_adapter.build_base_inputs(prompt, audio)
         inputs = inputs.to(torch.cuda.current_device())
 
+        inputs['input_features'] = inputs['input_features'].to(model_adapter.dtype) # audio flamingo for some reason emits float32 input_features
+
         generated_string = model_adapter.generate(**inputs, max_new_tokens=32, decode_tokens=True)
         logging.info(f"[ANY] Generated string: {generated_string}")
         match = re.findall(r'\d+\.\d+', generated_string)
