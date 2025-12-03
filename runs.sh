@@ -335,3 +335,17 @@ EXCLUDE_NODES="--exclude=h012"
 # sbatch $EXCLUDE_NODES scripts/anvil/accelerate_4_gpu_bf16_run.sh configs/qwen7b/librispeech/timestamp_any/tuning/poisson+bidirectional_audio[start][bias_-6][bf16][epoch_8].yaml
 # sbatch $EXCLUDE_NODES scripts/anvil/accelerate_4_gpu_bf16_run.sh configs/qwen7b/librispeech/timestamp_any/tuning/poisson+bidirectional_audio[start][bias_-6][bf16][upscale_4][epoch_8].yaml
 
+# qwen3b libricount lr tuning
+sbatch $EXCLUDE_NODES scripts/anvil/accelerate_4_gpu_bf16_run.sh configs/qwen3b/libricount/timestamp_single/tuning/token+bidirectional_audio[start][bf16][lr_1e-6].yaml
+sbatch $EXCLUDE_NODES scripts/anvil/accelerate_4_gpu_bf16_run.sh configs/qwen3b/libricount/timestamp_single/tuning/poisson+bidirectional_audio[start][bias_-6.9][bf16][upscale_4][lr_1e-6].yaml
+sbatch $EXCLUDE_NODES scripts/anvil/accelerate_4_gpu_bf16_run.sh configs/qwen3b/libricount/timestamp_single/tuning/token+bidirectional_audio[start][bf16][lr_3e-6].yaml
+sbatch $EXCLUDE_NODES scripts/anvil/accelerate_4_gpu_bf16_run.sh configs/qwen3b/libricount/timestamp_single/tuning/poisson+bidirectional_audio[start][bias_-6.9][bf16][upscale_4][lr_3e-6].yaml
+sbatch $EXCLUDE_NODES scripts/anvil/accelerate_4_gpu_bf16_run.sh configs/qwen3b/libricount/timestamp_single/tuning/token+bidirectional_audio[start][bf16][lr_7e-6].yaml
+sbatch $EXCLUDE_NODES scripts/anvil/accelerate_4_gpu_bf16_run.sh configs/qwen3b/libricount/timestamp_single/tuning/poisson+bidirectional_audio[start][bias_-6.9][bf16][upscale_4][lr_7e-6].yaml
+
+# qwen3b libricount linear bias tuning
+sbatch $EXCLUDE_NODES scripts/anvil/accelerate_4_gpu_bf16_run.sh configs/qwen3b/libricount/timestamp_single/poisson+bidirectional_audio[start][bias_-5.5][bf16][upscale_4][lr_5e-6].yaml
+
+# qwen3b libricount no schedule
+sbatch $EXCLUDE_NODES scripts/anvil/accelerate_4_gpu_bf16_run.sh configs/qwen3b/libricount/timestamp_single/tuning/token+bidirectional_audio[start][bf16][lr_5e-6][no_schedule].yaml
+sbatch $EXCLUDE_NODES scripts/anvil/accelerate_4_gpu_bf16_run.sh configs/qwen3b/libricount/timestamp_single/tuning/poisson+bidirectional_audio[start][bias_-6.9][bf16][upscale_4][lr_5e-6][no_schedule].yaml

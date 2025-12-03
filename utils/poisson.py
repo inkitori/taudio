@@ -55,23 +55,23 @@ def poisson_loss(log_hazard, label_mask, frame_mask):
 
 
 def infer_timestamps(n_pred, log_hazards):
-    # input: scalar (number of predictions), np.array (log-hazard values)
-    hazards = np.exp(log_hazards)
-    total_hazard = np.sum(hazards)
-    medians = beta_medians(n_pred)
+    # # input: scalar (number of predictions), np.array (log-hazard values)
+    # hazards = np.exp(log_hazards)
+    # total_hazard = np.sum(hazards)
+    # medians = beta_medians(n_pred)
 
-    # return the inverse cumulative hazard
-    return np.interp(medians * total_hazard, np.cumsum(np.insert(hazards, 0, 0)), np.arange(log_hazards.shape[0]+1))
-    # """
-    # Infer timestamps using the Mode (Peak Finding) strategy.
+    # # return the inverse cumulative hazard
+    # return np.interp(medians * total_hazard, np.cumsum(np.insert(hazards, 0, 0)), np.arange(log_hazards.shape[0]+1))
+    """
+    Infer timestamps using the Mode (Peak Finding) strategy.
     
-    # Args:
-    #     n_pred (int): Number of events to predict.
-    #     log_hazards (np.array): Shape (seq_len,), log intensity values.
+    Args:
+        n_pred (int): Number of events to predict.
+        log_hazards (np.array): Shape (seq_len,), log intensity values.
         
-    # Returns:
-    #     np.array: Shape (n_pred,), sorted timestamps (indices).
-    # """
+    Returns:
+        np.array: Shape (n_pred,), sorted timestamps (indices).
+    """
     # from scipy.signal import find_peaks
     # n_pred = int(n_pred)
     # if n_pred == 0:
@@ -119,6 +119,87 @@ def infer_timestamps(n_pred, log_hazards):
     # # 3. Sort by time (timestamps must be sequential) and cast to float
     # # to match the original output type of interpolation
     # return np.sort(selected_timestamps).astype(float)
+    """
+    Infers timestamps by finding the highest accuracy windows (peaks),
+    then minimizing L1 loss locally within those windows.
+    
+    Args:
+        n_pred (int): Number of timestamps to predict.
+        log_hazards (np.array): Log-hazard (or log-probability) values.
+        frame_ms (float): Duration of one frame in ms (default 40).
+        tolerance_ms (float): The tolerance radius for accuracy (default 100).
+                              Total window size will be +/- tolerance.
+                              
+    Returns:
+        np.array: Predicted timestamp indices (float).
+    """
+    frame_ms = 10
+    tolerance_ms = 100
+
+    hazards = np.exp(log_hazards)
+    
+    # 1. Define the Window Size
+    # We want a window of +/- 100ms (Total 200ms)
+    # If frame is 40ms, 200/40 = 5 frames.
+    window_frames = int((tolerance_ms * 2) / frame_ms)
+    
+    # Ensure window is odd so it has a distinct center
+    if window_frames % 2 == 0:
+        window_frames += 1
+        
+    half_window = window_frames // 2
+    
+    # Create a convolution kernel to find 'Mass within Window'
+    kernel = np.ones(window_frames)
+    
+    # We work on a copy so we can "suppress" peaks as we find them
+    search_probs = hazards.copy()
+    
+    predicted_indices = []
+
+    for _ in range(int(n_pred)):
+        # 2. Convolve to find the region with Maximum Accuracy
+        # (The window with the highest sum of probability)
+        # Using 'same' keeps the indices aligned with the original array
+        window_sums = np.convolve(search_probs, kernel, mode='same')
+        
+        # Find the center index of the best window
+        # This maximizes P(hit) within tolerance
+        global_peak_idx = np.argmax(window_sums)
+        
+        # If the max probability is effectively 0, stop (no more events found)
+        if window_sums[global_peak_idx] < 1e-9:
+            break
+
+        # 3. Local Refinement: Minimize L1 Loss (Local Median)
+        # We look strictly inside the winning window
+        start = max(0, global_peak_idx - half_window)
+        end = min(len(hazards), global_peak_idx + half_window + 1)
+        
+        local_mass = hazards[start:end]
+        
+        # Calculate Local Median within this specific window
+        # (Normalize so it sums to 1, then find 0.5 crossing)
+        local_cumsum = np.cumsum(local_mass)
+        total_local_mass = local_cumsum[-1]
+        
+        if total_local_mass > 0:
+            # searchsorted finds the first index where value >= target
+            median_offset = np.searchsorted(local_cumsum, total_local_mass * 0.5)
+            refined_idx = start + median_offset
+        else:
+            refined_idx = global_peak_idx
+
+        predicted_indices.append(refined_idx)
+        
+        # 4. Suppression (The "Greedy" step)
+        # Zero out the mass in this window so the next iteration 
+        # finds the *next* highest peak, not the same one.
+        # We suppress the full window area.
+        search_probs[start:end] = 0
+
+    # Return sorted indices (as floats)
+    return np.sort(np.array(predicted_indices))
 
 
 def poisson_count_loss(log_hazard, counts, frame_mask):
