@@ -133,6 +133,78 @@ def infer_timestamps(n_pred, log_hazards):
     Returns:
         np.array: Predicted timestamp indices (float).
     """
+    
+    # ARGMAX STRATEGY
+
+    # best_idx = int(np.argmax(log_hazards))
+    # # match previous format: 1-D float array of timestamps
+    # return np.array([best_idx], dtype=float)
+
+    # NON OVERLAPPING WINDOWS STRATEGY
+
+    # frame_ms = 10
+    # tolerance_ms = 50
+
+    # hazards = np.exp(log_hazards)
+    
+    # # 1. Define the Window Size (Fixed Frame Size)
+    # # Total window is 2x tolerance (e.g., 100ms)
+    # window_frames = int((tolerance_ms * 2) / frame_ms)
+    
+    # # (Optional) Ensure window is odd if you prefer, 
+    # # though for fixed tiling even numbers are fine.
+    # if window_frames % 2 == 0:
+    #     window_frames += 1
+
+    # # 2. Reshape into Non-Overlapping Windows
+    # # We truncate the end of the array to make it divisible by window_frames
+    # n_windows = len(hazards) // window_frames
+    # trunc_len = n_windows * window_frames
+    
+    # # Create a view of the array as distinct blocks
+    # # Shape becomes: (Number of Windows, Frames per Window)
+    # tiled_hazards = hazards[:trunc_len].reshape(n_windows, window_frames)
+    
+    # # 3. Calculate Mass for every window at once
+    # # Sum along axis 1 (summing mass inside each window)
+    # window_sums = tiled_hazards.sum(axis=1)
+    
+    # # 4. Select the Top 'n_pred' Windows
+    # # We filter for the requested number of events, ensuring we don't exceed available windows
+    # count_to_pick = min(int(n_pred), n_windows)
+    
+    # # argsort gives indices of windows sorted by mass (ascending), 
+    # # we take the last 'count_to_pick' and reverse to get descending order
+    # top_window_indices = np.argsort(window_sums)[-count_to_pick:][::-1]
+    
+    # predicted_indices = []
+
+    # for w_idx in top_window_indices:
+    #     # If the window mass is effectively 0, skip
+    #     if window_sums[w_idx] < 1e-9:
+    #         continue
+
+    #     # 5. Local Refinement: Minimize L1 Loss (Local Median)
+    #     # We work directly with the specific row in our tiled matrix
+    #     local_mass = tiled_hazards[w_idx]
+        
+    #     local_cumsum = np.cumsum(local_mass)
+    #     total_local_mass = local_cumsum[-1]
+        
+    #     # Find the offset within this specific window where we cross 50% mass
+    #     median_offset = np.searchsorted(local_cumsum, total_local_mass * 0.5)
+        
+    #     # 6. Map back to Global Index
+    #     # Global Index = (Window Index * Window Size) + Local Offset
+    #     global_idx = (w_idx * window_frames) + median_offset
+        
+    #     predicted_indices.append(global_idx)
+
+    # # Return sorted indices
+    # return np.sort(np.array(predicted_indices))
+
+    # OVERLAPPING WINDOWS STRATEGY
+
     frame_ms = 10
     tolerance_ms = 100
 
@@ -200,6 +272,134 @@ def infer_timestamps(n_pred, log_hazards):
 
     # Return sorted indices (as floats)
     return np.sort(np.array(predicted_indices))
+
+    # OVERLAPPING WINDOWS TRIANGULAR KERNEL
+
+    # frame_ms = 10
+    # tolerance_ms = 50
+
+    # hazards = np.exp(log_hazards)
+
+    # # 1. Define the Window Size
+    # window_frames = int((tolerance_ms * 2) / frame_ms)
+
+    # # Ensure window is odd so it has a distinct center
+    # if window_frames % 2 == 0:
+    #     window_frames += 1
+        
+    # half_window = window_frames // 2
+
+    # # --- MODIFIED SECTION START ---
+    # # Create a Triangular Kernel
+    # # Instead of np.ones(window_frames), we create a ramp up and down.
+    # # For a window of 5, this creates: [1, 2, 3, 2, 1]
+    # ramp_up = np.arange(1, half_window + 2)
+    # ramp_down = np.arange(half_window, 0, -1)
+    # kernel = np.concatenate((ramp_up, ramp_down))
+
+    # # Optional: Normalize the kernel so the peak value reflects probability magnitude
+    # # (Not strictly necessary for argmax, but good for debugging)
+    # # kernel = kernel / kernel.sum()
+    # # --- MODIFIED SECTION END ---
+
+    # search_probs = hazards.copy()
+
+    # predicted_indices = []
+
+    # for _ in range(int(n_pred)):
+    #     # 2. Convolve to find the region with Maximum Weighted Accuracy
+    #     window_sums = np.convolve(search_probs, kernel, mode='same')
+        
+    #     global_peak_idx = np.argmax(window_sums)
+        
+    #     if window_sums[global_peak_idx] < 1e-9:
+    #         break
+
+    #     # 3. Local Refinement: Minimize L1 Loss (Local Median)
+    #     start = max(0, global_peak_idx - half_window)
+    #     end = min(len(hazards), global_peak_idx + half_window + 1)
+        
+    #     local_mass = hazards[start:end]
+        
+    #     local_cumsum = np.cumsum(local_mass)
+    #     total_local_mass = local_cumsum[-1]
+        
+    #     if total_local_mass > 0:
+    #         median_offset = np.searchsorted(local_cumsum, total_local_mass * 0.5)
+    #         refined_idx = start + median_offset
+    #     else:
+    #         refined_idx = global_peak_idx
+
+    #     predicted_indices.append(refined_idx)
+        
+    #     # 4. Suppression
+    #     # Note: We still suppress the 'box' area to prevent re-detecting the same peak
+    #     search_probs[start:end] = 0
+
+    # return np.sort(np.array(predicted_indices))
+
+    # OVERLAPPING WINDOWS GAUSSIAN KERNEL
+    # frame_ms = 10
+    # tolerance_ms = 50
+
+    # hazards = np.exp(log_hazards)
+
+    # # 1. Define the Window Size
+    # window_frames = int((tolerance_ms * 2) / frame_ms)
+
+    # if window_frames % 2 == 0:
+    #     window_frames += 1
+        
+    # half_window = window_frames // 2
+
+    # # --- MODIFIED SECTION START ---
+    # # Create a Gaussian Kernel
+    # # We define sigma so that the window edges (half_window) are 3 standard deviations away.
+    # sigma = half_window / 3.0
+
+    # # Create an array of indices centered at 0: [-2, -1, 0, 1, 2]
+    # x = np.linspace(-half_window, half_window, window_frames)
+
+    # # Calculate Gaussian: e^(-x^2 / 2*sigma^2)
+    # kernel = np.exp(-0.5 * (x / sigma) ** 2)
+    # # --- MODIFIED SECTION END ---
+
+    # search_probs = hazards.copy()
+
+    # predicted_indices = []
+
+    # for _ in range(int(n_pred)):
+    #     # 2. Convolve
+    #     window_sums = np.convolve(search_probs, kernel, mode='same')
+        
+    #     global_peak_idx = np.argmax(window_sums)
+        
+    #     # Check if peak is effectively zero
+    #     if window_sums[global_peak_idx] < 1e-9:
+    #         break
+
+    #     # 3. Local Refinement: Minimize L1 Loss
+    #     start = max(0, global_peak_idx - half_window)
+    #     end = min(len(hazards), global_peak_idx + half_window + 1)
+        
+    #     local_mass = hazards[start:end]
+    #     local_cumsum = np.cumsum(local_mass)
+    #     total_local_mass = local_cumsum[-1]
+        
+    #     if total_local_mass > 0:
+    #         median_offset = np.searchsorted(local_cumsum, total_local_mass * 0.5)
+    #         refined_idx = start + median_offset
+    #     else:
+    #         refined_idx = global_peak_idx
+
+    #     predicted_indices.append(refined_idx)
+        
+    #     # 4. Suppression
+    #     # We still use 'hard' suppression (zeroing out the box) so we don't 
+    #     # find the same peak twice.
+    #     search_probs[start:end] = 0
+
+    # return np.sort(np.array(predicted_indices))
 
 
 def poisson_count_loss(log_hazard, counts, frame_mask):
