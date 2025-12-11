@@ -354,6 +354,12 @@ EXCLUDE_NODES="--exclude=h012"
 
 # Qwen 2.5 Omni 3B
 
+# LibriSpeech Clean
+
+# 1e-6 lr
+sbatch $EXCLUDE_NODES scripts/anvil/accelerate_4_gpu_bf16_run.sh configs/qwen3b/librispeech/timestamp_any/new_inference/token[start][bf16][lr_1e-6][epoch_3][no_schedule].yaml
+sbatch $EXCLUDE_NODES scripts/anvil/accelerate_4_gpu_bf16_run.sh configs/qwen3b/librispeech/timestamp_any/new_inference/poisson[start][bias_-6][bf16][upscale_4][lr_1e-6][epoch_3][no_schedule].yaml
+
 # LibriSpeech Other
 
 # 5e-5 lr
