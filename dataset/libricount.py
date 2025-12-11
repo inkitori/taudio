@@ -9,6 +9,7 @@ from utils.utils import round_timestamp_python
 from .base_dataset_adapter import BaseDatasetAdapter
 
 class LibriCountAdapter(BaseDatasetAdapter):
+    EVENT_NAME = "speaker"
     def load_streaming_split(self, split: str):
         ds = load_dataset(self.repository, split=split, streaming=True)
         ds = ds.cast_column("audio", Audio(sampling_rate=self.sampling_rate))

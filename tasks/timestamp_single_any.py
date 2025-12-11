@@ -7,6 +7,7 @@ import torch.nn as nn
 import math
 import re
 from nltk.corpus import stopwords
+import textwrap
 
 from dataset.base_dataset_adapter import BaseDatasetAdapter
 from models.base_model_adapter import BaseModelAdapter
@@ -135,12 +136,18 @@ class SingleTimestampAnyTask(BaseTask):
         # Training supervision: include expected JSON as assistant text when not in eval
         if not eval_mode:
             seconds = ds_adapter.get_target_seconds(event, self.key)
-            word_json = '{"%s": %s}' % (name, seconds)
+            expected_json = textwrap.dedent('''\
+            ```json
+            [
+                {"%s": "%s", "start": %s}
+            ]
+            ```''') % (ds_adapter.EVENT_NAME, name, seconds)
+
             conversation.append(
                 {
                     "role": "assistant",
                     "content": [
-                        {"type": "text", "text": f"{word_json}"},
+                        {"type": "text", "text": f"{expected_json}"},
                     ],
                 }
             )
@@ -183,7 +190,7 @@ class SingleTimestampAnyTask(BaseTask):
             model_processor=processor, ds_adapter=ds_adapter, event=event, ordinal=ordinal, eval_mode=eval_mode
         )
 
-        logging.info(f"[ANY] Prompt text: {prompt_text}")
+        logging.info(f"[ANY] Prompt text:\n {prompt_text}")
 
         inputs = processor(
             text=prompt_text,
@@ -258,12 +265,24 @@ class SingleTimestampAnyTask(BaseTask):
         inputs = inputs.to(next(model.parameters()).device)
 
         generated_string = model.generate(**inputs)
-        logging.info(f"[ANY] Token prediction: {generated_string}, GT: {gt}")
+        logging.info(f"[ANY] Token prediction: \n{generated_string}\n, GT: {gt}")
+
+        triple_backtick_match = re.search(r"```json(.*?)```", generated_string, re.DOTALL)
+        json_candidate = triple_backtick_match.group(1).strip() if triple_backtick_match else None
+        if json_candidate is None:
+            brace_match = re.search(r"\[.*\]", generated_string, re.DOTALL)
+            if brace_match:
+                json_candidate = brace_match.group(0).strip()
         try:
-            token_pred = json.loads(generated_string)[name]
+            token_pred = json.loads(json_candidate)[0]['start']
         except Exception:
-            abs_err = ds_adapter.get_audio_frames(example).size / (2 * model.model_adapter.sampling_rate)
-            return {"token_abs_error_sum": abs_err, "token_correct": 0.0, "parsing_error": 1.0}
+            match = re.findall(r'\d+\.\d+', generated_string)
+            if match:
+                token_pred = float(match[0])
+                logging.info(f"[ANY] Fallback numeric extraction: {str(token_pred)}, GT: {str(gt)}")
+            else:
+                abs_err = ds_adapter.get_audio_frames(example).size / (2 * model.model_adapter.sampling_rate)
+                return {"token_abs_error_sum": abs_err, "token_correct": 0.0, "parsing_error": 1.0}
 
         # Metric increments
         token_pred = round_timestamp_python(float(token_pred))
@@ -456,6 +475,8 @@ class SingleTimestampAnyTask(BaseTask):
         return False
 
     def evaluate_tokens_base(self, example: Dict[str, Any], ds_adapter: BaseDatasetAdapter, model_adapter: BaseModelAdapter) -> Dict[str, Any]:
+        # from models.audio_flamingo3_adapter import AudioFlamingo3Adapter
+
         events = list(ds_adapter.get_events(example))
         event = self._choose_event(events=events, ds_adapter=ds_adapter, apply_fallback=False)
 
@@ -468,28 +489,63 @@ class SingleTimestampAnyTask(BaseTask):
 
         # Build a base prompt suitable for token-level decoding
         base_question = ds_adapter.get_timestamp_single_any_prompt(name, self.key, ordinal)
-        prompt = f"{base_question} Respond with only the timestamp in seconds, like '2.435'."
+        prompt_text = f'{base_question} Respond in JSON format with the time in seconds.'
+        generation_prefix = textwrap.dedent(f'''\
+        ```json
+        [
+            {{\"{ds_adapter.EVENT_NAME}\": \"{name}\", "start": ''')
 
-        logging.info(f"[ANY] Prompt: {prompt}")
+        logging.info(f"[ANY] Prompt with prefix: {prompt_text} | Prefix: {generation_prefix}")
 
-        inputs = model_adapter.build_base_inputs(prompt, audio)
+        inputs = model_adapter.build_base_inputs(prompt_text, audio, generation_prefix=generation_prefix)
         inputs = inputs.to(torch.cuda.current_device())
 
-        inputs['input_features'] = inputs['input_features'].to(model_adapter.dtype) # audio flamingo for some reason emits float32 input_features
+  
+        # if isinstance(model_adapter, AudioFlamingo3Adapter):
+        #     inputs['input_features'] = inputs['input_features'].to(model_adapter.dtype) # audio flamingo for some reason emits float32 input_features
 
         generated_string = model_adapter.generate(**inputs, max_new_tokens=32, decode_tokens=True)
-        logging.info(f"[ANY] Generated string: {generated_string}")
-        match = re.findall(r'\d+\.\d+', generated_string)
-        if match:
-            token_pred = float(match[-1])
-            logging.info(f"[ANY] Token prediction: {str(token_pred)}, GT: {str(gt)}")
-        else:
-            token_pred = float(audio["array"].size / (2 * audio["sampling_rate"]))
+        full_generation = f"{generation_prefix}{generated_string}"
+        # logging.info(f"[ANY] Generated string: {generated_string}")
+        logging.info(f"[ANY] Full generation: \n{full_generation}")
+
+        token_pred: Optional[float] = None
+
+        triple_backtick_match = re.search(r"```json(.*?)```", full_generation, re.DOTALL)
+        json_candidate = triple_backtick_match.group(1).strip() if triple_backtick_match else None
+        if json_candidate is None:
+            brace_match = re.search(r"\[.*\]", full_generation, re.DOTALL)
+            if brace_match:
+                json_candidate = brace_match.group(0).strip()
+
+        if json_candidate:
+            try:
+                parsed = json.loads(json_candidate)
+                token_pred = float(parsed[0]['start'])
+            except Exception:
+                token_pred = None
+
+        if token_pred is None:
+            match = re.findall(r'\d+\.\d+', generated_string)
+            if match:
+                token_pred = float(match[0])
+                logging.info(f"[ANY] Fallback numeric extraction: {str(token_pred)}, GT: {str(gt)}")
+
+        audio_duration = audio["array"].size / audio["sampling_rate"]
+
+        logging.info(f"[ANY] Audio Duration: {audio_duration}")
+
+        if token_pred is None:
+            token_pred = float(audio_duration / 2)
             logging.info(f"[ANY] Falling back to half the audio frames size: {token_pred}")
 
         # Metric increments
         token_pred = round_timestamp_python(float(token_pred))
         abs_err = round_timestamp_python(abs(float(token_pred) - float(gt)))
+
+        token_pred = clamp(token_pred, 0, audio_duration)
+
+        logging.info(f"[ANY] Token Prediction: {str(token_pred)}, Ground Truth: {str(gt)}")
 
         metrics: Dict[str, float] = {
             "token_abs_error_sum": abs_err,

@@ -18,6 +18,7 @@ def start_filter_fn(example):
     return True
 
 class AudioSetAdapter(BaseDatasetAdapter):
+    EVENT_NAME = "event"
     def load_streaming_split(self, split: str):
         ds = load_dataset(self.repository, split=split, streaming=True)
         ds = ds.cast_column("audio", Audio(sampling_rate=self.sampling_rate))
@@ -26,8 +27,8 @@ class AudioSetAdapter(BaseDatasetAdapter):
         return ds
 
     def load_split(self, split: str):
-        if split == "test":
-            split = "eval"
+        # if split == "test":
+        #     split = "eval"
 
         effective_split = split
         if split == 'dev':

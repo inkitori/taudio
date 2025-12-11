@@ -7,6 +7,8 @@ from .base_dataset_adapter import BaseDatasetAdapter
 from utils.utils import round_timestamp_python
 
 class LibriSpeechAdapter(BaseDatasetAdapter):
+    EVENT_NAME = "word"
+
     def load_streaming_split(self, split: str):
         ds = load_dataset(self.repository, split=split, streaming=True)
         ds = ds.cast_column("audio", Audio(sampling_rate=self.sampling_rate))

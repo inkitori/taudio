@@ -1,7 +1,7 @@
 from torch import nn
 import torch
 from contextlib import contextmanager
-from typing import Any
+from typing import Any, Optional
 
 
 class BaseModelAdapter(nn.Module):
@@ -53,6 +53,9 @@ class BaseModelAdapter(nn.Module):
 
     def generate(self, **kwargs):
         # must call bidirectional_audio_context if bidirectional_audio is True
+        raise NotImplementedError
+
+    def build_base_inputs(self, prompt: str, audio: Any, generation_prefix: Optional[str] = None):
         raise NotImplementedError
 
     # Model-specific helpers

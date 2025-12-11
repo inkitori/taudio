@@ -1,6 +1,6 @@
 import numpy as np
 
-from typing import Any
+from typing import Any, Optional
 
 import torch
 import torch.nn as nn
@@ -56,7 +56,7 @@ class VoxtralAdapter(BaseModelAdapter):
         return self.base_model.model
 
 
-    def build_base_inputs(self, prompt: str, audio):
+    def build_base_inputs(self, prompt: str, audio, generation_prefix: Optional[str] = None):
         audio_path = ensure_audio_path(audio)
         conversation = [
             {
@@ -68,9 +68,25 @@ class VoxtralAdapter(BaseModelAdapter):
             },
         ]
 
-        inputs = self.processor.apply_chat_template(
-            conversation,
-            # add_generation_prompt=True,
-            return_tensors="pt",)
+        if generation_prefix is not None:
+            conversation.append(
+                {
+                    "role": "assistant",
+                    "content": [{"type": "text", "text": generation_prefix}],
+                },
+            )
+
+
+        if generation_prefix is None:
+            inputs = self.processor.apply_chat_template(
+                conversation,
+                # add_generation_prompt=True, add_generation_prompt not supported by voxtral
+                return_tensors="pt",)
+        else:
+            inputs = self.processor.apply_chat_template(
+                conversation,
+                continue_final_message=True,
+                return_tensors="pt",)
+
 
         return inputs

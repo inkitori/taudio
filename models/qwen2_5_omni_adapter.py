@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Optional
 
 import torch
 import torch.nn as nn
@@ -25,6 +25,7 @@ class Qwen2_5OmniAdapter(BaseModelAdapter):
             torch_dtype=dtype,
         )
 
+
         # Convenience references
         self._processor = Qwen2_5OmniProcessor.from_pretrained(model_id)
         self.bidirectional_audio = bidirectional_audio
@@ -36,6 +37,8 @@ class Qwen2_5OmniAdapter(BaseModelAdapter):
             self.constants = qwen_7b_constants
         else:
             raise ValueError(f"Unsupported model: {model_id}")
+
+        self.base_model.generation_config.eos_token_id = self.constants.EOS_TOKEN_IDS
 
     # --- START: NEW HELPER PROPERTY ---
     @property
@@ -103,8 +106,8 @@ class Qwen2_5OmniAdapter(BaseModelAdapter):
             tokens = self.base_model.generate(**kwargs)
 
             if decode_tokens:
-                generated_tokens = tokens[0][kwargs["input_ids"].shape[1]:-1]
-                generated_string = self.processor.tokenizer.decode(generated_tokens)
+                generated_tokens = tokens[0][kwargs["input_ids"].shape[1]:]
+                generated_string = self.processor.tokenizer.decode(generated_tokens, skip_special_tokens=True)
                 return generated_string
             else:
                 return tokens
@@ -195,7 +198,7 @@ class Qwen2_5OmniAdapter(BaseModelAdapter):
             self._unpatch_causal_mask()
             logging.debug("Restored original causal mask settings")
     
-    def build_base_inputs(self, prompt: str, audio):
+    def build_base_inputs(self, prompt: str, audio, generation_prefix: Optional[str] = None):
         # audio_path = ensure_audio_path(audio)
         conversation = [
             {
@@ -216,7 +219,25 @@ class Qwen2_5OmniAdapter(BaseModelAdapter):
             },
         ]
 
-        conversation_template = self.processor.apply_chat_template(conversation, tokenize=False, add_generation_prompt=True)
+        if generation_prefix is not None:
+            conversation.append(
+                {
+                    "role": "assistant",
+                    "content": [{"type": "text", "text": generation_prefix}],
+                },
+            )
+
+		# if we have a generation prefix, we don't want to add the generation prompt
+        if generation_prefix is None:
+            conversation_template = self.processor.apply_chat_template(conversation, tokenize=False, add_generation_prompt=True)
+        else:
+            conversation_template = self.processor.apply_chat_template(conversation, tokenize=False, continue_final_message=True)
+
+        if generation_prefix:
+            logging.debug(f"[Qwen2.5Omni] Using generation prefix: {generation_prefix}")
+            logging.debug(f"[Qwen2.5Omni] Conversation template tail: {conversation_template[-200:]}")
+
+        logging.info(f"[Qwen2.5Omni] Conversation Template: {conversation_template}")
 
         inputs = self.processor(
             text=conversation_template,
