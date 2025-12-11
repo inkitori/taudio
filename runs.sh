@@ -405,3 +405,11 @@ sbatch $EXCLUDE_NODES scripts/anvil/accelerate_4_gpu_bf16_run.sh configs/qwen3b/
 # 1e-6 lr
 sbatch $EXCLUDE_NODES scripts/anvil/accelerate_4_gpu_bf16_run.sh configs/qwen3b/audioset_balanced/timestamp_any/new_inference/poisson[start][bias_-6.9][bf16][upscale_4][lr_1e-6][no_schedule][epoch_3].yaml
 sbatch $EXCLUDE_NODES scripts/anvil/accelerate_4_gpu_bf16_run.sh configs/qwen3b/audioset_balanced/timestamp_any/new_inference/poisson[start][bias_-6.9][bf16][upscale_4][lr_1e-6][no_schedule][epoch_12].yaml
+
+# Qwen 2.5 Omni 7B
+
+# LibriSpeech Clean
+
+# 1e-6 lr
+sbatch $EXCLUDE_NODES scripts/anvil/accelerate_4_gpu_bf16_run.sh configs/qwen7b/librispeech/timestamp_any/new_inference/token[start][bf16][lr_1e-6][epoch_7][no_schedule].yaml 
+sbatch $EXCLUDE_NODES scripts/anvil/accelerate_4_gpu_bf16_run.sh configs/qwen7b/librispeech/timestamp_any/new_inference/poisson[start][bias_-6][bf16][upscale_4][lr_1e-6][epoch_7][no_schedule].yaml
