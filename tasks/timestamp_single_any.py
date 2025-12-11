@@ -276,12 +276,13 @@ class SingleTimestampAnyTask(BaseTask):
         try:
             token_pred = json.loads(json_candidate)[0]['start']
         except Exception:
-            match = re.findall(r'\d+\.\d+', generated_string)
+            match = re.findall(r"\d+(?:\.\d+)?", generated_string)
             if match:
                 token_pred = float(match[0])
                 logging.info(f"[ANY] Fallback numeric extraction: {str(token_pred)}, GT: {str(gt)}")
             else:
                 abs_err = ds_adapter.get_audio_frames(example).size / (2 * model.model_adapter.sampling_rate)
+                logging.info(f"[ANY] Parsing Error (check generated_string)")
                 return {"token_abs_error_sum": abs_err, "token_correct": 0.0, "parsing_error": 1.0}
 
         # Metric increments
@@ -526,7 +527,7 @@ class SingleTimestampAnyTask(BaseTask):
                 token_pred = None
 
         if token_pred is None:
-            match = re.findall(r'\d+\.\d+', generated_string)
+            match = re.findall(r"\d+(?:\.\d+)?", generated_string)
             if match:
                 token_pred = float(match[0])
                 logging.info(f"[ANY] Fallback numeric extraction: {str(token_pred)}, GT: {str(gt)}")
