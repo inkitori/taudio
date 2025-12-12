@@ -360,51 +360,17 @@ EXCLUDE_NODES="--exclude=h012"
 sbatch $EXCLUDE_NODES scripts/anvil/accelerate_4_gpu_bf16_run.sh configs/qwen3b/librispeech/timestamp_any/new_inference/token[start][bf16][lr_1e-6][epoch_3][no_schedule].yaml
 sbatch $EXCLUDE_NODES scripts/anvil/accelerate_4_gpu_bf16_run.sh configs/qwen3b/librispeech/timestamp_any/new_inference/poisson[start][bias_-6][bf16][upscale_4][lr_1e-6][epoch_3][no_schedule].yaml
 
-# LibriSpeech Other
-
-# 5e-5 lr
-sbatch $EXCLUDE_NODES scripts/anvil/accelerate_4_gpu_bf16_run.sh configs/qwen3b/librispeech_other/timestamp_any/new_inference/token[start][bf16][lr_5e-5][epoch_3][no_schedule].yaml
-
-# 1e-5 lr
-sbatch $EXCLUDE_NODES scripts/anvil/accelerate_4_gpu_bf16_run.sh configs/qwen3b/librispeech_other/timestamp_any/new_inference/token[start][bf16][lr_1e-5][epoch_3][no_schedule].yaml
-
-# 1e-6 lr
-sbatch $EXCLUDE_NODES scripts/anvil/accelerate_4_gpu_bf16_run.sh configs/qwen3b/librispeech_other/timestamp_any/new_inference/token[start][bf16][lr_1e-6][epoch_3][no_schedule].yaml
-sbatch $EXCLUDE_NODES scripts/anvil/accelerate_4_gpu_bf16_run.sh configs/qwen3b/librispeech_other/timestamp_any/new_inference/poisson[start][bias_-6][bf16][upscale_4][lr_1e-6][epoch_3][no_schedule].yaml
-
 # LibriCount
 
-# 1e-5 lr
-sbatch $EXCLUDE_NODES scripts/anvil/accelerate_4_gpu_bf16_run.sh configs/qwen3b/libricount/timestamp_single/new_inference/token[start][bf16][lr_1e-5][no_schedule][epoch_3].yaml
-sbatch $EXCLUDE_NODES scripts/anvil/accelerate_4_gpu_bf16_run.sh configs/qwen3b/libricount/timestamp_single/new_inference/poisson[start][bias_-6.9][bf16][upscale_4][lr_1e-5][no_schedule][epoch_3].yaml
-
-# 5e-6 lr
-sbatch $EXCLUDE_NODES scripts/anvil/accelerate_4_gpu_bf16_run.sh configs/qwen3b/libricount/timestamp_single/new_inference/token[start][bf16][lr_5e-6][no_schedule][epoch_3].yaml
-sbatch $EXCLUDE_NODES scripts/anvil/accelerate_4_gpu_bf16_run.sh configs/qwen3b/libricount/timestamp_single/new_inference/poisson[start][bias_-6.9][bf16][upscale_4][lr_5e-6][no_schedule][epoch_3].yaml
-
 # 1e-6 lr
-sbatch $EXCLUDE_NODES scripts/anvil/accelerate_4_gpu_bf16_run.sh configs/qwen3b/libricount/timestamp_single/new_inference/token[start][bf16][lr_1e-6][no_schedule][epoch_3].yaml
-sbatch $EXCLUDE_NODES scripts/anvil/accelerate_4_gpu_bf16_run.sh configs/qwen3b/libricount/timestamp_single/new_inference/poisson[start][bias_-6.9][bf16][upscale_4][lr_1e-6][no_schedule][epoch_3].yaml
+sbatch $EXCLUDE_NODES scripts/anvil/accelerate_4_gpu_bf16_run.sh configs/qwen3b/libricount/timestamp_any/new_inference/token[start][bf16][lr_1e-6][no_schedule][epoch_3].yaml
+sbatch $EXCLUDE_NODES scripts/anvil/accelerate_4_gpu_bf16_run.sh configs/qwen3b/libricount/timestamp_any/new_inference/poisson[start][bias_-6.9][bf16][upscale_4][lr_1e-6][no_schedule][epoch_3].yaml
 
 # Audioset Humans
 
-# 5e-6 lr
-sbatch $EXCLUDE_NODES scripts/anvil/accelerate_4_gpu_bf16_run.sh configs/qwen3b/audioset_humans/timestamp_any/new_inference/token[start][bf16][lr_5e-6][no_schedule][epoch_3].yaml
-sbatch $EXCLUDE_NODES scripts/anvil/accelerate_4_gpu_bf16_run.sh configs/qwen3b/audioset_humans/timestamp_any/new_inference/poisson[start][bias_-6.9][bf16][upscale_4][lr_5e-6][no_schedule][epoch_3].yaml
-
-# 3e-6 lr
-sbatch $EXCLUDE_NODES scripts/anvil/accelerate_4_gpu_bf16_run.sh configs/qwen3b/audioset_humans/timestamp_any/new_inference/token[start][bf16][lr_3e-6][no_schedule][epoch_3].yaml
-sbatch $EXCLUDE_NODES scripts/anvil/accelerate_4_gpu_bf16_run.sh configs/qwen3b/audioset_humans/timestamp_any/new_inference/poisson[start][bias_-6.9][bf16][upscale_4][lr_3e-6][no_schedule][epoch_3].yaml
-
 # 1e-6 lr
-sbatch $EXCLUDE_NODES scripts/anvil/accelerate_4_gpu_bf16_run.sh configs/qwen3b/audioset_humans/timestamp_any/new_inference/token[start][bf16][lr_1e-6][no_schedule][epoch_3].yaml
-sbatch $EXCLUDE_NODES scripts/anvil/accelerate_4_gpu_bf16_run.sh configs/qwen3b/audioset_humans/timestamp_any/new_inference/poisson[start][bias_-6.9][bf16][upscale_4][lr_1e-6][no_schedule][epoch_3].yaml
-
-# Audioset Balanced
-
-# 1e-6 lr
-sbatch $EXCLUDE_NODES scripts/anvil/accelerate_4_gpu_bf16_run.sh configs/qwen3b/audioset_balanced/timestamp_any/new_inference/poisson[start][bias_-6.9][bf16][upscale_4][lr_1e-6][no_schedule][epoch_3].yaml
-sbatch $EXCLUDE_NODES scripts/anvil/accelerate_4_gpu_bf16_run.sh configs/qwen3b/audioset_balanced/timestamp_any/new_inference/poisson[start][bias_-6.9][bf16][upscale_4][lr_1e-6][no_schedule][epoch_12].yaml
+sbatch $EXCLUDE_NODES scripts/anvil/accelerate_4_gpu_bf16_run.sh configs/qwen3b/audioset_humans_resampled/timestamp_any/token[start][bf16][lr_1e-6][epoch_3][no_schedule].yaml
+sbatch $EXCLUDE_NODES scripts/anvil/accelerate_4_gpu_bf16_run.sh configs/qwen3b/audioset_humans_resampled/timestamp_any/poisson[start][bias_-6][bf16][upscale_4][lr_1e-6][epoch_3][no_schedule].yaml
 
 # Qwen 2.5 Omni 7B
 
@@ -413,3 +379,9 @@ sbatch $EXCLUDE_NODES scripts/anvil/accelerate_4_gpu_bf16_run.sh configs/qwen3b/
 # 1e-6 lr
 sbatch $EXCLUDE_NODES scripts/anvil/accelerate_4_gpu_bf16_run.sh configs/qwen7b/librispeech/timestamp_any/new_inference/token[start][bf16][lr_1e-6][epoch_7][no_schedule].yaml 
 sbatch $EXCLUDE_NODES scripts/anvil/accelerate_4_gpu_bf16_run.sh configs/qwen7b/librispeech/timestamp_any/new_inference/poisson[start][bias_-6][bf16][upscale_4][lr_1e-6][epoch_7][no_schedule].yaml
+
+# LibriCount
+
+# 1e-6 lr
+sbatch $EXCLUDE_NODES scripts/anvil/accelerate_4_gpu_bf16_run.sh configs/qwen7b/libricount/timestamp_any/new_inference/token[start][bf16][lr_1e-6][no_schedule][epoch_3].yaml
+sbatch $EXCLUDE_NODES scripts/anvil/accelerate_4_gpu_bf16_run.sh configs/qwen7b/libricount/timestamp_any/new_inference/poisson[start][bias_-6.9][bf16][upscale_4][lr_1e-6][no_schedule][epoch_3].yaml
