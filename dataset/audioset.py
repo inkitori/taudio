@@ -53,8 +53,6 @@ class AudioSetAdapter(BaseDatasetAdapter):
         if self.take_first:
             ds = ds.select(range(self.take_first))
         
-        if self.key == "start":
-            ds = ds.filter(start_filter_fn)
         return ds
 
     def get_audio_frames(self, example: Dict[str, Any]) -> Dict[str, Any]:
