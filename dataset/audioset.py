@@ -43,7 +43,7 @@ class AudioSetAdapter(BaseDatasetAdapter):
                 ds = remove_indices(ds, eval_exclude_indices)
         
         if split in ['train', 'dev']:
-            ds = ds.train_test_split(test_size=0.05, seed=42)
+            ds = ds.train_test_split(test_size=0.05, seed=80)
             if split == 'train':
                 ds = ds['train']
             else:

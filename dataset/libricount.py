@@ -20,7 +20,7 @@ class LibriCountAdapter(BaseDatasetAdapter):
     def load_split(self, split: str):
         if split in ['train', 'dev']:
             ds = load_dataset(self.repository, split='train')
-            ds = ds.train_test_split(test_size=0.05, seed=42)
+            ds = ds.train_test_split(test_size=0.05, seed=80)
             if split == 'train':
                 ds = ds['train']
             else:
