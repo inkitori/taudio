@@ -296,7 +296,7 @@ def main():
     # Training loop
     epochs = 0 if args.load_checkpoint else training_config['epochs']
 
-    best_metric = float('inf') # infinite abs error is worst case
+    best_metric = float('-inf') # infinite abs error is worst case
     best_checkpoint_path = None
 
     for epoch in range(epochs):
@@ -358,13 +358,13 @@ def main():
             dev_split = dataset_config.get('dev_split', 'dev')
             metrics = distributed_eval(dev_split, prefix="dev", epoch=epoch, state_dict_path=checkpoint_path)
             
-            target_metric = "dev/token_abs_error_sum"
+            target_metric = "dev/token_correct_20ms"
             if not eval_token_outputs and eval_aux_outputs:
-                target_metric = "dev/aux_abs_error_sum"
+                target_metric = "dev/aux_correct_20ms"
                 
             current_metric = metrics.get(target_metric, -1.0)
-            logging.info(f"Current model achieved {target_metric}: {best_metric}")
-            if current_metric < best_metric: # abs error should be lower
+            logging.info(f"Current model achieved {target_metric}: {current_metric}")
+            if current_metric > best_metric: # 20ms accuracy should be higher
                 best_metric = current_metric
                 best_checkpoint_path = checkpoint_path
                 if is_master:
@@ -378,7 +378,7 @@ def main():
     if final_checkpoint:
         logging.info(f"Evaluating with checkpoint: {final_checkpoint}")
 
-    test_split = dataset_config.get('test_split', 'test')
+    test_split = 'test'
     distributed_eval(test_split, prefix="test", epoch=training_config['epochs'] - 1, state_dict_path=final_checkpoint) # first do evaluation on the constraints imposed during training
 
     accelerator.wait_for_everyone()

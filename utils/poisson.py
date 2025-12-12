@@ -206,7 +206,7 @@ def infer_timestamps(n_pred, log_hazards):
     # OVERLAPPING WINDOWS STRATEGY
 
     frame_ms = 10
-    tolerance_ms = 100
+    tolerance_ms = 40
 
     hazards = np.exp(log_hazards)
     

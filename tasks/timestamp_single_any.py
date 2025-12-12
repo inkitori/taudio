@@ -11,6 +11,7 @@ import textwrap
 
 from dataset.base_dataset_adapter import BaseDatasetAdapter
 from models.base_model_adapter import BaseModelAdapter
+from dataset.audioset import AudioSetAdapter
 
 from .base_task import BaseTask
 from utils.utils import clamp, round_timestamp, round_timestamp_python
@@ -38,7 +39,13 @@ class SingleTimestampAnyTask(BaseTask):
 
         logging.debug(f"[ANY] Min time: {self.min_time}, Max time: {self.max_time}, Key: {self.key}, Apply fallback: {apply_fallback}")
 
-        for event in events:
+        filtered_events = []
+        if isinstance(ds_adapter, AudioSetAdapter):
+            filtered_events = [event for event in events if event['start'] > 0]
+        else:
+            filtered_events = [event for event in events]
+
+        for event in filtered_events:
             name = ds_adapter.event_name(event)
 
             # timing filter
