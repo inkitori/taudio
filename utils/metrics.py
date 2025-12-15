@@ -80,3 +80,12 @@ class AverageMetrics:
 
     def to_dict(self):
         return {key: self.get(key) for key in self._sum.keys()}
+
+    def restore_from_averages(self, count: int, averages: Dict[str, float]):
+        """
+        Restores the internal state (sums) based on a known count and previous averages.
+        This allows a run to continue calculating a true running average.
+        """
+        for key, avg_val in averages.items():
+            self._count[key] = count
+            self._sum[key] = avg_val * count
