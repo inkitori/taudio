@@ -1,14 +1,15 @@
 #!/bin/bash
-#SBATCH --partition=gpu-l40s
-#SBATCH --account=ark
-#SBATCH --mem-per-gpu=128G
-#SBATCH --cpus-per-gpu=10
-#SBATCH --nodes=1
-#SBATCH --gres=gpu:1
-#SBATCH --time=1:59:00
 #SBATCH --job-name=base_eval
-#SBATCH --output=/gscratch/ark/anjo0/taudio/scripts/%x/%j.out
-#SBATCH --error=/gscratch/ark/anjo0/taudio/scripts/%x/%j.err
+#SBATCH --account=ark
+#SBATCH --partition=ckpt
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=1
+#SBATCH --cpus-per-task=16
+#SBATCH --mem=128G
+#SBATCH --time=4:00:00
+#SBATCH --gres=gpu:a40:1
+#SBATCH --output=scripts/%x/%j.out
+#SBATCH --error=scripts/%x/%j.err
 
 CONDA_BASE=$(conda info --base) # This is a good way to get it if conda is in PATH
 

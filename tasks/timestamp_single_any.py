@@ -483,7 +483,6 @@ class SingleTimestampAnyTask(BaseTask):
         return False
 
     def evaluate_tokens_base(self, example: Dict[str, Any], ds_adapter: BaseDatasetAdapter, model_adapter: BaseModelAdapter) -> Dict[str, Any]:
-        # from models.audio_flamingo3_adapter import AudioFlamingo3Adapter
 
         events = list(ds_adapter.get_events(example))
         event = self._choose_event(events=events, ds_adapter=ds_adapter, apply_fallback=False)
@@ -509,10 +508,15 @@ class SingleTimestampAnyTask(BaseTask):
         inputs = inputs.to(torch.cuda.current_device())
 
   
-        # if isinstance(model_adapter, AudioFlamingo3Adapter):
-        #     inputs['input_features'] = inputs['input_features'].to(model_adapter.dtype) # audio flamingo for some reason emits float32 input_features
+        try:
+            from models.audio_flamingo3_adapter import AudioFlamingo3Adapter
 
-        generated_string = model_adapter.generate(**inputs, max_new_tokens=32, decode_tokens=True)
+            if isinstance(model_adapter, AudioFlamingo3Adapter):
+                inputs['input_features'] = inputs['input_features'].to(model_adapter.dtype) # audio flamingo for some reason emits float32 input_features
+        except ModuleNotFoundError:
+            logging.info(f"[ANY] Couldn't find AudioFlamingo3Adapter, not importing (likely too old of transformers version)")
+
+        generated_string = model_adapter.generate(**inputs, max_new_tokens=10, decode_tokens=True)
         full_generation = f"{generation_prefix}{generated_string}"
         # logging.info(f"[ANY] Generated string: {generated_string}")
         logging.info(f"[ANY] Full generation: \n{full_generation}")
@@ -529,8 +533,20 @@ class SingleTimestampAnyTask(BaseTask):
         if json_candidate:
             try:
                 parsed = json.loads(json_candidate)
-                token_pred = float(parsed[0]['start'])
-            except Exception:
+                raw_start = parsed[0]['start']
+
+                # Check if it is a string containing ':' (e.g., "00:00:02.420")
+                if isinstance(raw_start, str) and ':' in raw_start:
+                    parts = raw_start.split(':')
+                    token_pred = 0.0
+                    for part in parts:
+                        # Accumulate seconds: hours -> mins -> secs
+                        token_pred = token_pred * 60 + float(part)
+                else:
+                    # Handle standard floats or strings like "2.42"
+                    token_pred = float(raw_start)
+            except Exception as e:
+                logging.debug(f"[ANY] JSON parsing failed: {e}")
                 token_pred = None
 
         if token_pred is None:
@@ -549,9 +565,10 @@ class SingleTimestampAnyTask(BaseTask):
 
         # Metric increments
         token_pred = round_timestamp_python(float(token_pred))
+        token_pred = clamp(token_pred, 0, audio_duration)
+
         abs_err = round_timestamp_python(abs(float(token_pred) - float(gt)))
 
-        token_pred = clamp(token_pred, 0, audio_duration)
 
         logging.info(f"[ANY] Token Prediction: {str(token_pred)}, Ground Truth: {str(gt)}")
 
