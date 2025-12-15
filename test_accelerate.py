@@ -2,15 +2,13 @@ import argparse
 import logging
 import os
 import random
-import re
 from pathlib import Path
 from typing import Dict, List
 
 import numpy as np
 import torch
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Subset
 from tqdm.auto import tqdm
-import wandb
 from transformers import set_seed
 
 from accelerate import Accelerator, PartialState
@@ -31,6 +29,13 @@ from utils.config_utils import (
 from utils.metrics import AverageMetrics
 
 
+def limit_dataset(dataset, max_examples: int):
+    """Return a subset of the dataset capped at max_examples."""
+    if len(dataset) <= max_examples:
+        return dataset
+    return Subset(dataset, range(max_examples))
+
+
 def main():
     logging.getLogger().setLevel(logging.INFO)
 
@@ -42,8 +47,6 @@ def main():
     parser.add_argument('--eval-min-time', type=float, default=None, help='Minimum time for evaluating on test split')
     parser.add_argument('--eval-max-time', type=float, default=None, help='Maximum time for evaluating on test split')
     parser.add_argument('--load-checkpoint', type=str, default=None, help='Path to a checkpoint to load for evaluation only')
-    parser.add_argument('--eval-only', action='store_true', help='Don\'t run training')
-    parser.add_argument('--run-id', type=str, default=None, help='wandb run id')
 
     args = parser.parse_args()
 
@@ -79,21 +82,13 @@ def main():
     set_seed(system_config['seed'])
 
     # Experiment, project
-    experiment_dir: Path = None  # type: ignore
+    experiment_dir: Path = Path("tmp_checkpoints")
+    experiment_dir.mkdir(parents=True, exist_ok=True)
     experiment_name = relative_path_to_experiment_name(args.config, eval=False)
     project_name = relative_path_to_project_name(args.config, eval=False)
 
-    # If resuming from a checkpoint, keep using its parent experiment directory.
-    if args.load_checkpoint is not None:
-        experiment_dir = Path(args.load_checkpoint).resolve().parent
-        logging.info(f"Using experiment directory from checkpoint: {experiment_dir}")
-
-    if experiment_dir is None and not args.debug and not args.eval_only:
-        # Create experiment directory and save config
-        experiment_dir = config_manager.create_experiment_dir(
-            args.config,
-            timestamp=not args.no_timestamp
-        )
+    if not args.debug:
+        # Save config to fixed checkpoint directory
         config_manager.save_config(config, experiment_dir)
     logging.info(f"Output directory: {experiment_dir}")
     logging.info(f"Project name: {project_name}")
@@ -101,22 +96,6 @@ def main():
 
     # Initialize wandb
     run = None
-    if not args.debug and is_master:
-        flattened_config = flatten_config(config)
-        wandb_kwargs = {
-            "entity": config['wandb']['entity'],
-            "project": project_name,
-            "name": experiment_name,
-            "config": flattened_config,
-        }
-
-        # When a run id is provided, attempt to resume that run instead of creating a new one.
-        if args.run_id is not None:
-            wandb_kwargs["id"] = args.run_id
-            wandb_kwargs["resume"] = "allow"
-            logging.info(f"Resuming wandb run with id={args.run_id}")
-
-        run = wandb.init(**wandb_kwargs)
 
     # Create task
     task = create_task(task_type=task_config['type'], **task_config.get('kwargs', {}))
@@ -129,71 +108,91 @@ def main():
     }
     model = TAudio(**taudio_config)
 
-	
-    # random bug where if gradients arent tracked they cause a keyerror
-    # for some reason audio_bos_eos_token is also an unused param
-    model.model_adapter.base_model.audio_tower.audio_bos_eos_token.requires_grad_(False)
-    model.model_adapter.base_model.visual.requires_grad_(False)
-
-    if not loss_config.get('surrogate_loss', False):
-        model.linear.requires_grad_(False)
-
-    if not loss_config.get('token_loss', False):
-        model.model_adapter.base_model.lm_head.requires_grad_(False)
-
     model.train()
 
     accelerator = Accelerator()
 
-    # Build training dataset/dataloader
-    ds, ds_adapter = get_ds(
-        model_adapter=model.model_adapter,
-        repository=dataset_config['repository'],
-        split=dataset_config['split'],
-        task=task,
-        take_first=dataset_config.get('take_first', None),
-        left_padding=dataset_config.get('left_padding', 0),
-    )
+    resume_state_dir = args.load_checkpoint if args.load_checkpoint and os.path.isdir(args.load_checkpoint) else None
 
-    accelerator.wait_for_everyone()
+    if resume_state_dir is None and args.load_checkpoint:
+        # Evaluation-only path (checkpoint file or non-accelerate dir). For FSDP2 we still need an optimizer.
+        dummy_optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)
+        model, dummy_optimizer = accelerator.prepare(model, dummy_optimizer)
+    else:
+        # Build training dataset/dataloader
+        ds, ds_adapter = get_ds(
+            model_adapter=model.model_adapter,
+            repository=dataset_config['repository'],
+            split=dataset_config['split'],
+            task=task,
+            take_first=dataset_config.get('take_first', None),
+            left_padding=dataset_config.get('left_padding', 0),
+        )
 
-    dataloader = DataLoader(
-        ds,
-        batch_size=batch_size_per_device,
-        drop_last=True,
-        pin_memory=True,
-        num_workers=8,
-        collate_fn=collate_fn,
-        shuffle=True
-    )
+        accelerator.wait_for_everyone()
 
-    optim = torch.optim.AdamW(model.parameters(), lr=training_config['learning_rate'])
-    num_optim_steps = len(dataloader) * training_config['epochs']
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-        optim,
-        T_max=num_optim_steps,
-        eta_min=training_config['learning_rate'] * training_config['eta_min_scale'],
-    )
+        ds = limit_dataset(ds, 100)
+        logging.info(f"Debug mode: limiting training dataset to {len(ds)} examples")
 
-    model, optim, scheduler, dataloader = accelerator.prepare(model, optim, scheduler, dataloader)
-    logging.info(f"Number of optimizer steps: {num_optim_steps}")
-    logging.info(f"Dataloader length: {len(dataloader)}")
+        dataloader = DataLoader(
+            ds,
+            batch_size=batch_size_per_device,
+            drop_last=True,
+            pin_memory=True,
+            num_workers=8,
+            collate_fn=collate_fn,
+            shuffle=True
+        )
 
-    start_epoch = 0
-    if args.load_checkpoint:
-        accelerator.load_state(args.load_checkpoint)
-        # Infer starting epoch from the checkpoint directory name (e.g., checkpoint_epoch3 -> start at epoch 3)
-        ckpt_name = Path(args.load_checkpoint).name
-        epoch_match = re.findall(r'\d+', ckpt_name)
-        if epoch_match:
-            start_epoch = int(epoch_match[-1])
-            logging.info(f"Resuming training from epoch {start_epoch}")
-        else:
-            logging.warning(f"Could not infer epoch from checkpoint path: {args.load_checkpoint}")
+        model.model_adapter.base_model.audio_tower.audio_bos_eos_token.requires_grad_(False)
+        model.model_adapter.base_model.visual.requires_grad_(False)
+
+        if not loss_config.get('surrogate_loss', False):
+            model.linear.requires_grad_(False)
+
+        optim = torch.optim.AdamW(model.parameters(), lr=training_config['learning_rate'])
+        num_optim_steps = len(dataloader) * training_config['epochs']
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+            optim,
+            T_max=num_optim_steps,
+            eta_min=training_config['learning_rate'] * training_config['eta_min_scale'],
+        )
+
+        model, optim, scheduler, dataloader = accelerator.prepare(model, optim, scheduler, dataloader)
+        logging.info(f"Number of optimizer steps: {num_optim_steps}")
+        logging.info(f"Dataloader length: {len(dataloader)}")
+
+        if resume_state_dir:
+            logging.info(f"Resuming training state from {resume_state_dir}")
+            accelerator.load_state(resume_state_dir)
 
     # Flags for what to evaluate
     eval_token_outputs = bool(loss_config.get('token_loss', False))
     eval_aux_outputs = bool(loss_config.get('surrogate_loss', False))
+
+    if accelerator.is_main_process:
+        print("\n" + "="*30)
+        print("INSPECTING FROZEN PARAMETERS")
+        print("="*30)
+        
+        # We unwrap the model to ensure we get the original variable names
+        # instead of FSDP wrapper names.
+        unwrapped_model = accelerator.unwrap_model(model)
+        
+        frozen_count = 0
+        trainable_count = 0
+        
+        for name, param in unwrapped_model.named_parameters():
+            if not param.requires_grad:
+                print(f"❄️  FROZEN: {name}  [Shape: {param.shape}]")
+                frozen_count += 1
+            else:
+                trainable_count += 1
+
+        print("-" * 30)
+        print(f"Total Frozen Parameters:    {frozen_count}")
+        print(f"Total Trainable Parameters: {trainable_count}")
+        print("="*30 + "\n")
 
     # Helper: distributed evaluation
     def get_full_state_dict(state_dir: str | None):
@@ -203,11 +202,27 @@ def main():
         that tracks only the model so we avoid optimizer/scheduler loading errors.
         """
         if state_dir is not None:
+
+            # load_accelerator = Accelerator()
+            # load_model = TAudio(**taudio_config)
+
+            # load_model.model_adapter.base_model.audio_tower.audio_bos_eos_token.requires_grad_(False)
+            # load_model.model_adapter.base_model.visual.requires_grad_(False)
+
+            # if not loss_config.get('surrogate_loss', False):
+            #     model.linear.requires_grad_(False)
+
+            # dummy_optimizer = torch.optim.AdamW(load_model.parameters(), lr=1e-3)
+            # load_model, _ = load_accelerator.prepare(load_model, dummy_optimizer)
             accelerator.load_state(state_dir)
             full_state = get_model_state_dict(
                 accelerator.unwrap_model(model),
                 options=StateDictOptions(full_state_dict=True, broadcast_from_rank0=True)
             )
+            # Best-effort cleanup
+            # del load_model
+            # del dummy_optimizer
+            # del load_accelerator
             import gc; gc.collect()
             torch.cuda.empty_cache()
             return full_state
@@ -246,6 +261,8 @@ def main():
         )
 
         base_ds = adapter.load_split(split_name)
+        base_ds = limit_dataset(base_ds, 100)
+        logging.info(f"Debug mode: limiting {split_name} split to {len(base_ds)} examples for eval")
 
         # Shard across processes using Accelerate context manager
         distributed_state = PartialState()
@@ -342,12 +359,12 @@ def main():
         return aggregated
 
     # Training loop
-    epochs = 0 if args.eval_only else training_config['epochs']
+    epochs = training_config['epochs'] if resume_state_dir is not None else (0 if args.load_checkpoint else training_config['epochs'])
 
     best_metric = float('-inf') # infinite abs error is worst case
-    best_checkpoint_dir = args.load_checkpoint if args.eval_only else None
+    best_checkpoint_dir = None
 
-    for epoch in range(start_epoch, epochs):
+    for epoch in range(epochs):
         progress_bar = tqdm(
             dataloader,
             desc=f"Epoch {epoch + 1}",
@@ -358,6 +375,7 @@ def main():
         for step, batch in enumerate(progress_bar, start=1):
             batch = {k: v.to(accelerator.device) for k, v in batch.items()}
             output = model(**batch)
+    
 
             accelerator.backward(output.loss)
             optim.step()

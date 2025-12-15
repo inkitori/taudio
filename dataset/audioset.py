@@ -43,6 +43,22 @@ class AudioSetAdapter(BaseDatasetAdapter):
                 ds = remove_indices(ds, eval_exclude_indices)
         
         if split in ['train', 'dev']:
+            ds = ds.shuffle(seed=80)
+            half_size = len(ds) // 2
+            ds = ds.select(range(half_size))
+
+            try:
+                output_filename = "included_video_ids.txt"
+                kept_ids = ds['video_id']
+                
+                with open(output_filename, 'w') as f:
+                    for vid in kept_ids:
+                        f.write(f"{vid}\n")
+                
+                logging.info(f"Saved {len(kept_ids)} kept video_ids to {output_filename}")
+            except Exception as e:
+                logging.warning(f"Could not save video_ids: {e}")
+
             ds = ds.train_test_split(test_size=0.05, seed=80)
             if split == 'train':
                 ds = ds['train']

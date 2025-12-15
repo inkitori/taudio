@@ -5,7 +5,7 @@
 #SBATCH --cpus-per-gpu=1
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:4
-#SBATCH --time=8:00:00
+#SBATCH --time=5:00:00
 #SBATCH --job-name=4_gpu_bf16
 #SBATCH --output=scripts/anvil/logs/%x/%j.out
 #SBATCH --error=scripts/anvil/logs/%x/%j.err
@@ -22,16 +22,4 @@ echo "MASTER_PORT: $MASTER_PORT"
 module load conda
 conda activate ./env
 
-
-# Optional eval min/max time arguments
-EVAL_MIN_ARG=""
-if [ -n "$2" ]; then
-EVAL_MIN_ARG="--eval-min-time $2"
-fi
-
-EVAL_MAX_ARG=""
-if [ -n "$3" ]; then
-EVAL_MAX_ARG="--eval-max-time $3"
-fi
-
-accelerate launch --config_file accelerate_configs/4_gpu_bf16.yaml run.py --config "$1" $EVAL_MIN_ARG $EVAL_MAX_ARG
+accelerate launch --config_file accelerate_configs/4_gpu_bf16.yaml run.py --config "$1" --load-checkpoint "$2" --run-id "$3" --eval-only
