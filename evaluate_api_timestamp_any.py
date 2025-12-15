@@ -19,7 +19,8 @@ import os
 import random
 import re
 from dataclasses import dataclass
-from typing import Dict, Optional, Protocol, Tuple
+from typing import Dict, Optional, Protocol, Tuple, List
+from pydantic import BaseModel, Field
 
 import numpy as np
 import soundfile as sf
@@ -31,11 +32,25 @@ from tasks.timestamp_single_any import SingleTimestampAnyTask
 from utils.metrics import AverageMetrics
 from utils.utils import round_timestamp_python, ensure_audio_path
 
+try:
+    from google import genai  # type: ignore
+    from google.genai import types
+except ImportError as exc:  # pragma: no cover - dependency hint
+    raise RuntimeError(
+        "google-genai is required. Install via `pip install google-genai`."
+    ) from exc
+
+class Timestamp(BaseModel):
+    # event_name: str = Field(description="Name of the event")
+    start: float = Field(description="Start time of the event")
+
+class Timestamps(BaseModel):
+    timestamps: List[Timestamp]
 
 DATASET_REPOS: Dict[str, str] = {
     "librispeech": "gilkeyio/librispeech-alignments",
     "libricount": "enyoukai/libricount-timings",
-    "audioset": "enyoukai/AudioSet-Strong-Human-Sounds",
+    "audioset": "enyoukai/audioset-humans-reprocessed",
 }
 
 FLOAT_PATTERN = re.compile(r"\d+(?:\.\d+)?")
@@ -73,12 +88,6 @@ class TimestampPredictor(Protocol):
 class GeminiTimestampClient:
     def __init__(self, api_key: str, model: str, timeout: Optional[int]) -> None:
         self.name = "gemini"
-        try:
-            from google import genai  # type: ignore
-        except ImportError as exc:  # pragma: no cover - dependency hint
-            raise RuntimeError(
-                "google-genai is required. Install via `pip install google-genai`."
-            ) from exc
 
         if not api_key:
             raise ValueError("Missing Gemini API key. Set --gemini-api-key or GEMINI_API_KEY.")
@@ -86,7 +95,6 @@ class GeminiTimestampClient:
         self._client = genai.Client(api_key=api_key)
         self._model = model
         self._timeout = timeout
-        self._gen_config = {"temperature": 0.0, "max_output_tokens": 256}
 
     def predict_timestamp(self, prompt: str, audio: Dict[str, object]) -> str:
         audio_path = ensure_audio_path(audio)
@@ -95,17 +103,26 @@ class GeminiTimestampClient:
             uploaded_file = self._client.files.upload(
                 file=audio_path,
             )
-            request_kwargs = {"config": self._gen_config}
-            if self._timeout:
-                request_kwargs["request_options"] = {"timeout": self._timeout}
+            # if self._timeout:
+            #     request_kwargs["request_options"] = {"timeout": self._timeout}
 
             contents = [prompt, uploaded_file]
             response = self._client.models.generate_content(
                 model=self._model,
                 contents=contents,
-                **request_kwargs,
+                config=types.GenerateContentConfig(
+                    thinking_config=types.ThinkingConfig(thinking_budget=0),
+                    temperature=0.0,
+                    # system_instruction="Output your answer in seconds in decimal format."
+                    response_mime_type="application/json",
+                    response_json_schema=Timestamp.model_json_schema(),
+                ),
             )
-            return _extract_gemini_text(response)
+            # return _extract_gemini_text(response)
+            logging.info(f"[GEMINI] Response: {response}")
+            logging.info(f"[GEMINI] Response Text: {response.text}")
+            return Timestamp.model_validate_json(response.text).model_dump()
+            # return response.text
         finally:
             try:
                 os.remove(audio_path)
@@ -215,7 +232,7 @@ def _build_prompt(ds_adapter, task: SingleTimestampAnyTask, example: Dict[str, o
     ordinal = task._compute_ordinal(all_events=events, ds_adapter=ds_adapter, selected_event=event)
     base_prompt = ds_adapter.get_timestamp_single_any_prompt(event_name, task.key, ordinal)
     prompt = (
-        f"{base_prompt} Respond with only the timestamp in seconds using a decimal number such as '2.435'."
+        f"{base_prompt}"
     )
     audio = ds_adapter.get_audio(example)
     gt = ds_adapter.get_target_seconds(event, task.key)
@@ -242,6 +259,17 @@ def _parse_timestamp(raw_text: str) -> Optional[float]:
     if matches:
         return float(matches[-1])
     return None
+
+def _parse_timestamp_json(response_json) -> Optional[float]:
+    if not response_json:
+        return None
+
+    try:
+        timestamp = response_json['start']
+    except:
+        timestamp = None
+    
+    return timestamp
 
 
 def _metrics_from_prediction(pred: float, gt: float) -> Dict[str, float]:
@@ -294,6 +322,7 @@ def evaluate_dataset(
             continue
 
         logging.info(f"Prompt: " + prompt)
+        # raw_text = predictor.predict_timestamp(prompt, audio)
         raw_text = predictor.predict_timestamp(prompt, audio)
         logging.info(
             "[%s][%s] Model response: %s | Ground truth: %.3f",
@@ -302,9 +331,16 @@ def evaluate_dataset(
             raw_text,
             gt,
         )
-        parsed = _parse_timestamp(raw_text)
+        # parsed = _parse_timestamp(raw_text)
+        parsed = _parse_timestamp_json(raw_text)
         if parsed is None:
             parsed = _fallback_timestamp(audio)
+            logging.info(
+                "[%s][%s] Failed to parse %s",
+                predictor.name,
+                repository,
+                raw_text,
+            )
         
         logging.info(f"Parsed timestamp: " + str(parsed))
         example_metrics = _metrics_from_prediction(parsed, gt)
