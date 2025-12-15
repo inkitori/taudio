@@ -1,4 +1,4 @@
-EXCLUDE_NODES="--exclude=h012"
+EXCLUDE_NODES="--exclude=h012,h018"
 
 # sbatch $EXCLUDE_NODES scripts/anvil/accelerate_4_gpu_bf16.sh configs/qwen3b/audioset_humans/timestamp_single/poisson+bidirectional_audio[start][bias_-6.9][bf16][upscale_4][lr_1e-6].yaml test
 # sbatch $EXCLUDE_NODES scripts/anvil/accelerate_4_gpu_bf16.sh configs/qwen3b/audioset_humans/timestamp_single/poisson+bidirectional_audio[start][bias_-6.9][bf16][upscale_4][lr_3e-6].yaml test
