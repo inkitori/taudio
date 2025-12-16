@@ -44,6 +44,7 @@ def main():
     parser.add_argument('--load-checkpoint', type=str, default=None, help='Path to a checkpoint to load for evaluation only')
     parser.add_argument('--eval-only', action='store_true', help='Don\'t run training')
     parser.add_argument('--run-id', type=str, default=None, help='wandb run id')
+    parser.add_argument('--dev', action='store_true', help='Perform final evaluation on dev')
 
     args = parser.parse_args()
 
@@ -175,21 +176,41 @@ def main():
         eta_min=training_config['learning_rate'] * training_config['eta_min_scale'],
     )
 
+	# if we are doing legacy .pt loading we will need to prefill the model before sharding it
+    if args.load_checkpoint:
+        ckpt_path = Path(args.load_checkpoint)
+        
+        if ckpt_path.is_file():
+            logging.info(f"Loading checkpoint directly from file: {ckpt_path}")
+            state_dict = torch.load(ckpt_path, map_location='cpu')
+            
+            accelerator.unwrap_model(model).load_state_dict(state_dict)
+            
+
+    # Note: passing optimizer to prepare is crucial for FSDP/Accelerate to handle sharded states
     model, optim, scheduler, dataloader = accelerator.prepare(model, optim, scheduler, dataloader)
     logging.info(f"Number of optimizer steps: {num_optim_steps}")
     logging.info(f"Dataloader length: {len(dataloader)}")
 
     start_epoch = 0
     if args.load_checkpoint:
-        accelerator.load_state(args.load_checkpoint)
-        # Infer starting epoch from the checkpoint directory name (e.g., checkpoint_epoch3 -> start at epoch 3)
-        ckpt_name = Path(args.load_checkpoint).name
-        epoch_match = re.findall(r'\d+', ckpt_name)
-        if epoch_match:
-            start_epoch = int(epoch_match[-1])
-            logging.info(f"Resuming training from epoch {start_epoch}")
+        ckpt_path = Path(args.load_checkpoint)
+        
+        if ckpt_path.is_file():
+            logging.info(".pt detected, skipping second load")
+                
         else:
-            logging.warning(f"Could not infer epoch from checkpoint path: {args.load_checkpoint}")
+            # Load from Accelerate directory structure
+            accelerator.load_state(args.load_checkpoint)
+            
+            # Infer start epoch from directory name
+            ckpt_name = Path(args.load_checkpoint).name
+            epoch_match = re.findall(r'\d+', ckpt_name)
+            if epoch_match:
+                start_epoch = int(epoch_match[-1])
+                logging.info(f"Resuming training from epoch {start_epoch}")
+            else:
+                logging.warning(f"Could not infer epoch from checkpoint path: {args.load_checkpoint}")
 
     # Flags for what to evaluate
     eval_token_outputs = bool(loss_config.get('token_loss', False))
@@ -199,18 +220,22 @@ def main():
     def get_full_state_dict(state_dir: str | None):
         """
         Helper that returns a full, unsharded model state dict.
-        When a checkpoint directory is provided, we load it with a fresh Accelerator
-        that tracks only the model so we avoid optimizer/scheduler loading errors.
         """
         if state_dir is not None:
-            accelerator.load_state(state_dir)
-            full_state = get_model_state_dict(
-                accelerator.unwrap_model(model),
-                options=StateDictOptions(full_state_dict=True, broadcast_from_rank0=True)
-            )
-            import gc; gc.collect()
-            torch.cuda.empty_cache()
-            return full_state
+            path = Path(state_dir)
+            if path.is_file():
+                # Direct load from .pt file
+                return torch.load(path, map_location='cpu')
+            else:
+                # Load via Accelerator (directory)
+                accelerator.load_state(state_dir)
+                full_state = get_model_state_dict(
+                    accelerator.unwrap_model(model),
+                    options=StateDictOptions(full_state_dict=True, broadcast_from_rank0=True)
+                )
+                import gc; gc.collect()
+                torch.cuda.empty_cache()
+                return full_state
 
         unwrapped_model = accelerator.unwrap_model(model)
         return get_model_state_dict(
@@ -425,13 +450,19 @@ def main():
     if final_checkpoint:
         logging.info(f"Evaluating with checkpoint: {final_checkpoint}")
 
-    test_split = 'test'
-    distributed_eval(test_split, prefix="test", epoch=training_config['epochs'] - 1, state_dir=final_checkpoint) # first do evaluation on the constraints imposed during training
+    if args.dev:
+        split = 'dev'
+    else:
+        split = 'test'
+    
+    logging.info(f"Evaluating final split on split {split}")
+
+    distributed_eval(split, prefix=split, epoch=training_config['epochs'] - 1, state_dir=final_checkpoint) # first do evaluation on the constraints imposed during training
 
     accelerator.wait_for_everyone()
 
     if args.eval_min_time is not None or args.eval_max_time is not None:
-        distributed_eval(test_split, prefix="test_ood", epoch=training_config['epochs'] - 1, min_time=args.eval_min_time, max_time=args.eval_max_time, state_dir=final_checkpoint)
+        distributed_eval(split, prefix=split+"_ood", epoch=training_config['epochs'] - 1, min_time=args.eval_min_time, max_time=args.eval_max_time, state_dir=final_checkpoint)
     
     accelerator.wait_for_everyone()
 
@@ -445,6 +476,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
-
