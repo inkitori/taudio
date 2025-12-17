@@ -31,6 +31,7 @@ from utils.config_utils import (
     relative_path_to_project_name,
 )
 from utils.metrics import AverageMetrics
+from utils.utils import dist_log
 
 
 def main():
@@ -72,18 +73,13 @@ def main():
     # --------------------------------------------------------------------------
     effective_batch_size = training_config['effective_batch_size']
     
-    # Check if gradient accumulation is explicitly set, otherwise infer 1
-    grad_accum_steps = training_config.get('gradient_accumulation_steps', 1)
-    
     # Calculate per-device batch size
     # Formula: Effective = Per_Device * World_Size * Accum_Steps
     batch_size_per_device = 1
     grad_accum_steps = effective_batch_size // (batch_size_per_device * world_size)
     
-    # Fallback safety: ensure at least 1
     if batch_size_per_device < 1:
-        batch_size_per_device = 1
-        logging.warning("Calculated batch size per device was 0. Setting to 1 and adjusting effective batch size implicitly.")
+        raise ValueError("Calculated batch size per device was 0")
 
     torch.cuda.set_device(PartialState().device)
     logging.info(f"World Size: {world_size}")
@@ -192,16 +188,7 @@ def main():
 
     optim = torch.optim.AdamW(model.parameters(), lr=training_config['learning_rate'])
     
-    # Calculate total update steps
-    # We use explicit floor division by grad_accum_steps
-    num_update_steps_per_epoch = len(dataloader) // grad_accum_steps
-    num_optim_steps = num_update_steps_per_epoch * training_config['epochs']
     
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-        optim,
-        T_max=num_optim_steps,
-        eta_min=training_config['learning_rate'] * training_config['eta_min_scale'],
-    )
 
     # if we are doing legacy .pt loading we will need to prefill the model before sharding it
     if args.load_checkpoint:
@@ -213,7 +200,18 @@ def main():
             accelerator.unwrap_model(model).load_state_dict(state_dict)
 
     # Note: passing optimizer to prepare is crucial for FSDP/Accelerate to handle sharded states
-    model, optim, scheduler, dataloader = accelerator.prepare(model, optim, scheduler, dataloader)
+    model, optim, dataloader = accelerator.prepare(model, optim, dataloader)
+    
+    # Calculate total update steps
+    dist_log(accelerator, f"Dataloader Length: {len(dataloader)}")
+    
+    # preventing deadlocks from gpu stopping early
+    local_len = torch.tensor(len(dataloader), device=accelerator.device)
+    min_len = accelerator.reduce(local_len, reduction="min").item()
+    num_update_steps_per_epoch = int(min_len) // grad_accum_steps
+    dist_log(accelerator, f"Adjusted update steps per epoch (deadlock safe): {num_update_steps_per_epoch}")
+
+    num_optim_steps = num_update_steps_per_epoch * training_config['epochs']
     
     logging.info(f"Total batches per epoch: {len(dataloader)}")
     logging.info(f"Optimizer update steps per epoch: {num_update_steps_per_epoch}")
@@ -406,53 +404,38 @@ def main():
             # 2. Pre-Calculate Totals for Variable-Size Scaling
             # ------------------------------------------------------------------
             local_step_tokens = 0.0
-            local_step_samples = 0.0
 
             for batch in accum_batches:
                 # Count valid tokens for Token Loss scaling (CrossEntropy)
-                if 'labels' in batch:
-                    local_step_tokens += (batch['labels'] != -100).sum().item()
-                else:
-                    # Fallback
-                    local_step_tokens += batch['input_ids'].numel()
-
-                # Count samples for Surrogate Loss scaling (Poisson/BCE per sample)
-                # Assumes dim 0 is batch dimension
-                local_step_samples += len(batch['input_ids'])
+                local_step_tokens += (batch['labels'] != -100).sum().item()
 
             # Convert to tensor for reduction
             # [token_count, sample_count]
-            counts_tensor = torch.tensor([local_step_tokens, local_step_samples], device=accelerator.device)
+            counts_tensor = torch.tensor([local_step_tokens], device=accelerator.device)
             
             # Reduce across all GPUs to get Global Totals for this step
             global_counts = accelerator.reduce(counts_tensor, reduction='sum')
             global_total_tokens = global_counts[0].item()
-            global_total_samples = global_counts[1].item()
             
-            # Safety for div by zero
-            if global_total_tokens == 0: global_total_tokens = 1.0
-            if global_total_samples == 0: global_total_samples = 1.0
-
             # ------------------------------------------------------------------
             # 3. Forward & Backward Pass with Mixed Scaling
             # ------------------------------------------------------------------
             # Track logging loss separately
-            avg_loss_accum = 0.0
 
+            losses = []
             for i, batch in enumerate(accum_batches):
                 # Ensure on device
                 batch = {k: v.to(accelerator.device) for k, v in batch.items()}
                 
                 # Logic: Only sync gradients on the LAST micro-batch of the accumulation step
                 # (Standard Accelerate/DDP optimization)
-                ctx = accelerator.no_sync(model) if (i < len(accum_batches) - 1 and world_size > 1) else contextlib.nullcontext
+                ctx = contextlib.nullcontext
 
                 with ctx():
                     output = model(**batch)
                     
                     # --- A. Calculate Local Counts for this specific micro-batch ---
                     current_batch_tokens = (batch['labels'] != -100).sum().item() if 'labels' in batch else 0.0
-                    current_batch_samples = len(batch['input_ids'])
 
                     # --- B. Apply Scaling Factors ---
                     # 1. Un-average the loss (multiply by local count)
@@ -460,10 +443,9 @@ def main():
                     # 3. Multiply by world_size (cancel DDP's implicit division)
 
                     # Factor for Token Loss (Frame-weighted)
-                    token_scale = (current_batch_tokens / global_total_tokens) * world_size
+                    token_scale = (current_batch_tokens / global_total_tokens) * world_size * grad_accum_steps
                     
                     # Factor for Surrogate/Aux Loss (Sample-weighted)
-                    sample_scale = (current_batch_samples / global_total_samples) * world_size
 
                     # Reconstruct total loss
                     # Note: output.token_loss and output.surrogate_loss are local means
@@ -474,16 +456,16 @@ def main():
                         total_scaled_loss += output.token_loss * token_scale
                         
                     if hasattr(output, 'surrogate_loss'):
-                        total_scaled_loss += output.surrogate_loss * (1.0 / grad_accum_steps)
+                        total_scaled_loss += output.surrogate_loss 
                         
                     # If auxiliary_deviation acts as a loss component (unlikely based on name, but safe to check)
                     # Assuming it's just a metric for now based on previous discussions. 
                     # If there are other losses in 'output', add them here with sample_scale.
 
-                    total_scaled_loss *= grad_accum_steps
                         
                     # --- C. Backward ---
                     accelerator.backward(total_scaled_loss)
+                    losses.append(total_scaled_loss.detach())
                     
                     # --- D. Update Metrics for Logging ---
                     with torch.no_grad():
@@ -494,36 +476,34 @@ def main():
                             "train/auxiliary_deviation": output.auxiliary_deviation.item(),
                         })
                         
-                        # Accumulate a rough average for the progress bar
-                        avg_loss_accum += (output.token_loss.item() + output.surrogate_loss.item()) / len(accum_batches)
 
             # ------------------------------------------------------------------
             # 4. Optimization Step
             # ------------------------------------------------------------------
             optim.step()
             optim.zero_grad()
-            scheduler.step()
 
             # ------------------------------------------------------------------
             # 5. Logging
             # ------------------------------------------------------------------
-            avg_loss_tensor = torch.tensor(avg_loss_accum, device=accelerator.device)
-            global_avg_loss = accelerator.reduce(avg_loss_tensor, reduction='mean').item()
 
-            metrics.update_dict({"train/loss": global_avg_loss})
+            losses = accelerator.gather(sum(losses)).sum().item() / (
+                accelerator.num_processes * grad_accum_steps
+            )
+
+            metrics.update_dict({"train/loss": losses})
 
             if is_master and not args.debug and run is not None:
                 run.log({
                     **metrics.to_dict(),
                     "train/epoch": epoch + 1,
                     "train/step": (epoch * num_update_steps_per_epoch) + update_step + 1,
-                    "train/lr": scheduler.get_last_lr()[0],
                     # Optional: monitor utilization
                     "train/global_tokens": global_total_tokens,
                 })
                 metrics.reset()
 
-            progress_bar.set_description(f"Epoch {epoch + 1}, Loss: {global_avg_loss:.4f}")
+            progress_bar.set_description(f"Epoch {epoch + 1}, Loss: {losses:.4f}")
 
         logging.info(f"Epoch {epoch + 1} completed.")
 

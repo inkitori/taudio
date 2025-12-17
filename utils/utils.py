@@ -151,3 +151,6 @@ def ensure_audio_path(audio) -> str:
         tmp.close()
 
     return path
+
+def dist_log(accelerator, text):
+    accelerator.log(f"[{accelerator.process_index}] {text}")
