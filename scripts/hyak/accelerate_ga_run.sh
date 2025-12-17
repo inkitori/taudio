@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=gemini_eval
+#SBATCH --job-name=accelerate_ga_run
 #SBATCH --account=ark
 #SBATCH --partition=ckpt
 #SBATCH --nodes=1
