@@ -170,11 +170,6 @@ def main():
 
     optim = torch.optim.AdamW(model.parameters(), lr=training_config['learning_rate'])
     num_optim_steps = len(dataloader) * training_config['epochs']
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-        optim,
-        T_max=num_optim_steps,
-        eta_min=training_config['learning_rate'] * training_config['eta_min_scale'],
-    )
 
 	# if we are doing legacy .pt loading we will need to prefill the model before sharding it
     if args.load_checkpoint:
@@ -188,7 +183,7 @@ def main():
             
 
     # Note: passing optimizer to prepare is crucial for FSDP/Accelerate to handle sharded states
-    model, optim, scheduler, dataloader = accelerator.prepare(model, optim, scheduler, dataloader)
+    model, optim, dataloader = accelerator.prepare(model, optim, dataloader)
     logging.info(f"Number of optimizer steps: {num_optim_steps}")
     logging.info(f"Dataloader length: {len(dataloader)}")
 
@@ -387,7 +382,6 @@ def main():
             accelerator.backward(output.loss)
             optim.step()
             optim.zero_grad()
-            scheduler.step()
 
             loss = accelerator.reduce(output.loss, reduction='mean')
             token_loss = accelerator.reduce(output.token_loss, reduction='mean')
@@ -406,7 +400,6 @@ def main():
                     **metrics.to_dict(),
                     "train/epoch": epoch + 1,
                     "train/step": step + 1,
-                    "train/lr": scheduler.get_last_lr()[0],
                 })
                 metrics.reset()
 
