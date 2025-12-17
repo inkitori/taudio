@@ -9,18 +9,18 @@ model:
 
 # Training configuration
 training:
-  epochs: 6
-  effective_batch_size: 8
+  epochs: 1
+  effective_batch_size: 4
   learning_rate: 1.0e-6
   eta_min_scale: 1.0
   
 # Dataset configuration
 dataset:
   split: "train"
-  repository: "enyoukai/libricount-timings"
+  repository: "gilkeyio/librispeech-alignments"
 
 task:
-  type: "SINGLE_WORD_TIMESTAMP_ANY"
+  type: "ALL_TIMESTAMPS"
   kwargs:
     key: "start"
 

@@ -452,8 +452,13 @@ class SingleTimestampAnyTask(BaseTask):
                     example_audio_logits = example_audio_logits[:neg_100_idx]
                     example_audio_labels = example_audio_labels[:neg_100_idx]
 
-                predicted_timestamps[example] = torch.argmax(example_audio_logits)
-                predicted_timestamps[example] = predicted_timestamps[example] + 0.5
+                # Use Poisson inference for timestamp prediction; keep argmax path commented for testing.
+                poisson_frame_idx = infer_timestamps(1, example_audio_logits.cpu().float().detach().numpy())[0]
+                predicted_timestamps[example] = torch.tensor(
+                    poisson_frame_idx, device=audio_logits.device, dtype=audio_logits.dtype
+                )
+                # predicted_timestamps[example] = torch.argmax(example_audio_logits)
+                # predicted_timestamps[example] = predicted_timestamps[example] + 0.5
                 # Convert from 10ms frame index to seconds (100 frames per second)
                 predicted_timestamps[example] = predicted_timestamps[example] / (
                     model_adapter.seconds_to_embedding * model_adapter.scaling_factor

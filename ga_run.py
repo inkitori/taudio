@@ -3,6 +3,8 @@ import logging
 import os
 import random
 import re
+import math
+import contextlib
 from pathlib import Path
 from typing import Dict, List
 
@@ -63,11 +65,30 @@ def main():
 
     # Process/world info
     world_size = PartialState().num_processes
-    batch_size_per_device = training_config['effective_batch_size'] // max(world_size, 1)
     is_master = PartialState().is_main_process
+    
+    # --------------------------------------------------------------------------
+    # Batch Size & Gradient Accumulation Calculation
+    # --------------------------------------------------------------------------
+    effective_batch_size = training_config['effective_batch_size']
+    
+    # Check if gradient accumulation is explicitly set, otherwise infer 1
+    grad_accum_steps = training_config.get('gradient_accumulation_steps', 1)
+    
+    # Calculate per-device batch size
+    # Formula: Effective = Per_Device * World_Size * Accum_Steps
+    batch_size_per_device = 1
+    grad_accum_steps = effective_batch_size // (batch_size_per_device * world_size)
+    
+    # Fallback safety: ensure at least 1
+    if batch_size_per_device < 1:
+        batch_size_per_device = 1
+        logging.warning("Calculated batch size per device was 0. Setting to 1 and adjusting effective batch size implicitly.")
 
     torch.cuda.set_device(PartialState().device)
     logging.info(f"World Size: {world_size}")
+    logging.info(f"Effective Batch Size: {effective_batch_size}")
+    logging.info(f"Gradient Accumulation Steps: {grad_accum_steps}")
     logging.info(f"Batch size per device: {batch_size_per_device}")
     logging.info(f"Is master: {is_master}")
     logging.info(f"Using device: {torch.cuda.current_device()}")
@@ -130,7 +151,6 @@ def main():
     }
     model = TAudio(**taudio_config)
 
-	
     # random bug where if gradients arent tracked they cause a keyerror
     # for some reason audio_bos_eos_token is also an unused param
     model.model_adapter.base_model.audio_tower.audio_bos_eos_token.requires_grad_(False)
@@ -144,7 +164,9 @@ def main():
 
     model.train()
 
-    accelerator = Accelerator()
+    # Initialize Accelerator with specific gradient accumulation steps
+    # This helps internal state management, though we do manual accumulation in the loop.
+    accelerator = Accelerator(gradient_accumulation_steps=grad_accum_steps)
 
     # Build training dataset/dataloader
     ds, ds_adapter = get_ds(
@@ -169,23 +191,33 @@ def main():
     )
 
     optim = torch.optim.AdamW(model.parameters(), lr=training_config['learning_rate'])
-    num_optim_steps = len(dataloader) * training_config['epochs']
+    
+    # Calculate total update steps
+    # We use explicit floor division by grad_accum_steps
+    num_update_steps_per_epoch = len(dataloader) // grad_accum_steps
+    num_optim_steps = num_update_steps_per_epoch * training_config['epochs']
+    
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+        optim,
+        T_max=num_optim_steps,
+        eta_min=training_config['learning_rate'] * training_config['eta_min_scale'],
+    )
 
-	# if we are doing legacy .pt loading we will need to prefill the model before sharding it
+    # if we are doing legacy .pt loading we will need to prefill the model before sharding it
     if args.load_checkpoint:
         ckpt_path = Path(args.load_checkpoint)
         
         if ckpt_path.is_file():
             logging.info(f"Loading checkpoint directly from file: {ckpt_path}")
             state_dict = torch.load(ckpt_path, map_location='cpu')
-            
             accelerator.unwrap_model(model).load_state_dict(state_dict)
-            
 
     # Note: passing optimizer to prepare is crucial for FSDP/Accelerate to handle sharded states
-    model, optim, dataloader = accelerator.prepare(model, optim, dataloader)
-    logging.info(f"Number of optimizer steps: {num_optim_steps}")
-    logging.info(f"Dataloader length: {len(dataloader)}")
+    model, optim, scheduler, dataloader = accelerator.prepare(model, optim, scheduler, dataloader)
+    
+    logging.info(f"Total batches per epoch: {len(dataloader)}")
+    logging.info(f"Optimizer update steps per epoch: {num_update_steps_per_epoch}")
+    logging.info(f"Total training steps: {num_optim_steps}")
 
     start_epoch = 0
     if args.load_checkpoint:
@@ -193,7 +225,6 @@ def main():
         
         if ckpt_path.is_file():
             logging.info(".pt detected, skipping second load")
-                
         else:
             # Load from Accelerate directory structure
             accelerator.load_state(args.load_checkpoint)
@@ -213,9 +244,6 @@ def main():
 
     # Helper: distributed evaluation
     def get_full_state_dict(state_dir: str | None):
-        """
-        Helper that returns a full, unsharded model state dict.
-        """
         if state_dir is not None:
             path = Path(state_dir)
             if path.is_file():
@@ -242,8 +270,6 @@ def main():
         original_min_time = task.min_time
         original_max_time = task.max_time
 
-        # If either bound is specified for this eval, explicitly set both,
-        # allowing None to clear prior training-time constraints.
         if min_time is not None or max_time is not None:
             task.min_time = min_time
             task.max_time = max_time
@@ -255,7 +281,6 @@ def main():
         eval_model.to(accelerator.device)
         eval_model.eval()
 
-        # Use raw dataset through adapter and shard across processes
         adapter = create_adapter(
             infer_adapter_from_repository(dataset_config['repository']),
             repository=dataset_config['repository'],
@@ -266,14 +291,15 @@ def main():
         )
 
         base_ds = adapter.load_split(split_name)
-
-        # Shard across processes using Accelerate context manager
+        
+        # Simple debug print
         distributed_state = PartialState()
         with distributed_state.split_between_processes(base_ds) as ds_shard:
-            print(f"Base dataset length: {len(base_ds)}")
-            for example in ds_shard:
-                print(example)
-                break
+            if is_master:
+                print(f"Base dataset length: {len(base_ds)}")
+                for example in ds_shard:
+                    print(example)
+                    break
 
         local_metrics = AverageMetrics()
         with distributed_state.split_between_processes(base_ds) as ds_shard:
@@ -299,31 +325,16 @@ def main():
                     if aux_metrics is not None:
                         local_metrics.update_dict(aux_metrics)
 
-        # Collect keys and reduce sums and counts across processes using a fixed schema
-        # so that all ranks execute identical reduce calls in identical order.
         token_metric_keys: List[str] = [
-            "token_abs_error_sum",
-            "token_correct_5ms",
-            "token_correct_10ms",
-            "token_correct_20ms",
-            "token_correct_40ms",
-            "token_correct_50ms",
-            "token_correct_80ms",
-            "token_correct_100ms",
-            "token_correct_200ms",
+            "token_abs_error_sum", "token_correct_5ms", "token_correct_10ms",
+            "token_correct_20ms", "token_correct_40ms", "token_correct_50ms",
+            "token_correct_80ms", "token_correct_100ms", "token_correct_200ms",
             "parsing_error",
         ]
         aux_metric_keys: List[str] = [
-            # Timestamp-style aux metrics
-            "aux_abs_error_sum",
-            "aux_correct_5ms",
-            "aux_correct_10ms",
-            "aux_correct_20ms",
-            "aux_correct_40ms",
-            "aux_correct_50ms",
-            "aux_correct_80ms",
-            "aux_correct_100ms",
-            "aux_correct_200ms",
+            "aux_abs_error_sum", "aux_correct_5ms", "aux_correct_10ms",
+            "aux_correct_20ms", "aux_correct_40ms", "aux_correct_50ms",
+            "aux_correct_80ms", "aux_correct_100ms", "aux_correct_200ms",
         ]
 
         metric_keys: List[str] = []
@@ -344,14 +355,11 @@ def main():
 
         if is_master and not args.debug and run is not None:
             log_payload = dict(aggregated)
-            # if epoch is not None:
-            #     log_payload["train/epoch"] = epoch + 1
             run.log(log_payload)
         
         task.min_time = original_min_time
         task.max_time = original_max_time
 
-        # cleanup
         del eval_model
         del full_state_dict
         del adapter
@@ -363,47 +371,159 @@ def main():
 
     # Training loop
     epochs = 0 if args.eval_only else training_config['epochs']
-
-    best_metric = float('-inf') # infinite abs error is worst case
+    best_metric = float('-inf') 
     best_checkpoint_dir = args.load_checkpoint if args.eval_only else None
 
     for epoch in range(start_epoch, epochs):
+        model.train()
+        
+        # Create an iterator to manually fetch batches for gradient accumulation
+        data_iterator = iter(dataloader)
+        
         progress_bar = tqdm(
-            dataloader,
+            range(num_update_steps_per_epoch),
             desc=f"Epoch {epoch + 1}",
             disable=not is_master,
         )
+        
         metrics = AverageMetrics()
 
-        for step, batch in enumerate(progress_bar, start=1):
-            batch = {k: v.to(accelerator.device) for k, v in batch.items()}
-            output = model(**batch)
+        for update_step in progress_bar:
+            # ------------------------------------------------------------------
+            # 1. Fetch Batches for this Gradient Accumulation Step
+            # ------------------------------------------------------------------
+            accum_batches = []
+            for _ in range(grad_accum_steps):
+                try:
+                    accum_batches.append(next(data_iterator))
+                except StopIteration:
+                    break
+            
+            if not accum_batches:
+                break
+            
+            # ------------------------------------------------------------------
+            # 2. Pre-Calculate Totals for Variable-Size Scaling
+            # ------------------------------------------------------------------
+            local_step_tokens = 0.0
+            local_step_samples = 0.0
 
-            accelerator.backward(output.loss)
+            for batch in accum_batches:
+                # Count valid tokens for Token Loss scaling (CrossEntropy)
+                if 'labels' in batch:
+                    local_step_tokens += (batch['labels'] != -100).sum().item()
+                else:
+                    # Fallback
+                    local_step_tokens += batch['input_ids'].numel()
+
+                # Count samples for Surrogate Loss scaling (Poisson/BCE per sample)
+                # Assumes dim 0 is batch dimension
+                local_step_samples += len(batch['input_ids'])
+
+            # Convert to tensor for reduction
+            # [token_count, sample_count]
+            counts_tensor = torch.tensor([local_step_tokens, local_step_samples], device=accelerator.device)
+            
+            # Reduce across all GPUs to get Global Totals for this step
+            global_counts = accelerator.reduce(counts_tensor, reduction='sum')
+            global_total_tokens = global_counts[0].item()
+            global_total_samples = global_counts[1].item()
+            
+            # Safety for div by zero
+            if global_total_tokens == 0: global_total_tokens = 1.0
+            if global_total_samples == 0: global_total_samples = 1.0
+
+            # ------------------------------------------------------------------
+            # 3. Forward & Backward Pass with Mixed Scaling
+            # ------------------------------------------------------------------
+            # Track logging loss separately
+            avg_loss_accum = 0.0
+
+            for i, batch in enumerate(accum_batches):
+                # Ensure on device
+                batch = {k: v.to(accelerator.device) for k, v in batch.items()}
+                
+                # Logic: Only sync gradients on the LAST micro-batch of the accumulation step
+                # (Standard Accelerate/DDP optimization)
+                ctx = accelerator.no_sync(model) if (i < len(accum_batches) - 1 and world_size > 1) else contextlib.nullcontext
+
+                with ctx():
+                    output = model(**batch)
+                    
+                    # --- A. Calculate Local Counts for this specific micro-batch ---
+                    current_batch_tokens = (batch['labels'] != -100).sum().item() if 'labels' in batch else 0.0
+                    current_batch_samples = len(batch['input_ids'])
+
+                    # --- B. Apply Scaling Factors ---
+                    # 1. Un-average the loss (multiply by local count)
+                    # 2. Re-average over global count (divide by global total)
+                    # 3. Multiply by world_size (cancel DDP's implicit division)
+
+                    # Factor for Token Loss (Frame-weighted)
+                    token_scale = (current_batch_tokens / global_total_tokens) * world_size
+                    
+                    # Factor for Surrogate/Aux Loss (Sample-weighted)
+                    sample_scale = (current_batch_samples / global_total_samples) * world_size
+
+                    # Reconstruct total loss
+                    # Note: output.token_loss and output.surrogate_loss are local means
+                    
+                    total_scaled_loss = 0.0
+                    
+                    if hasattr(output, 'token_loss'):
+                        total_scaled_loss += output.token_loss * token_scale
+                        
+                    if hasattr(output, 'surrogate_loss'):
+                        total_scaled_loss += output.surrogate_loss * (1.0 / grad_accum_steps)
+                        
+                    # If auxiliary_deviation acts as a loss component (unlikely based on name, but safe to check)
+                    # Assuming it's just a metric for now based on previous discussions. 
+                    # If there are other losses in 'output', add them here with sample_scale.
+
+                    total_scaled_loss *= grad_accum_steps
+                        
+                    # --- C. Backward ---
+                    accelerator.backward(total_scaled_loss)
+                    
+                    # --- D. Update Metrics for Logging ---
+                    with torch.no_grad():
+                        # We accumulate the raw local means for the metrics dictionary
+                        metrics.update_dict({
+                            "train/token_loss": output.token_loss.item(),
+                            "train/surrogate_loss": output.surrogate_loss.item(),
+                            "train/auxiliary_deviation": output.auxiliary_deviation.item(),
+                        })
+                        
+                        # Accumulate a rough average for the progress bar
+                        avg_loss_accum += (output.token_loss.item() + output.surrogate_loss.item()) / len(accum_batches)
+
+            # ------------------------------------------------------------------
+            # 4. Optimization Step
+            # ------------------------------------------------------------------
             optim.step()
             optim.zero_grad()
+            scheduler.step()
 
-            loss = accelerator.reduce(output.loss, reduction='mean')
-            token_loss = accelerator.reduce(output.token_loss, reduction='mean')
-            surrogate_loss = accelerator.reduce(output.surrogate_loss, reduction='mean')
-            auxiliary_deviation = accelerator.reduce(output.auxiliary_deviation, reduction='mean')
+            # ------------------------------------------------------------------
+            # 5. Logging
+            # ------------------------------------------------------------------
+            avg_loss_tensor = torch.tensor(avg_loss_accum, device=accelerator.device)
+            global_avg_loss = accelerator.reduce(avg_loss_tensor, reduction='mean').item()
 
-            metrics.update_dict({
-                "train/loss": loss.item(),
-                "train/token_loss": token_loss.item(),
-                "train/surrogate_loss": surrogate_loss.item(),
-                "train/auxiliary_deviation": auxiliary_deviation.item(),
-            })
+            metrics.update_dict({"train/loss": global_avg_loss})
 
             if is_master and not args.debug and run is not None:
                 run.log({
                     **metrics.to_dict(),
                     "train/epoch": epoch + 1,
-                    "train/step": step + 1,
+                    "train/step": (epoch * num_update_steps_per_epoch) + update_step + 1,
+                    "train/lr": scheduler.get_last_lr()[0],
+                    # Optional: monitor utilization
+                    "train/global_tokens": global_total_tokens,
                 })
                 metrics.reset()
 
-            progress_bar.set_description(f"Epoch {epoch + 1}, Loss: {loss.item():.4f}")
+            progress_bar.set_description(f"Epoch {epoch + 1}, Loss: {global_avg_loss:.4f}")
 
         logging.info(f"Epoch {epoch + 1} completed.")
 
@@ -429,7 +549,7 @@ def main():
                 
             current_metric = metrics.get(target_metric, -1.0)
             logging.info(f"Current model achieved {target_metric}: {current_metric}")
-            if current_metric > best_metric: # 100ms accuracy should be higher
+            if current_metric > best_metric: 
                 best_metric = current_metric
                 best_checkpoint_dir = checkpoint_dir
                 if is_master:
@@ -437,8 +557,7 @@ def main():
         
         accelerator.wait_for_everyone()
 
-    # Final evaluation on test split
-
+    # Final evaluation
     final_checkpoint = best_checkpoint_dir if best_checkpoint_dir else args.load_checkpoint
     if final_checkpoint:
         logging.info(f"Evaluating with checkpoint: {final_checkpoint}")
@@ -450,7 +569,7 @@ def main():
     
     logging.info(f"Evaluating final split on split {split}")
 
-    distributed_eval(split, prefix=split, epoch=training_config['epochs'] - 1, state_dir=final_checkpoint) # first do evaluation on the constraints imposed during training
+    distributed_eval(split, prefix=split, epoch=training_config['epochs'] - 1, state_dir=final_checkpoint)
 
     accelerator.wait_for_everyone()
 
@@ -459,7 +578,6 @@ def main():
     
     accelerator.wait_for_everyone()
 
-    # Completion line
     if is_master:
         logging.info(f"Training completed. All outputs saved to: {experiment_dir}")
 
