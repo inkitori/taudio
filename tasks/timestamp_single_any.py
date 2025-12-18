@@ -182,14 +182,14 @@ class SingleTimestampAnyTask(BaseTask):
                 events=events, ds_adapter=ds_adapter, apply_fallback=not eval_mode
             )
 
-        logging.info(f"[ANY] Events: {events}")
-        logging.info(f"[ANY] Event: {event}")
+        # logging.info(f"[ANY] Events: {events}")
+        # logging.info(f"[ANY] Event: {event}")
 
         # Logging for traceability
         name = ds_adapter.event_name(event)
         t_sec = ds_adapter.get_target_seconds(event, self.key)
         ordinal = self._compute_ordinal(all_events=events, ds_adapter=ds_adapter, selected_event=event)
-        logging.debug(f"[ANY] Selected event: {name}, {t_sec}, ordinal={ordinal}")
+        logging.info(f"[ANY] Selected event: {name}, {t_sec}, ordinal={ordinal}")
 
         # Build prompt text via chat template and prepare inputs using the model adapter's processor
         processor = model_adapter.processor
@@ -197,7 +197,7 @@ class SingleTimestampAnyTask(BaseTask):
             model_processor=processor, ds_adapter=ds_adapter, event=event, ordinal=ordinal, eval_mode=eval_mode
         )
 
-        logging.info(f"[ANY] Prompt text:\n {prompt_text}")
+        # logging.info(f"[ANY] Prompt text:\n {prompt_text}")
 
         inputs = processor(
             text=prompt_text,
