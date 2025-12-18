@@ -196,23 +196,27 @@ class ChatGPTEvaluator:
         # but the request specifically asked for Gemini.
         audio_bytes = _audio_to_wav_bytes(audio)
         encoded_audio = base64.b64encode(audio_bytes).decode("utf-8")
-        response = self._client.responses.create(
+        response = self._client.responses.parse(
             model=self._model,
             input=[
                 {
                     "role": "user",
                     "content": [
-                        {"type": "input_text", "text": prompt},
+                        {"type": "text", "text": prompt},
                         {"type": "input_audio", "audio": {"data": encoded_audio, "format": "wav"}},
                     ],
                 }
             ],
+            text_format=Timestamp,
             max_output_tokens=64,
             temperature=0.0,
             top_p=0.1,
             **({"timeout": self._timeout} if self._timeout else {}),
         )
-        return _extract_openai_text(response)
+        logging.info(f"[GPT] Response: {response}")
+        logging.info(f"[GPT] Parsed Response: {response.output_parsed}")
+
+        return response.output_parsed
 
 
 def _audio_to_wav_bytes(audio: Dict[str, object]) -> bytes:
@@ -223,24 +227,6 @@ def _audio_to_wav_bytes(audio: Dict[str, object]) -> bytes:
     buffer.seek(0)
     return buffer.read()
 
-
-def _extract_openai_text(response: object) -> str:
-    output_text = getattr(response, "output_text", None)
-    if output_text:
-        return str(output_text).strip()
-
-    output = getattr(response, "output", None)
-    if not output:
-        return ""
-
-    texts = []
-    for item in output:
-        if getattr(item, "type", None) != "message":
-            continue
-        for content in getattr(item, "content", []):
-            if getattr(content, "type", None) in {"output_text", "text"}:
-                texts.append(str(getattr(content, "text", "")))
-    return "\n".join(texts).strip()
 
 
 def _build_prompt(ds_adapter, task: SingleTimestampAnyTask, example: Dict[str, object]) -> Tuple[str, Dict[str, object], float]:
@@ -263,20 +249,20 @@ def _fallback_timestamp(audio: Dict[str, object]) -> float:
     return float(samples.size / (2 * sr))
 
 
-def _parse_timestamp(raw_text: str) -> Optional[float]:
-    if not raw_text:
-        return None
+# def _parse_timestamp(raw_text: str) -> Optional[float]:
+#     if not raw_text:
+#         return None
 
-    timecode_match = TIMECODE_PATTERN.search(raw_text)
-    if timecode_match:
-        minutes = float(timecode_match.group(1))
-        seconds = float(timecode_match.group(2))
-        return minutes * 60 + seconds
+#     timecode_match = TIMECODE_PATTERN.search(raw_text)
+#     if timecode_match:
+#         minutes = float(timecode_match.group(1))
+#         seconds = float(timecode_match.group(2))
+#         return minutes * 60 + seconds
 
-    matches = FLOAT_PATTERN.findall(raw_text)
-    if matches:
-        return float(matches[-1])
-    return None
+#     matches = FLOAT_PATTERN.findall(raw_text)
+#     if matches:
+#         return float(matches[-1])
+#     return None
 
 def _parse_timestamp_json(response_json) -> Optional[float]:
     if not response_json:
@@ -371,10 +357,10 @@ def evaluate_dataset(
         )
         
         # Determine format (dict or str)
-        if isinstance(raw_text, dict):
-             parsed = _parse_timestamp_json(raw_text)
-        else:
-             parsed = _parse_timestamp(raw_text)
+        # if isinstance(raw_text, dict):
+        parsed = _parse_timestamp_json(raw_text)
+        # else:
+        #      parsed = _parse_timestamp(raw_text)
 
         if parsed is None:
             parsed = _fallback_timestamp(audio)
