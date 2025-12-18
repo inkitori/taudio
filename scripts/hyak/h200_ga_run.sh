@@ -1,15 +1,15 @@
 #!/bin/bash
-#SBATCH --job-name=accelerate_ga_run
+#SBATCH --partition=gpu-h200
 #SBATCH --account=ark
-#SBATCH --partition=ckpt
+#SBATCH --mem-per-gpu=128G
+#SBATCH --cpus-per-gpu=10
 #SBATCH --nodes=1
-#SBATCH --ntasks-per-node=1
-#SBATCH --cpus-per-task=4
-#SBATCH --mem=48G
-#SBATCH --time=4:00:00
-#SBATCH --gres=gpu:a40:4
+#SBATCH --gres=gpu:1
+#SBATCH --time=5:00:00
+#SBATCH --job-name=h200_ga_run
 #SBATCH --output=scripts/%x/%j.out
 #SBATCH --error=scripts/%x/%j.err
+#SBATCH --dependency=singleton         # dont hog 
 
 CONDA_BASE=$(conda info --base) # This is a good way to get it if conda is in PATH
 
@@ -40,4 +40,4 @@ if [ -n "$3" ]; then
 EVAL_MAX_ARG="--eval-max-time $3"
 fi
 
-accelerate launch --config_file accelerate_configs/4_gpu_bf16.yaml ga_run.py --config "$1" $EVAL_MIN_ARG $EVAL_MAX_ARG
+accelerate launch --config_file accelerate_configs/1_gpu_bf16.yaml ga_run.py --config "$1" $EVAL_MIN_ARG $EVAL_MAX_ARG

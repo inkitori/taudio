@@ -472,7 +472,7 @@ def get_wandb_run_state(run_path: str) -> Tuple[int, Dict[str, float]]:
     # Since the script logs every step, history length is a good proxy for 'processed' count.
     
     # Scan history is more efficient for large runs
-    history = list(run.scan_history(keys=["token_abs_error_sum"]))
+    history = list(run.scan_history())
     if not history:
         return 0, {}
 
@@ -484,7 +484,7 @@ def get_wandb_run_state(run_path: str) -> Tuple[int, Dict[str, float]]:
     # The script doesn't explicitly log a "step" counter variable other than relying on 
     # wandb's internal step.
     # However, since we log once per example, len(history) is the number of examples processed.
-    count = len(history)
+    count = len(list(run.scan_history(keys=["token_abs_error_sum"])))
     
     return count, metrics
 

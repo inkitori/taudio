@@ -49,6 +49,8 @@ def main():
     parser.add_argument('--run-id', type=str, default=None, help='wandb run id')
     parser.add_argument('--dev', action='store_true', help='Perform final evaluation on dev')
 
+    parser.add_argument('--bs-per-device', type=int, default=1)
+
     args = parser.parse_args()
 
     # Initialize config manager
@@ -75,7 +77,7 @@ def main():
     
     # Calculate per-device batch size
     # Formula: Effective = Per_Device * World_Size * Accum_Steps
-    batch_size_per_device = 1
+    batch_size_per_device = args.bs_per_device
     grad_accum_steps = effective_batch_size // (batch_size_per_device * world_size)
     
     if batch_size_per_device < 1:
@@ -285,7 +287,7 @@ def main():
             sampling_rate=model.model_adapter.sampling_rate,
             left_padding=dataset_config.get('left_padding', 0),
             key=task.key,
-            take_first=dataset_config.get('take_first', None),
+            # take_first=dataset_config.get('take_first', None),
         )
 
         base_ds = adapter.load_split(split_name)
@@ -429,7 +431,11 @@ def main():
                 
                 # Logic: Only sync gradients on the LAST micro-batch of the accumulation step
                 # (Standard Accelerate/DDP optimization)
-                ctx = contextlib.nullcontext
+
+                if (i < len(accum_batches) - 1 and accelerator.num_processes > 1):
+                    ctx = accelerator.no_sync(model)
+                else:
+                    ctx = contextlib.nullcontext
 
                 with ctx():
                     output = model(**batch)
