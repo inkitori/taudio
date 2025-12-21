@@ -1,3 +1,4 @@
+import os
 from typing import Any, Dict, Iterable, List
 from datasets import load_dataset
 from datasets.features import Audio
@@ -47,8 +48,9 @@ class AudioSetAdapter(BaseDatasetAdapter):
             half_size = len(ds) // 2
             ds = ds.select(range(half_size))
 
+            local_rank = int(os.environ.get("LOCAL_RANK", 0)) 
             try:
-                output_filename = "included_video_ids.txt"
+                output_filename = f"included_video_ids_rank-{local_rank}.txt"
                 kept_ids = ds['video_id']
                 
                 with open(output_filename, 'w') as f:
@@ -68,7 +70,6 @@ class AudioSetAdapter(BaseDatasetAdapter):
         ds = ds.cast_column("audio", Audio(sampling_rate=self.sampling_rate))
         if self.take_first:
             ds = ds.select(range(self.take_first))
-        
         return ds
 
     def get_audio_frames(self, example: Dict[str, Any]) -> Dict[str, Any]:
