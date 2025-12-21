@@ -1,3 +1,5 @@
+import os
+from collections import defaultdict
 from typing import Any, Dict, Iterable, Optional, List, Tuple
 import random
 import logging
@@ -8,7 +10,8 @@ import math
 import re
 from nltk.corpus import stopwords
 import textwrap
-
+from pathlib import Path
+import hashlib
 from dataset.base_dataset_adapter import BaseDatasetAdapter
 from models.base_model_adapter import BaseModelAdapter
 from dataset.audioset import AudioSetAdapter
@@ -33,6 +36,7 @@ class SingleTimestampAnyTask(BaseTask):
         ds_adapter: BaseDatasetAdapter,
         apply_fallback: bool,
         return_all: bool = False,
+        example
     ) -> Dict[str, Any]:
         candidate_events: List[Dict[str, Any]] = []
         unknown = set(ds_adapter.unknown_events())
@@ -65,8 +69,23 @@ class SingleTimestampAnyTask(BaseTask):
             return candidate_events
 
         logging.debug(f"[ANY] Candidate events: {candidate_events}")
+        
         if len(candidate_events) > 0:
-            return random.choice(candidate_events)
+            chosen_event = random.choice(candidate_events) 
+
+        selected_idx = example.get('selected')
+        if selected_idx is not None:
+            logging.info(f"[_choose_event] Selected index already precomputed, using index {example['selected']}")
+
+            if selected_idx == -1:
+                raise ValueError("No candidate events found (precomputed index was -1)")
+
+            chosen_event = events[example['selected']]
+
+            logging.info(f"[_choose_event] Using event: {chosen_event}")
+
+        if chosen_event is not None: 
+            return chosen_event
 
         raise ValueError("No candidate events found")
 
@@ -179,7 +198,7 @@ class SingleTimestampAnyTask(BaseTask):
         # If an event is provided (e.g., during eval), use it to keep GT and inputs aligned
         if event is None:
             event = self._choose_event(
-                events=events, ds_adapter=ds_adapter, apply_fallback=not eval_mode
+                events=events, ds_adapter=ds_adapter, apply_fallback=not eval_mode, example=example
             )
 
         # logging.info(f"[ANY] Events: {events}")
@@ -254,7 +273,7 @@ class SingleTimestampAnyTask(BaseTask):
         # Choose event if not provided so we can compute GT consistently
         if event is None:
             events = list(ds_adapter.get_events(example))
-            event = self._choose_event(events=events, ds_adapter=ds_adapter, apply_fallback=False)
+            event = self._choose_event(events=events, ds_adapter=ds_adapter, apply_fallback=False, example=example)
             if event is None:
                 return None
 
@@ -300,6 +319,7 @@ class SingleTimestampAnyTask(BaseTask):
         )
 
         metrics: Dict[str, float] = {
+            "parsing_error": 0.0,
             "token_abs_error_sum": abs_err,
             "token_correct_5ms": 1.0 if abs_err <= 0.005 else 0.0,
             "token_correct_10ms": 1.0 if abs_err <= 0.010 else 0.0,
@@ -324,7 +344,7 @@ class SingleTimestampAnyTask(BaseTask):
         # Choose event if not provided for consistent GT
         if event is None:
             events = list(ds_adapter.get_events(example))
-            event = self._choose_event(events=events, ds_adapter=ds_adapter, apply_fallback=False)
+            event = self._choose_event(events=events, ds_adapter=ds_adapter, apply_fallback=False, example=example)
             if event is None:
                 return None
 
@@ -342,27 +362,34 @@ class SingleTimestampAnyTask(BaseTask):
 
         with torch.no_grad():
             outputs = model(**inputs, inference=True)
-            pred_timestamp = round_timestamp_python(outputs.auxiliary_prediction.item())
 
-        logging.info(f"[ANY] Auxiliary prediction: {pred_timestamp}, GT: {gt_timestamp}")
+            preds_dict = outputs.auxiliary_prediction
+            if not isinstance(preds_dict, dict):
+                preds_dict = {"default": preds_dict}
 
-        # Metric increments
-        abs_err = round_timestamp_python(abs(pred_timestamp - gt_timestamp))
-        logging.info(
-            f"[ANY] Absolute error: {abs_err}, Error bound: {error_bound}, Correct: {1.0 if abs_err <= float(error_bound) else 0.0}"
-        )
-        metrics: Dict[str, float] = {
-            "aux_abs_error_sum": abs_err,
-            "aux_correct_5ms": 1.0 if abs_err <= 0.005 else 0.0,
-            "aux_correct_10ms": 1.0 if abs_err <= 0.010 else 0.0,
-            "aux_correct_20ms": 1.0 if abs_err <= 0.020 else 0.0,
-            "aux_correct_40ms": 1.0 if abs_err <= 0.040 else 0.0,
-            "aux_correct_50ms": 1.0 if abs_err <= 0.050 else 0.0,
-            "aux_correct_80ms": 1.0 if abs_err <= 0.080 else 0.0,
-            "aux_correct_100ms": 1.0 if abs_err <= 0.100 else 0.0,
-            "aux_correct_200ms": 1.0 if abs_err <= 0.200 else 0.0,
-        }
-        return metrics
+            
+        thresholds = [0.005, 0.010, 0.020, 0.040, 0.050, 0.080, 0.100, 0.200]
+
+        all_metrics = {}
+
+        for method_name, pred_tensor in preds_dict.items():
+            # Extract scalar and round
+            pred_timestamp = round_timestamp_python(pred_tensor.item())
+            abs_err = round_timestamp_python(abs(pred_timestamp - gt_timestamp))
+
+            # logging.info(f"[{method_name.upper()}] Pred: {pred_timestamp}, GT: {gt_timestamp}, Err: {abs_err}")
+
+            # Add general error metric
+            all_metrics[f"{method_name}/aux_abs_error_sum"] = abs_err
+            
+            # Add accuracy metrics for each threshold
+            for t in thresholds:
+                # Format key as "method/aux_correct_5ms" etc.
+                ms_label = int(t * 1000)
+                metric_key = f"{method_name}/aux_correct_{ms_label}ms"
+                all_metrics[metric_key] = 1.0 if abs_err <= t else 0.0
+
+        return all_metrics
 
     def calculate_loss(
         self,
@@ -374,115 +401,98 @@ class SingleTimestampAnyTask(BaseTask):
         class_weighting: bool,
     ) -> torch.Tensor:
         batch_size = audio_logits.size(0)
+        device = audio_logits.device
+        dtype = audio_logits.dtype
+        
+        # Pre-calculate scaling factor
+        scaling = model_adapter.seconds_to_embedding * model_adapter.scaling_factor
+        
         gt_timestamps = torch.argmax(audio_labels, dim=1)
-        # Convert from 10ms frame index to seconds (100 frames per second)
-        gt_timestamps = gt_timestamps / (model_adapter.seconds_to_embedding * model_adapter.scaling_factor)
-        gt_timestamps = round_timestamp(gt_timestamps)
+        gt_timestamps = round_timestamp(gt_timestamps / scaling)
 
-        if use_poisson_loss and class_weighting:
-            p_loss = poisson_loss(audio_logits, audio_labels, audio_labels_frame_mask).mean()
+        # Dictionary to store a list of predictions for every method
+        # e.g., predictions_accumulator["smooth_20ms_gauss"] = [val1, val2, ...]
+        predictions_accumulator = defaultdict(lambda: torch.zeros(batch_size, device=device))
 
-            # When both Poisson loss and class weighting are enabled, predict timestamp
-            # as the average of Poisson-inferred and binary-argmax timestamps.
-            predicted_timestamps = torch.zeros(batch_size, device=audio_logits.device)
-
-            for example in range(batch_size):
-                example_audio_logits = audio_logits[example]
-                example_audio_labels = audio_labels[example]
-                example_audio_labels = example_audio_labels.to(example_audio_logits.dtype)
-
-                if (example_audio_labels == -100).any():
-                    neg_100_idx = (example_audio_labels == -100).nonzero(as_tuple=True)[0][0].item()
-                    example_audio_logits = example_audio_logits[:neg_100_idx]
-                    example_audio_labels = example_audio_labels[:neg_100_idx]
-
-                # Poisson timestamp (frame index)
-                poisson_frame_idx = infer_timestamps(1, example_audio_logits.cpu().float().detach().numpy())[0]
-                poisson_frame_idx = torch.tensor(poisson_frame_idx, device=audio_logits.device, dtype=audio_logits.dtype)
-                poisson_seconds = poisson_frame_idx / (model_adapter.seconds_to_embedding * model_adapter.scaling_factor)
-                poisson_seconds = round_timestamp(poisson_seconds)
-
-                # Binary timestamp (frame index) with bias subtraction
-                biased_logits = example_audio_logits
-                binary_frame_idx = torch.argmax(biased_logits).to(audio_logits.dtype)
-                binary_frame_idx = binary_frame_idx + 0.5  # cover full frame width
-                binary_seconds = binary_frame_idx / (model_adapter.seconds_to_embedding * model_adapter.scaling_factor)
-                binary_seconds = round_timestamp(binary_seconds)
-
-                # Average in seconds, then round to final grid
-                avg_seconds = (poisson_seconds + binary_seconds) / 2
-                predicted_timestamps[example] = round_timestamp(avg_seconds)
-
-            loss = p_loss
-
-        elif use_poisson_loss:
+        # --- Loss Calculation Logic ---
+        if use_poisson_loss:
             loss = poisson_loss(audio_logits, audio_labels, audio_labels_frame_mask).mean()
-
-            predicted_timestamps = torch.zeros(batch_size, device=audio_logits.device)
-
-            for example in range(batch_size):
-                example_audio_logits = audio_logits[example]
-                example_audio_labels = audio_labels[example]
-                example_audio_labels = example_audio_labels.to(example_audio_logits.dtype)
-
-                if (example_audio_labels == -100).any():
-                    neg_100_idx = (example_audio_labels == -100).nonzero(as_tuple=True)[0][0].item()
-                    example_audio_logits = example_audio_logits[:neg_100_idx]
-                    example_audio_labels = example_audio_labels[:neg_100_idx]
-
-                predicted_timestamps[example] = infer_timestamps(1, example_audio_logits.cpu().float().detach().numpy())[0]
-
-                # Convert from 10ms frame index to seconds (100 frames per second)
-                predicted_timestamps[example] = predicted_timestamps[example] / (
-                    model_adapter.seconds_to_embedding * model_adapter.scaling_factor
-                )
-
-                predicted_timestamps[example] = round_timestamp(predicted_timestamps[example])
         else:
-            predicted_timestamps = torch.zeros(batch_size, device=audio_logits.device)
-            loss = torch.zeros(batch_size, device=audio_logits.device)
-
+            # Standard BCE Path
+            losses = torch.zeros(batch_size, device=device, dtype=dtype)
             for example in range(batch_size):
                 example_audio_logits = audio_logits[example]
-                example_audio_labels = audio_labels[example]
-                example_audio_labels = example_audio_labels.to(example_audio_logits.dtype)
-
+                example_audio_labels = audio_labels[example].to(dtype)
+                
+                # Mask handling
                 if (example_audio_labels == -100).any():
-                    neg_100_idx = (example_audio_labels == -100).nonzero(as_tuple=True)[0][0].item()
-                    example_audio_logits = example_audio_logits[:neg_100_idx]
-                    example_audio_labels = example_audio_labels[:neg_100_idx]
-
-                # Use Poisson inference for timestamp prediction; keep argmax path commented for testing.
-                poisson_frame_idx = infer_timestamps(1, example_audio_logits.cpu().float().detach().numpy())[0]
-                predicted_timestamps[example] = torch.tensor(
-                    poisson_frame_idx, device=audio_logits.device, dtype=audio_logits.dtype
-                )
-                # predicted_timestamps[example] = torch.argmax(example_audio_logits)
-                # predicted_timestamps[example] = predicted_timestamps[example] + 0.5
-                # Convert from 10ms frame index to seconds (100 frames per second)
-                predicted_timestamps[example] = predicted_timestamps[example] / (
-                    model_adapter.seconds_to_embedding * model_adapter.scaling_factor
-                )
-                predicted_timestamps[example] = round_timestamp(predicted_timestamps[example])
+                    mask = example_audio_labels != -100
+                    example_audio_logits = example_audio_logits[mask]
+                    example_audio_labels = example_audio_labels[mask]
 
                 if class_weighting:
                     num_ones = (example_audio_labels == 1).sum()
                     num_zeros = (example_audio_labels == 0).sum()
-                    pos_weight = num_zeros / num_ones
-                    criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight.to(example_audio_logits.dtype))
+                    pos_weight = num_zeros / torch.clamp(num_ones, min=1.0)
+                    criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
                 else:
                     criterion = nn.BCEWithLogitsLoss()
+                
+                losses[example] = criterion(example_audio_logits, example_audio_labels)
+            loss = losses.mean()
 
-                loss[example] = criterion(example_audio_logits, example_audio_labels)
+        # --- Prediction & Metrics Logic ---
+        for example in range(batch_size):
+            example_audio_logits = audio_logits[example]
+            example_audio_labels = audio_labels[example].to(dtype)
 
-        loss = loss.mean()
+            # Truncate based on mask
+            if (example_audio_labels == -100).any():
+                neg_100_idx = (example_audio_labels == -100).nonzero(as_tuple=True)[0][0].item()
+                example_audio_logits = example_audio_logits[:neg_100_idx]
+                example_audio_labels = example_audio_labels[:neg_100_idx]
 
-        logging.info(f"[ANY] Predicted timestamps: {predicted_timestamps}, Ground truth timestamps: {gt_timestamps}")
+            # 1. Get dictionary of predictions from the new infer_timestamps
+            # returns {"posterior_mode": [...], "smooth_20ms_boxcar": [...], etc}
+            preds_dict_np = infer_timestamps(1, example_audio_logits.cpu().float().detach().numpy())
 
-        return loss, torch.abs(predicted_timestamps - gt_timestamps).mean(), predicted_timestamps
+            # 2. Process all method predictions
+            for method_name, pred_array in preds_dict_np.items():
+                frame_idx = pred_array[0] # n_pred=1, so we take index 0
+                predictions_accumulator[method_name][example] = frame_idx
+                predictions_accumulator[method_name][example] = predictions_accumulator[method_name][example] / (model_adapter.seconds_to_embedding * model_adapter.scaling_factor)
+                predictions_accumulator[method_name][example] = round_timestamp(predictions_accumulator[method_name][example])
+                # predictions_accumulator[method_name][example] = seconds
+
+            # 3. Special Hybrid Logic (Original "Poisson + Binary" branch)
+            if use_poisson_loss and class_weighting:
+                # We already have "posterior_mode" in the loop above
+                poisson_seconds = predictions_accumulator["posterior_mode"][example]
+                
+                # Binary argmax path
+                binary_frame_idx = torch.argmax(example_audio_logits).to(dtype) + 0.5
+                binary_seconds = round_timestamp(binary_frame_idx / scaling)
+                
+                # Average them and store as a new method name
+                avg_seconds = round_timestamp((poisson_seconds + binary_seconds) / 2)
+                predictions_accumulator["hybrid_poisson_binary"][example] = avg_seconds
+
+        # --- Final Return Values ---
+        # Convert defaultdict back to a regular dict for the return
+        predicted_timestamps = dict(predictions_accumulator)
+        
+        # Calculate absolute error specifically using posterior_mode as requested
+        base_preds = predicted_timestamps["posterior_mode"]
+        abs_error = torch.abs(base_preds - gt_timestamps).mean()
+
+        logging.info(f"[ANY] Base Predicted timestamps: {base_preds}")
+        logging.info(f"[ANY] Ground truth timestamps: {gt_timestamps}")
+
+        return loss, abs_error, predicted_timestamps
+
 
     def skip_example(self, example: Dict[str, Any], adapter: BaseModelAdapter) -> bool:
-        events = self._choose_event(events=list(adapter.get_events(example)), ds_adapter=adapter, apply_fallback=False, return_all=True)  # type: ignore
+        events = self._choose_event(events=list(adapter.get_events(example)), ds_adapter=adapter, apply_fallback=False, return_all=True, example=example)  # type: ignore
         if len(events) == 0:
             return True
         return False
@@ -490,7 +500,7 @@ class SingleTimestampAnyTask(BaseTask):
     def evaluate_tokens_base(self, example: Dict[str, Any], ds_adapter: BaseDatasetAdapter, model_adapter: BaseModelAdapter) -> Dict[str, Any]:
 
         events = list(ds_adapter.get_events(example))
-        event = self._choose_event(events=events, ds_adapter=ds_adapter, apply_fallback=False)
+        event = self._choose_event(events=events, ds_adapter=ds_adapter, apply_fallback=False, example=example)
 
         name = ds_adapter.event_name(event)
         gt = ds_adapter.get_target_seconds(event, self.key)
@@ -589,3 +599,75 @@ class SingleTimestampAnyTask(BaseTask):
             "token_correct_200ms": 1.0 if abs_err <= 0.200 else 0.0,
         }
         return metrics
+
+    def select_indices(self, ds, ds_adapter, split):
+        ds = ds.map(
+            _deterministic_map_fn,
+            with_indices=True,
+            fn_kwargs={
+                "repository": ds_adapter.repository,
+                "split": split,
+                "ds_adapter": ds_adapter,
+                "min_time": self.min_time,
+                "max_time": self.max_time,
+                "key": self.key
+            }
+        )
+
+        local_rank = int(os.environ.get("LOCAL_RANK", 0)) 
+        filename = f"{ds_adapter.repository.replace('/', '-')}_{split}_{self.min_time}_{self.max_time}_{self.key}_rank-{local_rank}_indices.txt"
+
+        indices_dir = Path("indices")
+        indices_path = indices_dir / filename
+        indices_dir.mkdir(parents=True, exist_ok=True)
+
+        selected_indices = ds['selected']
+        
+        with indices_path.open("w") as f:
+            for idx_val in selected_indices:
+                f.write(f"{idx_val}\n")
+        
+        logging.info(f"Saved {len(selected_indices)} indices to {filename}")
+        
+        return ds
+
+def _deterministic_map_fn(example, idx, repository, split, ds_adapter, min_time, max_time, key):
+    events = ds_adapter.get_events(example)
+    candidate_indices = []
+    unknown = set(ds_adapter.unknown_events())
+
+    for i, event in enumerate(events):
+        if isinstance(ds_adapter, AudioSetAdapter):
+            if event['start'] <= 0:
+                logging.info(f"[ANY] Skipping event {event}")
+                continue
+
+        name = ds_adapter.event_name(event)
+
+        # 2. Timing filters
+        t_seconds = float(ds_adapter.get_target_seconds(event, key))
+        if min_time is not None and t_seconds < min_time:
+            continue
+        if max_time is not None and t_seconds >= max_time:
+            continue
+
+        # 3. Lexical filters
+        if name in unknown or name in STOPS:
+            continue
+
+        candidate_indices.append(i)
+
+    # 4. Deterministic Choice Logic
+    if not candidate_indices:
+        return {"selected": -1}
+
+    # Hash based on repo, split, and row index
+    hash_input = f"{repository}_{split}_{idx}".encode()
+    hash_value = int(hashlib.sha256(hash_input).hexdigest(), 16)
+    
+    # Pick one index from the valid candidates
+    # This returns the index relative to the original 'components' list
+    chosen_meta_idx = hash_value % len(candidate_indices)
+    actual_component_idx = candidate_indices[chosen_meta_idx]
+    
+    return {"selected": actual_component_idx}
