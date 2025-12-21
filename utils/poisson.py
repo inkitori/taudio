@@ -2,6 +2,91 @@ import numpy as np
 import torch
 from scipy.stats import beta
 from accelerate import PartialState
+from scipy.signal import windows
+
+import numpy as np
+
+def get_beta_mode_fraction(k, n):
+    """
+    Computes the mode of the Beta distribution in [0, 1].
+    Mode = (k - 1) / (n - 1)
+    """
+    denominator = np.maximum(n - 1, 1e-9)
+    mode = (k - 1) / denominator
+    return mode
+
+def compute_log_scores(u_candidates, log_hazards, k, n):
+    """
+    Computes the log-likelihood score for candidate points u.
+    Score = log(lambda) + (k-1)log(u) + (n-k)log(1-u)
+    """
+    alpha = k - 1
+    beta = n - k
+    
+    epsilon = 1e-12
+    u_safe = np.clip(u_candidates, epsilon, 1.0 - epsilon)
+    
+    log_u = np.log(u_safe)
+    log_1_u = np.log(1.0 - u_safe)
+    
+    beta_log_prob = alpha * log_u + beta * log_1_u
+    
+    return log_hazards + beta_log_prob
+
+def posterior_mode_inhomogeneous_poisson(n_pred, log_hazards, seq_lens):
+    """
+    Vectorized computation of posterior modes in frame units.
+    """
+    batch_size, max_seq_len = log_hazards.shape
+    max_n = int(np.max(n_pred))
+    
+    # Masking
+    seq_mask = np.arange(max_seq_len)[None, :] < seq_lens[:, None]
+    masked_log_hazards = log_hazards.copy()
+    masked_log_hazards[~seq_mask] = -np.inf
+    
+    hazards = np.exp(masked_log_hazards)
+    hazards[~seq_mask] = 0.0 
+
+    # Cumulative Hazard F(t)
+    cum_hazard_right = np.cumsum(hazards, axis=1)
+    H_total = cum_hazard_right[:, -1:] 
+    F_right = np.divide(cum_hazard_right, H_total, where=H_total>0)
+    F_left = np.pad(F_right[:, :-1], ((0, 0), (1, 0)), mode='constant', constant_values=0)
+    
+    # Grids
+    k_grid = np.arange(1, max_n + 1).reshape(1, 1, -1) # (1, 1, K)
+    n_grid = n_pred.reshape(batch_size, 1, 1)          # (B, 1, 1)
+    
+    F_left_exp = F_left[:, :, np.newaxis]
+    F_right_exp = F_right[:, :, np.newaxis]
+    log_haz_exp = masked_log_hazards[:, :, np.newaxis]
+
+    # Local Best Candidates
+    u_star = get_beta_mode_fraction(k_grid, n_grid) 
+    u_best_local = np.clip(u_star, F_left_exp, F_right_exp)
+    
+    # Evaluate Scores
+    scores = compute_log_scores(u_best_local, log_haz_exp, k_grid, n_grid)
+    best_frame_indices = np.argmax(scores, axis=1) 
+    
+    # Transform Back
+    b_idx = np.arange(batch_size)[:, None]
+    win_F_left = F_left[b_idx, best_frame_indices]     
+    win_F_right = F_right[b_idx, best_frame_indices]   
+    
+    k_idx_3d = np.arange(max_n)[None, :]
+    win_u = u_best_local[b_idx, best_frame_indices, k_idx_3d]
+    
+    F_width = np.maximum(win_F_right - win_F_left, 1e-9)
+    local_fraction = (win_u - win_F_left) / F_width
+    
+    modes = best_frame_indices + local_fraction
+    
+    valid_mask = k_grid.squeeze() <= n_pred[:, None]
+    modes = np.where(valid_mask, modes, np.nan)
+    
+    return modes
 
 def beta_medians(n):
     # input: scalar n
@@ -54,277 +139,160 @@ def poisson_loss(log_hazard, label_mask, frame_mask):
 # perform inference
 
 
-def infer_timestamps(n_pred, log_hazards):
-    # # input: scalar (number of predictions), np.array (log-hazard values)
-    # hazards = np.exp(log_hazards)
-    # total_hazard = np.sum(hazards)
-    # medians = beta_medians(n_pred)
+import numpy as np
+from scipy.signal import windows
+import numpy as np
+from scipy.signal import windows
 
-    # # return the inverse cumulative hazard
-    # return np.interp(medians * total_hazard, np.cumsum(np.insert(hazards, 0, 0)), np.arange(log_hazards.shape[0]+1))
+import numpy as np
+from scipy.signal import windows
+
+def run_iterative_bayesian_greedy(n_pred, log_hazards, tolerance_ms, frame_ms, kernel):
     """
-    Infer timestamps using the Mode (Peak Finding) strategy.
-    
-    Args:
-        n_pred (int): Number of events to predict.
-        log_hazards (np.array): Shape (seq_len,), log intensity values.
-        
-    Returns:
-        np.array: Shape (n_pred,), sorted timestamps (indices).
+    Combines:
+    1. Posterior Mode (Detection): Finds the best frame.
+    2. Posterior Median (Refinement): Finds the exact time within that frame's window.
+    3. Greedy Suppression: Prevents double-counting.
     """
-    # from scipy.signal import find_peaks
-    # n_pred = int(n_pred)
-    # if n_pred == 0:
-    #     return np.array([], dtype=float)
+    outputs = []
+    
+    # Work on a copy of log_hazards so we can suppress events
+    # We maintain 'current_log_hazards' for detection
+    current_log_hazards = log_hazards.copy()
+    
+    # Pre-calculate window size for the refinement/suppression
+    # (Same logic as before)
+    M = int((tolerance_ms * 2) / frame_ms)
+    if M % 2 == 0: M += 1
+    half_window = M // 2
 
-    # hazards = np.exp(log_hazards)
+    # Pre-smooth hazards for the DETECTION step (Mode finding).
+    # We do this once upfront if we want "Strategy B" style detection,
+    # OR we can do it iteratively if we want "Strategy A" style.
+    # Let's do it iteratively to be safe with suppression.
     
-    # # 1. Find local maxima (peaks)
-    # # distance=2 ensures we don't pick immediate neighbors (frame t and t+1) 
-    # # as separate events. Adjust 'distance' based on your frame resolution.
-    # peaks, properties = find_peaks(hazards, height=0, distance=2)
-    
-    # peak_heights = properties['peak_heights']
-    
-    # # 2. Select the top N peaks
-    # if len(peaks) >= n_pred:
-    #     # Get indices of the peaks with the highest hazard values
-    #     # specific_indices are indices into the 'peaks' array, not the audio frames
-    #     top_peak_indices = np.argsort(peak_heights)[-n_pred:]
-    #     selected_timestamps = peaks[top_peak_indices]
-        
-    # else:
-    #     # FALLBACK: If the model predicts N events, but we found fewer than N peaks
-    #     # (e.g. the curve is flat or noisy), we fill the remaining spots 
-    #     # with the highest raw values from the hazard curve that aren't already peaks.
-        
-    #     # Take all found peaks
-    #     selected_timestamps = peaks.tolist()
-        
-    #     # Create a mask to exclude indices we already selected
-    #     mask = np.ones_like(hazards, dtype=bool)
-    #     mask[peaks] = False
-        
-    #     # How many more do we need?
-    #     remaining_count = n_pred - len(peaks)
-        
-    #     # Get the indices of the highest values from the non-peak areas
-    #     # We perform argsort on the masked hazards
-    #     masked_hazards = np.where(mask, hazards, -1.0) # Set already picked to -1
-    #     remaining_indices = np.argsort(masked_hazards)[-remaining_count:]
-        
-    #     selected_timestamps.extend(remaining_indices)
-    #     selected_timestamps = np.array(selected_timestamps)
-
-    # # 3. Sort by time (timestamps must be sequential) and cast to float
-    # # to match the original output type of interpolation
-    # return np.sort(selected_timestamps).astype(float)
-    """
-    Infers timestamps by finding the highest accuracy windows (peaks),
-    then minimizing L1 loss locally within those windows.
-    
-    Args:
-        n_pred (int): Number of timestamps to predict.
-        log_hazards (np.array): Log-hazard (or log-probability) values.
-        frame_ms (float): Duration of one frame in ms (default 40).
-        tolerance_ms (float): The tolerance radius for accuracy (default 100).
-                              Total window size will be +/- tolerance.
-                              
-    Returns:
-        np.array: Predicted timestamp indices (float).
-    """
-    
-    # ARGMAX STRATEGY
-
-    # best_idx = int(np.argmax(log_hazards))
-    # # match previous format: 1-D float array of timestamps
-    # return np.array([best_idx], dtype=float)
-
-    # NON OVERLAPPING WINDOWS STRATEGY
-
-    # frame_ms = 10
-    # tolerance_ms = 50
-
-    # hazards = np.exp(log_hazards)
-    
-    # # 1. Define the Window Size (Fixed Frame Size)
-    # # Total window is 2x tolerance (e.g., 100ms)
-    # window_frames = int((tolerance_ms * 2) / frame_ms)
-    
-    # # (Optional) Ensure window is odd if you prefer, 
-    # # though for fixed tiling even numbers are fine.
-    # if window_frames % 2 == 0:
-    #     window_frames += 1
-
-    # # 2. Reshape into Non-Overlapping Windows
-    # # We truncate the end of the array to make it divisible by window_frames
-    # n_windows = len(hazards) // window_frames
-    # trunc_len = n_windows * window_frames
-    
-    # # Create a view of the array as distinct blocks
-    # # Shape becomes: (Number of Windows, Frames per Window)
-    # tiled_hazards = hazards[:trunc_len].reshape(n_windows, window_frames)
-    
-    # # 3. Calculate Mass for every window at once
-    # # Sum along axis 1 (summing mass inside each window)
-    # window_sums = tiled_hazards.sum(axis=1)
-    
-    # # 4. Select the Top 'n_pred' Windows
-    # # We filter for the requested number of events, ensuring we don't exceed available windows
-    # count_to_pick = min(int(n_pred), n_windows)
-    
-    # # argsort gives indices of windows sorted by mass (ascending), 
-    # # we take the last 'count_to_pick' and reverse to get descending order
-    # top_window_indices = np.argsort(window_sums)[-count_to_pick:][::-1]
-    
-    # predicted_indices = []
-
-    # for w_idx in top_window_indices:
-    #     # If the window mass is effectively 0, skip
-    #     if window_sums[w_idx] < 1e-9:
-    #         continue
-
-    #     # 5. Local Refinement: Minimize L1 Loss (Local Median)
-    #     # We work directly with the specific row in our tiled matrix
-    #     local_mass = tiled_hazards[w_idx]
-        
-    #     local_cumsum = np.cumsum(local_mass)
-    #     total_local_mass = local_cumsum[-1]
-        
-    #     # Find the offset within this specific window where we cross 50% mass
-    #     median_offset = np.searchsorted(local_cumsum, total_local_mass * 0.5)
-        
-    #     # 6. Map back to Global Index
-    #     # Global Index = (Window Index * Window Size) + Local Offset
-    #     global_idx = (w_idx * window_frames) + median_offset
-        
-    #     predicted_indices.append(global_idx)
-
-    # # Return sorted indices
-    # return np.sort(np.array(predicted_indices))
-
-    # OVERLAPPING WINDOWS STRATEGY
-
-    frame_ms = 10
-    tolerance_ms = 40
-
-    hazards = np.exp(log_hazards)
-    
-    # 1. Define the Window Size
-    # We want a window of +/- 100ms (Total 200ms)
-    # If frame is 40ms, 200/40 = 5 frames.
-    window_frames = int((tolerance_ms * 2) / frame_ms)
-    
-    # Ensure window is odd so it has a distinct center
-    if window_frames % 2 == 0:
-        window_frames += 1
-        
-    half_window = window_frames // 2
-    
-    # Create a convolution kernel to find 'Mass within Window'
-    kernel = np.ones(window_frames)
-    
-    # We work on a copy so we can "suppress" peaks as we find them
-    search_probs = hazards.copy()
-    
-    predicted_indices = []
-
     for _ in range(int(n_pred)):
-        # 2. Convolve to find the region with Maximum Accuracy
-        # (The window with the highest sum of probability)
-        # Using 'same' keeps the indices aligned with the original array
-        window_sums = np.convolve(search_probs, kernel, mode='same')
+        # --- STEP 1: DETECTION (Posterior Mode for N=1) ---
         
-        # Find the center index of the best window
-        # This maximizes P(hit) within tolerance
-        global_peak_idx = np.argmax(window_sums)
+        # We need the hazards for the current state
+        # (Convert to linear space for smoothing, then back to log for stability)
+        current_hazards = np.exp(current_log_hazards)
         
-        # If the max probability is effectively 0, stop (no more events found)
-        if window_sums[global_peak_idx] < 1e-9:
+        # Apply Smoothing (Convolution)
+        # This acts as the "Likelihood Search" over the window
+        smoothed_search_hazards = np.convolve(current_hazards, kernel, mode='same')
+        
+        # Find the Global Maximum (Posterior Mode for N=1)
+        # We use argmax because for N=1, the Beta prior is Uniform,
+        # so Mode == Argmax of Intensity.
+        global_peak_idx = np.argmax(smoothed_search_hazards)
+        
+        # Stop condition: If probability mass is negligible
+        if smoothed_search_hazards[global_peak_idx] < 1e-9:
             break
 
-        # 3. Local Refinement: Minimize L1 Loss (Local Median)
-        # We look strictly inside the winning window
+        # --- STEP 2: REFINEMENT (Local Posterior Median) ---
+        
+        # Define the window around the mode
         start = max(0, global_peak_idx - half_window)
-        end = min(len(hazards), global_peak_idx + half_window + 1)
+        end = min(len(current_hazards), global_peak_idx + half_window + 1)
         
-        local_mass = hazards[start:end]
-        
-        # Calculate Local Median within this specific window
-        # (Normalize so it sums to 1, then find 0.5 crossing)
-        local_cumsum = np.cumsum(local_mass)
-        total_local_mass = local_cumsum[-1]
+        local_mass = current_hazards[start:end]
+        total_local_mass = np.sum(local_mass)
         
         if total_local_mass > 0:
-            # searchsorted finds the first index where value >= target
-            median_offset = np.searchsorted(local_cumsum, total_local_mass * 0.5)
-            refined_idx = start + median_offset
+            # We want the Median (50% quantile) of THIS local event.
+            # Your 'posterior_median' code uses: 
+            # np.interp(target_mass, cumsum, indices)
+            
+            local_cumsum = np.cumsum(local_mass)
+            
+            # The target is the median of the probability mass in this window
+            target = total_local_mass * 0.5
+            
+            # Perform the interpolation (exactly as in Method C, but local)
+            # We insert 0 at the start to handle the left-edge case properly
+            local_offset = np.interp(
+                target, 
+                np.insert(local_cumsum, 0, 0), 
+                np.arange(len(local_mass) + 1)
+            )
+            
+            # The interpolation returns an index 0..len(local_mass).
+            # 0.5 corresponds to the center of the first frame (index 0).
+            # We need to shift it to be 0-indexed relative to 'start'.
+            # Note: np.interp on range(0..N+1) with padding effectively gives 
+            # the "continuous index".
+            # e.g., if mass is in first bin, interp gives 0.5.
+            # We subtract 0.5 to center it on the integer frame index.
+            
+            refined_idx = start + local_offset - 0.5
         else:
             refined_idx = global_peak_idx
-
-        predicted_indices.append(refined_idx)
+            
+        outputs.append(refined_idx)
         
-        # 4. Suppression (The "Greedy" step)
-        # Zero out the mass in this window so the next iteration 
-        # finds the *next* highest peak, not the same one.
-        # We suppress the full window area.
-        search_probs[start:end] = 0
+        # --- STEP 3: SUPPRESSION ---
+        # Mask out this window with -inf (log(0))
+        current_log_hazards[start:end] = -np.inf
 
-    # Return sorted indices (as floats)
-    return np.sort(np.array(predicted_indices))
+    return np.sort(np.array(outputs))
 
-    # OVERLAPPING WINDOWS TRIANGULAR KERNEL
+def infer_timestamps(n_pred, log_hazards):
+    outputs = {}
 
     # frame_ms = 10
-    # tolerance_ms = 50
+    # tolerance_ms = 40
 
     # hazards = np.exp(log_hazards)
-
+    
     # # 1. Define the Window Size
+    # # We want a window of +/- 100ms (Total 200ms)
+    # # If frame is 40ms, 200/40 = 5 frames.
     # window_frames = int((tolerance_ms * 2) / frame_ms)
-
+    
     # # Ensure window is odd so it has a distinct center
     # if window_frames % 2 == 0:
     #     window_frames += 1
         
     # half_window = window_frames // 2
-
-    # # --- MODIFIED SECTION START ---
-    # # Create a Triangular Kernel
-    # # Instead of np.ones(window_frames), we create a ramp up and down.
-    # # For a window of 5, this creates: [1, 2, 3, 2, 1]
-    # ramp_up = np.arange(1, half_window + 2)
-    # ramp_down = np.arange(half_window, 0, -1)
-    # kernel = np.concatenate((ramp_up, ramp_down))
-
-    # # Optional: Normalize the kernel so the peak value reflects probability magnitude
-    # # (Not strictly necessary for argmax, but good for debugging)
-    # # kernel = kernel / kernel.sum()
-    # # --- MODIFIED SECTION END ---
-
+    
+    # # Create a convolution kernel to find 'Mass within Window'
+    # kernel = np.ones(window_frames)
+    
+    # # We work on a copy so we can "suppress" peaks as we find them
     # search_probs = hazards.copy()
-
+    
     # predicted_indices = []
 
     # for _ in range(int(n_pred)):
-    #     # 2. Convolve to find the region with Maximum Weighted Accuracy
+    #     # 2. Convolve to find the region with Maximum Accuracy
+    #     # (The window with the highest sum of probability)
+    #     # Using 'same' keeps the indices aligned with the original array
     #     window_sums = np.convolve(search_probs, kernel, mode='same')
         
+    #     # Find the center index of the best window
+    #     # This maximizes P(hit) within tolerance
     #     global_peak_idx = np.argmax(window_sums)
         
+    #     # If the max probability is effectively 0, stop (no more events found)
     #     if window_sums[global_peak_idx] < 1e-9:
     #         break
 
     #     # 3. Local Refinement: Minimize L1 Loss (Local Median)
+    #     # We look strictly inside the winning window
     #     start = max(0, global_peak_idx - half_window)
     #     end = min(len(hazards), global_peak_idx + half_window + 1)
         
     #     local_mass = hazards[start:end]
         
+    #     # Calculate Local Median within this specific window
+    #     # (Normalize so it sums to 1, then find 0.5 crossing)
     #     local_cumsum = np.cumsum(local_mass)
     #     total_local_mass = local_cumsum[-1]
         
     #     if total_local_mass > 0:
+    #         # searchsorted finds the first index where value >= target
     #         median_offset = np.searchsorted(local_cumsum, total_local_mass * 0.5)
     #         refined_idx = start + median_offset
     #     else:
@@ -332,75 +300,207 @@ def infer_timestamps(n_pred, log_hazards):
 
     #     predicted_indices.append(refined_idx)
         
-    #     # 4. Suppression
-    #     # Note: We still suppress the 'box' area to prevent re-detecting the same peak
+    #     # 4. Suppression (The "Greedy" step)
+    #     # Zero out the mass in this window so the next iteration 
+    #     # finds the *next* highest peak, not the same one.
+    #     # We suppress the full window area.
     #     search_probs[start:end] = 0
 
-    # return np.sort(np.array(predicted_indices))
+    # # Return sorted indices (as floats)
+    # outputs['default'] = np.sort(np.array(predicted_indices))
+    
+    # Configuration
+    frame_ms = 10
+    n_pred_val = np.atleast_1d(n_pred)
+    seq_lens = np.array([len(log_hazards)])
+    hazards = np.exp(log_hazards)
+    total_hazard = np.sum(hazards)
+    medians = beta_medians(n_pred)
+    
+    # 1. Base Predictions (No smoothing)
+    outputs["posterior_mode"] = posterior_mode_inhomogeneous_poisson(
+        n_pred=n_pred_val, 
+        log_hazards=log_hazards[np.newaxis, :], 
+        seq_lens=seq_lens
+    ).flatten()
 
-    # OVERLAPPING WINDOWS GAUSSIAN KERNEL
-    # frame_ms = 10
-    # tolerance_ms = 50
+    outputs['posterior_median'] = np.interp(
+        medians * total_hazard, 
+        np.cumsum(np.insert(hazards, 0, 0)), 
+        np.arange(log_hazards.shape[0]+1)
+    )
 
-    # hazards = np.exp(log_hazards)
+    def run_greedy_search(current_hazards, kernel, n, window_width_override=None, interpolate=False):
+            search_probs = current_hazards.copy()
+            
+            # 1. Decouple Kernel Size from Refinement/Suppression Window
+            K = len(kernel)
+            M = window_width_override if window_width_override is not None else K
+            
+            half_window = M // 2
+            predicted_indices = []
 
-    # # 1. Define the Window Size
-    # window_frames = int((tolerance_ms * 2) / frame_ms)
+            for _ in range(int(n)):
+                # 2. Convolve (Search)
+                window_sums = np.convolve(search_probs, kernel, mode='same')
+                peak_idx = np.argmax(window_sums)
+                
+                if window_sums[peak_idx] < 1e-9:
+                    break
 
-    # if window_frames % 2 == 0:
-    #     window_frames += 1
-        
-    # half_window = window_frames // 2
+                # 3. Local Refinement (Median)
+                # Now we look at the full window 'M' even if kernel was size 1
+                start = max(0, peak_idx - half_window)
+                end = min(len(current_hazards), peak_idx + half_window + 1)
+                
+                local_mass = current_hazards[start:end]
+                local_cumsum = np.cumsum(local_mass)
+                total_local_mass = local_cumsum[-1]
+                
+                if total_local_mass > 0:
+                    # Standard integer median frame
+                    median_idx_local = np.searchsorted(local_cumsum, total_local_mass * 0.5)
+                    
+                    # OPTIONAL: Linear Interpolation for True Sub-frame Float Precision
+                    # If you want 10.4 instead of 10:
+                    if interpolate:
+                        prev_cum = local_cumsum[median_idx_local-1] if median_idx_local > 0 else 0.0
+                        curr_cum = local_cumsum[median_idx_local]
+                        mass_at_idx = curr_cum - prev_cum
+                        frac = (total_local_mass * 0.5 - prev_cum) / max(1e-9, mass_at_idx)
+                        refined_idx = start + median_idx_local + np.clip(frac - 0.5, -0.5, 0.5)
+                    else:
+                        refined_idx = start + median_idx_local
+                else:
+                    refined_idx = peak_idx
 
-    # # --- MODIFIED SECTION START ---
-    # # Create a Gaussian Kernel
-    # # We define sigma so that the window edges (half_window) are 3 standard deviations away.
-    # sigma = half_window / 3.0
+                predicted_indices.append(refined_idx)
+                
+                # 4. Suppression
+                # Crucial: We now suppress the full 'M' width, preventing double-counting
+                search_probs[start:end] = 0
+                
+            return np.sort(np.array(predicted_indices))
 
-    # # Create an array of indices centered at 0: [-2, -1, 0, 1, 2]
-    # x = np.linspace(-half_window, half_window, window_frames)
+    # --- 3. Sweeping through kernels and tolerances ---
+    for tolerance_ms in range(10, 101, 10):
+        M = int((tolerance_ms * 2) / frame_ms)
+        if M % 2 == 0: M += 1
+            
+        kernels = {
+            "boxcar": np.ones(M),
+            "triang": windows.triang(M) * (M / np.sum(windows.triang(M))),
+            "gauss":  windows.gaussian(M, std=M/4) * (M / np.sum(windows.gaussian(M, std=M/4)))
+        }
 
-    # # Calculate Gaussian: e^(-x^2 / 2*sigma^2)
-    # kernel = np.exp(-0.5 * (x / sigma) ** 2)
-    # # --- MODIFIED SECTION END ---
+        for k_name, kernel in kernels.items():
+            key_base = f"smooth_{tolerance_ms}ms_{k_name}"
+            
+            # A. Strategy: Your original Greedy Search with Suppression
+            # (Calculates local median during the process)
+            outputs[f"{key_base}_greedy_suppression"] = run_greedy_search(
+                hazards, kernel, n_pred
+            )
+            
+            outputs[f"{key_base}_greedy_suppression_interpolate"] = run_greedy_search(
+                hazards, kernel, n_pred, interpolate=True
+            )
 
-    # search_probs = hazards.copy()
+            # B. Strategy: Posterior Mode (Geometric Smoothing)
+            smoothed_log_hazards = np.convolve(log_hazards, kernel, mode='same')
+            mode_indices = posterior_mode_inhomogeneous_poisson(
+                n_pred=n_pred_val, 
+                log_hazards=smoothed_log_hazards[np.newaxis, :], 
+                seq_lens=seq_lens
+            ).flatten()
+            outputs[f"{key_base}_buggy_posterior_mode"] = mode_indices
 
-    # predicted_indices = []
+            # C. Strategy: Global Posterior Median (Arithmetic Smoothing)
+            avg_kernel = kernel / np.sum(kernel)
+            smoothed_hazards = np.convolve(hazards, avg_kernel, mode='same')
+            total_smoothed_hazard = np.sum(smoothed_hazards)
+            outputs[f"{key_base}_posterior_median_smoothed"] = np.interp(
+                medians * total_smoothed_hazard, 
+                np.cumsum(np.insert(smoothed_hazards, 0, 0)), 
+                np.arange(log_hazards.shape[0]+1)
+            )
 
-    # for _ in range(int(n_pred)):
-    #     # 2. Convolve
-    #     window_sums = np.convolve(search_probs, kernel, mode='same')
-        
-    #     global_peak_idx = np.argmax(window_sums)
-        
-    #     # Check if peak is effectively zero
-    #     if window_sums[global_peak_idx] < 1e-9:
-    #         break
+            # ----------------------------------------------------------------
+            # B. Strategy: Posterior Mode (FIXED MATH)
+            # ----------------------------------------------------------------
+            # 1. Convolve in LINEAR space first
+            smoothed_hazards_lin = np.convolve(hazards, kernel, mode='same')
+            smoothed_hazards_lin_avg = np.convolve(hazards, avg_kernel, mode='same')
+            
+            # 2. Convert to log space safely
+            smoothed_log_hazards = np.log(smoothed_hazards_lin + 1e-12)
+            smoothed_log_hazards_avg = np.log(smoothed_hazards_lin_avg + 1e-12)
+            
+            mode_indices = posterior_mode_inhomogeneous_poisson(
+                n_pred=n_pred_val, 
+                log_hazards=smoothed_log_hazards[np.newaxis, :], 
+                seq_lens=seq_lens
+            ).flatten()
+            outputs[f"{key_base}_fixed_posterior_mode"] = mode_indices
 
-    #     # 3. Local Refinement: Minimize L1 Loss
-    #     start = max(0, global_peak_idx - half_window)
-    #     end = min(len(hazards), global_peak_idx + half_window + 1)
-        
-    #     local_mass = hazards[start:end]
-    #     local_cumsum = np.cumsum(local_mass)
-    #     total_local_mass = local_cumsum[-1]
-        
-    #     if total_local_mass > 0:
-    #         median_offset = np.searchsorted(local_cumsum, total_local_mass * 0.5)
-    #         refined_idx = start + median_offset
-    #     else:
-    #         refined_idx = global_peak_idx
+            mode_indices_avg = posterior_mode_inhomogeneous_poisson(
+                n_pred=n_pred_val, 
+                log_hazards=smoothed_log_hazards_avg[np.newaxis, :], 
+                seq_lens=seq_lens
+            ).flatten()
+            outputs[f"{key_base}_fixed_avg_posterior_mode"] = mode_indices_avg
 
-    #     predicted_indices.append(refined_idx)
-        
-    #     # 4. Suppression
-    #     # We still use 'hard' suppression (zeroing out the box) so we don't 
-    #     # find the same peak twice.
-    #     search_probs[start:end] = 0
+            # ----------------------------------------------------------------
+            # D. NEW Strategy: Fully Smoothed Greedy
+            # ----------------------------------------------------------------
+            # Search on Smoothed AND Refine on Smoothed.
+            # We pass the pre-smoothed hazards.
+            # We pass a kernel of [1] because the hazards are ALREADY smoothed.
+            # If we passed 'kernel' again, we would double-smooth (convolve twice).
+            
+            smoothed_hazards_for_greedy = np.convolve(hazards, kernel, mode='same')
+            
+            outputs[f"{key_base}_fully_smoothed_greedy"] = run_greedy_search(
+                smoothed_hazards_for_greedy, 
+                np.array([1.0]), # Identity kernel, just find peaks in pre-smoothed data
+                n_pred,
+                window_width_override=M
+            )
 
-    # return np.sort(np.array(predicted_indices))
+            outputs[f"{key_base}_fully_smoothed_greedy_argmax"] = run_greedy_search(
+                smoothed_hazards_for_greedy, 
+                np.array([1.0]), # Identity kernel, just find peaks in pre-smoothed data
+                n_pred,
+            )
 
+            # interpolated greedy
+
+            outputs[f"{key_base}_fully_smoothed_greedy_interpolate"] = run_greedy_search(
+                smoothed_hazards_for_greedy, 
+                np.array([1.0]), # Identity kernel, just find peaks in pre-smoothed data
+                n_pred,
+                window_width_override=M,
+                interpolate=True
+            )
+
+            outputs[f"{key_base}_fully_smoothed_greedy_argmax_interpolate"] = run_greedy_search(
+                smoothed_hazards_for_greedy, 
+                np.array([1.0]), # Identity kernel, just find peaks in pre-smoothed data
+                n_pred,
+                interpolate=True
+            )
+
+            # E. Strategy: Iterative Bayesian Greedy
+            # Exact Posterior Mode (Detection) -> Exact Posterior Median (Refinement)
+            outputs[f"{key_base}_iterative_bayesian"] = run_iterative_bayesian_greedy(
+                n_pred=n_pred,
+                log_hazards=log_hazards, # Pass RAW log hazards
+                tolerance_ms=tolerance_ms,
+                frame_ms=frame_ms,
+                kernel=kernel # Pass the smoothing kernel
+            )
+
+    return outputs
 
 def poisson_count_loss(log_hazard, counts, frame_mask):
     '''
