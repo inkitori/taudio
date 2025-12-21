@@ -188,7 +188,7 @@ def main():
     logging.info(f"Dataloader length: {len(dataloader)}")
 
     start_epoch = 0
-    if args.load_checkpoint:
+    if args.load_checkpoint and not args.eval_only: # we will immediately skip to eval if eval_only which already loads the ckpt
         ckpt_path = Path(args.load_checkpoint)
         
         if ckpt_path.is_file():
@@ -266,6 +266,7 @@ def main():
         )
 
         base_ds = adapter.load_split(split_name)
+        base_ds = task.select_indices(base_ds, adapter, split_name)
 
         # Shard across processes using Accelerate context manager
         distributed_state = PartialState()
@@ -299,48 +300,19 @@ def main():
                     if aux_metrics is not None:
                         local_metrics.update_dict(aux_metrics)
 
-        # Collect keys and reduce sums and counts across processes using a fixed schema
-        # so that all ranks execute identical reduce calls in identical order.
-        token_metric_keys: List[str] = [
-            "token_abs_error_sum",
-            "token_correct_5ms",
-            "token_correct_10ms",
-            "token_correct_20ms",
-            "token_correct_40ms",
-            "token_correct_50ms",
-            "token_correct_80ms",
-            "token_correct_100ms",
-            "token_correct_200ms",
-            "parsing_error",
-        ]
-        aux_metric_keys: List[str] = [
-            # Timestamp-style aux metrics
-            "aux_abs_error_sum",
-            "aux_correct_5ms",
-            "aux_correct_10ms",
-            "aux_correct_20ms",
-            "aux_correct_40ms",
-            "aux_correct_50ms",
-            "aux_correct_80ms",
-            "aux_correct_100ms",
-            "aux_correct_200ms",
-        ]
 
-        metric_keys: List[str] = []
-        if eval_token_outputs:
-            metric_keys.extend(token_metric_keys)
-        if eval_aux_outputs:
-            metric_keys.extend(aux_metric_keys)
+        to_reduce = {}
+        for key in local_metrics._sum.keys():
+            to_reduce[f"{key}_sum"] = torch.tensor(local_metrics.get_sum(key), device=accelerator.device)
+            to_reduce[f"{key}_cnt"] = torch.tensor(local_metrics.get_count(key), device=accelerator.device)
 
-        aggregated: Dict[str, float] = {}
-        device = accelerator.device
-        for key in metric_keys:
-            local_sum = torch.tensor(local_metrics.get_sum(key), device=device, dtype=torch.float32)
-            local_cnt = torch.tensor(local_metrics.get_count(key), device=device, dtype=torch.float32)
-            global_sum = accelerator.reduce(local_sum, reduction='sum')
-            global_cnt = accelerator.reduce(local_cnt, reduction='sum')
-            avg = (global_sum / torch.clamp_min(global_cnt, 1.0)).item()
-            aggregated[f"{prefix}/{key}"] = avg
+        reduced = accelerator.reduce(to_reduce, reduction='sum')
+
+        # 3. Calculate averages
+        aggregated = {
+            f"{prefix}/{key}": (reduced[f"{key}_sum"] / torch.clamp_min(reduced[f"{key}_cnt"], 1.0)).item()
+            for key in local_metrics._sum.keys()
+        }
 
         if is_master and not args.debug and run is not None:
             log_payload = dict(aggregated)
@@ -364,7 +336,7 @@ def main():
     # Training loop
     epochs = 0 if args.eval_only else training_config['epochs']
 
-    best_metric = float('-inf') # infinite abs error is worst case
+    best_metric = float('-inf') # negative inf accuracy is the worst case
     best_checkpoint_dir = args.load_checkpoint if args.eval_only else None
 
     for epoch in range(start_epoch, epochs):
@@ -417,19 +389,18 @@ def main():
 
         accelerator.wait_for_everyone()
 
-        # Per-epoch distributed eval on dev split
         if not args.debug:
             checkpoint_dir = experiment_dir / f"checkpoint_epoch{epoch+1}"
             dev_split = dataset_config.get('dev_split', 'dev')
             metrics = distributed_eval(dev_split, prefix="dev", epoch=epoch, state_dir=None)
             
-            target_metric = "dev/token_correct_100ms"
+            target_metric = "dev/token_correct_40ms"
             if not eval_token_outputs and eval_aux_outputs:
-                target_metric = "dev/aux_correct_100ms"
+                target_metric = "dev/smooth_40ms_boxcar_fixed_posterior_mode/aux_correct_40ms"
                 
             current_metric = metrics.get(target_metric, -1.0)
             logging.info(f"Current model achieved {target_metric}: {current_metric}")
-            if current_metric > best_metric: # 100ms accuracy should be higher
+            if current_metric > best_metric: # accuracy should be higher
                 best_metric = current_metric
                 best_checkpoint_dir = checkpoint_dir
                 if is_master:
