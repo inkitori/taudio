@@ -114,7 +114,6 @@ dependencies:
   - openssl=3.5.3=h26f9b46_1
   - pango=1.56.4=hadf4263_0
   - pcre2=10.46=h1321c63_0
-  - pip=25.2=pyh8b19718_0
   - pixman=0.46.4=h54a6638_1
   - pthread-stubs=0.4=hb9d3cd8_1002
   - pugixml=1.15=h3f63f65_0
@@ -164,6 +163,7 @@ dependencies:
       - decorator==5.2.1
       - dill==0.4.0
       - distro==1.9.0
+      - einops==0.8.1
       - filelock==3.19.1
       - frozenlist==1.7.0
       - fsspec==2025.9.0
@@ -198,6 +198,7 @@ dependencies:
       - multidict==6.6.4
       - multiprocess==0.70.16
       - networkx==3.5
+      - ninja==1.13.0
       - nltk==3.9.1
       - numba==0.62.0
       - numpy==2.3.3
@@ -219,6 +220,7 @@ dependencies:
       - packaging==25.0
       - pandas==2.3.2
       - pillow==11.3.0
+      - pip==25.3
       - platformdirs==4.4.0
       - pooch==1.8.2
       - propcache==0.3.2
