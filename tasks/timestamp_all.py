@@ -2,6 +2,7 @@ from typing import Any, Dict, Iterable, List, Optional
 import logging
 import math
 import json
+from accelerate import PartialState
 import torch
 import textwrap
 import re
@@ -10,7 +11,7 @@ from dataset.base_dataset_adapter import BaseDatasetAdapter
 from dataset.librispeech import LibriSpeechAdapter
 from models.base_model_adapter import BaseModelAdapter
 from utils.utils import clamp, round_timestamp, round_timestamp_python
-from utils.poisson import poisson_loss, infer_timestamps
+from utils.poisson import poisson_loss, infer_timestamps, infer_count
 
 from .base_task import BaseTask
 
@@ -361,12 +362,21 @@ class AllTimestampsTask(BaseTask):
                 continue
 
             if use_poisson_loss:
-                pred_idx = infer_timestamps(
+                timestamps_dict = infer_timestamps(
                     n_pred, example_logits.cpu().float().detach().numpy()
                 )
+                pred_idx = timestamps_dict['posterior_mode']
                 pred_sec = round_timestamp(
-                    torch.tensor(pred_idx, device=device, dtype=dtype) / denom
+                    torch.tensor(pred_idx, device=device) / denom
                 )
+
+                pred_count = infer_count(example_logits.unsqueeze(0), torch.ones_like(example_logits.unsqueeze(0)))
+                gt_count = example_labels.sum()
+                logging.info(f"Pred Count: {pred_count}, GT Count: {gt_count}")
+
+                if PartialState().is_main_process:
+                    logging.info(example_labels)
+                    logging.info(torch.exp(example_logits))
             else:
                 topk = torch.topk(example_logits, k=n_pred).indices.to(dtype)
                 pred_sec = round_timestamp((topk + 0.5) / denom)
