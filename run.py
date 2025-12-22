@@ -339,6 +339,13 @@ def main():
     best_metric = float('-inf') # negative inf accuracy is the worst case
     best_checkpoint_dir = args.load_checkpoint if args.eval_only else None
 
+	# this is only for joint training stuff
+    best_token_metric = float('-inf') # negative inf accuracy is the worst case
+    best_poisson_metric = float('-inf') # negative inf accuracy is the worst case
+
+    best_token_checkpoint_dir = None
+    best_poisson_checkpoint_dir = None
+
     for epoch in range(start_epoch, epochs):
         progress_bar = tqdm(
             dataloader,
@@ -408,6 +415,20 @@ def main():
                 best_checkpoint_dir = checkpoint_dir
                 if is_master:
                     logging.info(f"New best model found with {target_metric}: {best_metric}")
+
+            # joint training check
+            if loss_config['token_loss'] and loss_config['poisson_loss']:
+                token_metric = metrics.get('dev/token_correct_40ms')
+                poisson_metric = metrics.get('dev/smooth_40ms_boxcar_fixed_posterior_mode/aux_correct_40ms')
+
+                if token_metric > best_token_metric:
+                    best_token_metric = token_metric
+                    best_token_checkpoint_dir = checkpoint_dir
+
+                if poisson_metric > best_poisson_metric:
+                    best_poisson_metric = poisson_metric
+                    best_poisson_checkpoint_dir = checkpoint_dir
+
         
         accelerator.wait_for_everyone()
 
@@ -424,7 +445,17 @@ def main():
     
     logging.info(f"Evaluating final split on split {split}")
 
-    distributed_eval(split, prefix=split, epoch=training_config['epochs'] - 1, state_dir=final_checkpoint) # first do evaluation on the constraints imposed during training
+	# super hacky but basically we don't care about loading checkpoints for joint training
+    # also don't care about doing ood evals for joint training
+    if loss_config['token_loss'] and loss_config['poisson_loss']:
+        if best_token_checkpoint_dir == best_poisson_checkpoint_dir:
+            distributed_eval(split, prefix=f'token+poisson-{split}', epoch=training_config['epochs'] - 1, state_dir=best_token_checkpoint_dir) # first do evaluation on the constraints imposed during training
+        else:
+            distributed_eval(split, prefix=f'token-{split}', epoch=training_config['epochs'] - 1, state_dir=best_token_checkpoint_dir) # first do evaluation on the constraints imposed during training
+            distributed_eval(split, prefix=f'poisson-{split}', epoch=training_config['epochs'] - 1, state_dir=best_poisson_checkpoint_dir) # first do evaluation on the constraints imposed during training
+
+    else:
+        distributed_eval(split, prefix=split, epoch=training_config['epochs'] - 1, state_dir=final_checkpoint) # first do evaluation on the constraints imposed during training
 
     accelerator.wait_for_everyone()
 
