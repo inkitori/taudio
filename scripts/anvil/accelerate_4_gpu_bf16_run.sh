@@ -2,13 +2,20 @@
 #SBATCH --partition=ai
 #SBATCH --account=nairr250124-ai
 #SBATCH --mem-per-gpu=96G
-#SBATCH --cpus-per-gpu=1
+#SBATCH --cpus-per-gpu=2
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:4
-#SBATCH --time=8:00:00
+#SBATCH --time=5:00:00
 #SBATCH --job-name=4_gpu_bf16
 #SBATCH --output=scripts/anvil/logs/%x/%j.out
 #SBATCH --error=scripts/anvil/logs/%x/%j.err
+
+echo "-------------------------------------------------------"
+echo "mybalance:"
+mybalance
+echo "-------------------------------------------------------"
+
+start_time=$(date +%s)
 
 export OMP_NUM_THREADS=$(lscpu -b -p=CPU | grep -v '^#' | wc -l)
 
@@ -34,4 +41,21 @@ if [ -n "$3" ]; then
 EVAL_MAX_ARG="--eval-max-time $3"
 fi
 
+
 accelerate launch --config_file accelerate_configs/4_gpu_bf16.yaml run.py --config "$1" $EVAL_MIN_ARG $EVAL_MAX_ARG
+
+# --- END TIMING ---
+end_time=$(date +%s)
+runtime=$((end_time - start_time))
+
+# Format the seconds into Hours:Minutes:Seconds
+hours=$((runtime / 3600))
+minutes=$(( (runtime % 3600) / 60 ))
+seconds=$((runtime % 60))
+
+echo "-------------------------------------------------------"
+echo "Job Execution Completed"
+echo "Total Runtime: $(printf "%02d:%02d:%02d" $hours $minutes $seconds)"
+echo "mybalance:"
+mybalance
+echo "-------------------------------------------------------"
