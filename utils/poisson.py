@@ -531,6 +531,36 @@ def infer_timestamps(n_pred, log_hazards):
             #     kernel=kernel,
             #     window_width=M
             # )
+    
+    outputs['default'] = outputs['posterior_mode']
+
+    return outputs
+
+from scipy.special import expit  
+def infer_timestamps_binary(n_pred, logits):
+    outputs = {}
+    frame_ms = 10
+
+    probs = expit(logits)
+
+    outputs['argmax'] = np.argpartition(probs, -n_pred)[-n_pred:]
+    outputs['argmax_adjusted'] = outputs['argmax'] + 0.5
+    outputs['default'] = outputs['argmax_adjusted']
+
+    for tolerance_ms in range(10, 101, 10):
+        M = int((tolerance_ms * 2) / frame_ms)
+        if M % 2 == 0: M += 1
+            
+        kernels = {
+            "boxcar": np.ones(M) / M, # dividing by M shouldnt have any effect
+        }
+
+        for k_name, kernel in kernels.items():
+            key_base = f"smooth_{tolerance_ms}ms_{k_name}"
+            smoothed_probs = np.convolve(probs, kernel, mode='same')
+
+            top_indices = np.argpartition(smoothed_probs, -n_pred)[-n_pred:]
+            outputs[key_base] = top_indices + 0.5
 
     return outputs
 

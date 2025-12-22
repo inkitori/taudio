@@ -18,7 +18,7 @@ from dataset.audioset import AudioSetAdapter
 
 from .base_task import BaseTask
 from utils.utils import clamp, round_timestamp, round_timestamp_python
-from utils.poisson import poisson_loss, infer_timestamps
+from utils.poisson import poisson_loss, infer_timestamps, infer_timestamps_binary
 
 STOPS = set(stopwords.words("english"))
 
@@ -419,10 +419,10 @@ class SingleTimestampAnyTask(BaseTask):
             loss = poisson_loss(audio_logits, audio_labels, audio_labels_frame_mask).mean()
         else:
             # Standard BCE Path
-            losses = torch.zeros(batch_size, device=device, dtype=dtype)
+            losses = torch.zeros(batch_size, device=device)
             for example in range(batch_size):
                 example_audio_logits = audio_logits[example]
-                example_audio_labels = audio_labels[example].to(dtype)
+                example_audio_labels = audio_labels[example].to(example_audio_logits.dtype)
                 
                 # Mask handling
                 if (example_audio_labels == -100).any():
@@ -454,7 +454,10 @@ class SingleTimestampAnyTask(BaseTask):
 
             # 1. Get dictionary of predictions from the new infer_timestamps
             # returns {"posterior_mode": [...], "smooth_20ms_boxcar": [...], etc}
-            preds_dict_np = infer_timestamps(1, example_audio_logits.cpu().float().detach().numpy())
+            if use_poisson_loss:
+                preds_dict_np = infer_timestamps(1, example_audio_logits.cpu().float().detach().numpy())
+            else:
+                preds_dict_np = infer_timestamps_binary(1, example_audio_logits.cpu().float().detach().numpy())
 
             # 2. Process all method predictions
             for method_name, pred_array in preds_dict_np.items():
@@ -464,25 +467,12 @@ class SingleTimestampAnyTask(BaseTask):
                 predictions_accumulator[method_name][example] = round_timestamp(predictions_accumulator[method_name][example])
                 # predictions_accumulator[method_name][example] = seconds
 
-            # 3. Special Hybrid Logic (Original "Poisson + Binary" branch)
-            if use_poisson_loss and class_weighting:
-                # We already have "posterior_mode" in the loop above
-                poisson_seconds = predictions_accumulator["posterior_mode"][example]
-                
-                # Binary argmax path
-                binary_frame_idx = torch.argmax(example_audio_logits).to(dtype) + 0.5
-                binary_seconds = round_timestamp(binary_frame_idx / scaling)
-                
-                # Average them and store as a new method name
-                avg_seconds = round_timestamp((poisson_seconds + binary_seconds) / 2)
-                predictions_accumulator["hybrid_poisson_binary"][example] = avg_seconds
-
         # --- Final Return Values ---
         # Convert defaultdict back to a regular dict for the return
         predicted_timestamps = dict(predictions_accumulator)
         
         # Calculate absolute error specifically using posterior_mode as requested
-        base_preds = predicted_timestamps["posterior_mode"]
+        base_preds = predicted_timestamps["default"]
         abs_error = torch.abs(base_preds - gt_timestamps).mean()
 
         logging.info(f"[ANY] Base Predicted timestamps: {base_preds}")

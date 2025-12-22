@@ -396,7 +396,10 @@ def main():
             
             target_metric = "dev/token_correct_40ms"
             if not eval_token_outputs and eval_aux_outputs:
-                target_metric = "dev/smooth_40ms_boxcar_fixed_posterior_mode/aux_correct_40ms"
+                if loss_config['poisson_loss']:
+                    target_metric = "dev/smooth_40ms_boxcar_fixed_posterior_mode/aux_correct_40ms"
+                else:
+                    target_metric = 'dev/smooth_40ms_boxcar/aux_correct_40ms'
                 
             current_metric = metrics.get(target_metric, -1.0)
             logging.info(f"Current model achieved {target_metric}: {current_metric}")
