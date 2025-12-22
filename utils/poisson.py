@@ -6,6 +6,27 @@ from scipy.signal import windows
 
 import numpy as np
 
+def run_iterative_mode(n_pred, log_hazards, kernel, window_width):
+    hazards = np.exp(log_hazards)
+    
+    half_window = window_width // 2
+    
+    predictions = []
+    
+    for _ in range(int(n_pred)):
+        smoothed = np.convolve(hazards, kernel, mode='same')
+        
+        peak_idx = np.argmax(smoothed)
+        
+        predictions.append(peak_idx)
+        
+        start = max(0, peak_idx - half_window)
+        end = min(len(hazards), peak_idx + half_window + 1)
+        
+        hazards[start:end] = 0.0
+        
+    return np.sort(np.array(predictions))
+
 def get_beta_mode_fraction(k, n):
     """
     Computes the mode of the Beta distribution in [0, 1].
@@ -389,52 +410,52 @@ def infer_timestamps(n_pred, log_hazards):
             
         kernels = {
             "boxcar": np.ones(M),
-            "triang": windows.triang(M) * (M / np.sum(windows.triang(M))),
-            "gauss":  windows.gaussian(M, std=M/4) * (M / np.sum(windows.gaussian(M, std=M/4)))
+            # "triang": windows.triang(M) * (M / np.sum(windows.triang(M))),
+            # "gauss":  windows.gaussian(M, std=M/4) * (M / np.sum(windows.gaussian(M, std=M/4)))
         }
 
         for k_name, kernel in kernels.items():
             key_base = f"smooth_{tolerance_ms}ms_{k_name}"
             
-            # A. Strategy: Your original Greedy Search with Suppression
-            # (Calculates local median during the process)
-            outputs[f"{key_base}_greedy_suppression"] = run_greedy_search(
-                hazards, kernel, n_pred
-            )
+            # # A. Strategy: Your original Greedy Search with Suppression
+            # # (Calculates local median during the process)
+            # outputs[f"{key_base}_greedy_suppression"] = run_greedy_search(
+            #     hazards, kernel, n_pred
+            # )
             
-            outputs[f"{key_base}_greedy_suppression_interpolate"] = run_greedy_search(
-                hazards, kernel, n_pred, interpolate=True
-            )
+            # outputs[f"{key_base}_greedy_suppression_interpolate"] = run_greedy_search(
+            #     hazards, kernel, n_pred, interpolate=True
+            # )
 
-            # B. Strategy: Posterior Mode (Geometric Smoothing)
-            smoothed_log_hazards = np.convolve(log_hazards, kernel, mode='same')
-            mode_indices = posterior_mode_inhomogeneous_poisson(
-                n_pred=n_pred_val, 
-                log_hazards=smoothed_log_hazards[np.newaxis, :], 
-                seq_lens=seq_lens
-            ).flatten()
-            outputs[f"{key_base}_buggy_posterior_mode"] = mode_indices
+            # # B. Strategy: Posterior Mode (Geometric Smoothing)
+            # smoothed_log_hazards = np.convolve(log_hazards, kernel, mode='same')
+            # mode_indices = posterior_mode_inhomogeneous_poisson(
+            #     n_pred=n_pred_val, 
+            #     log_hazards=smoothed_log_hazards[np.newaxis, :], 
+            #     seq_lens=seq_lens
+            # ).flatten()
+            # outputs[f"{key_base}_buggy_posterior_mode"] = mode_indices
 
-            # C. Strategy: Global Posterior Median (Arithmetic Smoothing)
-            avg_kernel = kernel / np.sum(kernel)
-            smoothed_hazards = np.convolve(hazards, avg_kernel, mode='same')
-            total_smoothed_hazard = np.sum(smoothed_hazards)
-            outputs[f"{key_base}_posterior_median_smoothed"] = np.interp(
-                medians * total_smoothed_hazard, 
-                np.cumsum(np.insert(smoothed_hazards, 0, 0)), 
-                np.arange(log_hazards.shape[0]+1)
-            )
+            # # C. Strategy: Global Posterior Median (Arithmetic Smoothing)
+            # avg_kernel = kernel / np.sum(kernel)
+            # smoothed_hazards = np.convolve(hazards, avg_kernel, mode='same')
+            # total_smoothed_hazard = np.sum(smoothed_hazards)
+            # outputs[f"{key_base}_posterior_median_smoothed"] = np.interp(
+            #     medians * total_smoothed_hazard, 
+            #     np.cumsum(np.insert(smoothed_hazards, 0, 0)), 
+            #     np.arange(log_hazards.shape[0]+1)
+            # )
 
             # ----------------------------------------------------------------
             # B. Strategy: Posterior Mode (FIXED MATH)
             # ----------------------------------------------------------------
             # 1. Convolve in LINEAR space first
             smoothed_hazards_lin = np.convolve(hazards, kernel, mode='same')
-            smoothed_hazards_lin_avg = np.convolve(hazards, avg_kernel, mode='same')
+            # smoothed_hazards_lin_avg = np.convolve(hazards, avg_kernel, mode='same')
             
             # 2. Convert to log space safely
             smoothed_log_hazards = np.log(smoothed_hazards_lin + 1e-12)
-            smoothed_log_hazards_avg = np.log(smoothed_hazards_lin_avg + 1e-12)
+            # smoothed_log_hazards_avg = np.log(smoothed_hazards_lin_avg + 1e-12)
             
             mode_indices = posterior_mode_inhomogeneous_poisson(
                 n_pred=n_pred_val, 
@@ -443,62 +464,73 @@ def infer_timestamps(n_pred, log_hazards):
             ).flatten()
             outputs[f"{key_base}_fixed_posterior_mode"] = mode_indices
 
-            mode_indices_avg = posterior_mode_inhomogeneous_poisson(
-                n_pred=n_pred_val, 
-                log_hazards=smoothed_log_hazards_avg[np.newaxis, :], 
-                seq_lens=seq_lens
-            ).flatten()
-            outputs[f"{key_base}_fixed_avg_posterior_mode"] = mode_indices_avg
+            # mode_indices_avg = posterior_mode_inhomogeneous_poisson(
+            #     n_pred=n_pred_val, 
+            #     log_hazards=smoothed_log_hazards_avg[np.newaxis, :], 
+            #     seq_lens=seq_lens
+            # ).flatten()
+            # outputs[f"{key_base}_fixed_avg_posterior_mode"] = mode_indices_avg
 
-            # ----------------------------------------------------------------
-            # D. NEW Strategy: Fully Smoothed Greedy
-            # ----------------------------------------------------------------
-            # Search on Smoothed AND Refine on Smoothed.
-            # We pass the pre-smoothed hazards.
-            # We pass a kernel of [1] because the hazards are ALREADY smoothed.
-            # If we passed 'kernel' again, we would double-smooth (convolve twice).
+            # # ----------------------------------------------------------------
+            # # D. NEW Strategy: Fully Smoothed Greedy
+            # # ----------------------------------------------------------------
+            # # Search on Smoothed AND Refine on Smoothed.
+            # # We pass the pre-smoothed hazards.
+            # # We pass a kernel of [1] because the hazards are ALREADY smoothed.
+            # # If we passed 'kernel' again, we would double-smooth (convolve twice).
             
-            smoothed_hazards_for_greedy = np.convolve(hazards, kernel, mode='same')
+            # smoothed_hazards_for_greedy = np.convolve(hazards, kernel, mode='same')
             
-            outputs[f"{key_base}_fully_smoothed_greedy"] = run_greedy_search(
-                smoothed_hazards_for_greedy, 
-                np.array([1.0]), # Identity kernel, just find peaks in pre-smoothed data
-                n_pred,
-                window_width_override=M
-            )
+            # outputs[f"{key_base}_fully_smoothed_greedy"] = run_greedy_search(
+            #     smoothed_hazards_for_greedy, 
+            #     np.array([1.0]), # Identity kernel, just find peaks in pre-smoothed data
+            #     n_pred,
+            #     window_width_override=M
+            # )
 
-            outputs[f"{key_base}_fully_smoothed_greedy_argmax"] = run_greedy_search(
-                smoothed_hazards_for_greedy, 
-                np.array([1.0]), # Identity kernel, just find peaks in pre-smoothed data
-                n_pred,
-            )
+            # outputs[f"{key_base}_fully_smoothed_greedy_argmax"] = run_greedy_search(
+            #     smoothed_hazards_for_greedy, 
+            #     np.array([1.0]), # Identity kernel, just find peaks in pre-smoothed data
+            #     n_pred,
+            # )
 
-            # interpolated greedy
+            # # interpolated greedy
 
-            outputs[f"{key_base}_fully_smoothed_greedy_interpolate"] = run_greedy_search(
-                smoothed_hazards_for_greedy, 
-                np.array([1.0]), # Identity kernel, just find peaks in pre-smoothed data
-                n_pred,
-                window_width_override=M,
-                interpolate=True
-            )
+            # outputs[f"{key_base}_fully_smoothed_greedy_interpolate"] = run_greedy_search(
+            #     smoothed_hazards_for_greedy, 
+            #     np.array([1.0]), # Identity kernel, just find peaks in pre-smoothed data
+            #     n_pred,
+            #     window_width_override=M,
+            #     interpolate=True
+            # )
 
-            outputs[f"{key_base}_fully_smoothed_greedy_argmax_interpolate"] = run_greedy_search(
-                smoothed_hazards_for_greedy, 
-                np.array([1.0]), # Identity kernel, just find peaks in pre-smoothed data
-                n_pred,
-                interpolate=True
-            )
+            # outputs[f"{key_base}_fully_smoothed_greedy_argmax_interpolate"] = run_greedy_search(
+            #     smoothed_hazards_for_greedy, 
+            #     np.array([1.0]), # Identity kernel, just find peaks in pre-smoothed data
+            #     n_pred,
+            #     interpolate=True
+            # )
 
-            # E. Strategy: Iterative Bayesian Greedy
-            # Exact Posterior Mode (Detection) -> Exact Posterior Median (Refinement)
-            outputs[f"{key_base}_iterative_bayesian"] = run_iterative_bayesian_greedy(
-                n_pred=n_pred,
-                log_hazards=log_hazards, # Pass RAW log hazards
-                tolerance_ms=tolerance_ms,
-                frame_ms=frame_ms,
-                kernel=kernel # Pass the smoothing kernel
-            )
+            # # E. Strategy: Iterative Bayesian Greedy
+            # # Exact Posterior Mode (Detection) -> Exact Posterior Median (Refinement)
+            # outputs[f"{key_base}_iterative_bayesian"] = run_iterative_bayesian_greedy(
+            #     n_pred=n_pred,
+            #     log_hazards=log_hazards, # Pass RAW log hazards
+            #     tolerance_ms=tolerance_ms,
+            #     frame_ms=frame_ms,
+            #     kernel=kernel # Pass the smoothing kernel
+            # )
+
+            # # ----------------------------------------------------------------
+            # # F. STRATEGY: Iterative Re-Smoothing Greedy (Your Request)
+            # # ----------------------------------------------------------------
+            # # "Searches for mode, zeros region, smooths again"
+            # outputs[f"{key_base}_iterative_resmoothing"] = run_iterative_mode(
+            #     n_pred=n_pred,
+            #     log_hazards=log_hazards,
+            #     kernel=kernel,
+            #     window_width=M
+            # )
 
     return outputs
 
