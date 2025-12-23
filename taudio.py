@@ -150,3 +150,7 @@ class TAudio(nn.Module):
             generated_string = self.model_adapter.processor.tokenizer.decode(generated_tokens)
 
         return generated_string
+    
+    def generate_batch(self, **kwargs):
+        with torch.no_grad():
+            return self.model_adapter.generate_batch(**kwargs, eos_token_id=self.model_adapter.processor.tokenizer.eos_token_id, decode_tokens=True)

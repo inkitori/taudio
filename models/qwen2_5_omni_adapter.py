@@ -112,6 +112,25 @@ class Qwen2_5OmniAdapter(BaseModelAdapter):
             else:
                 return tokens
 
+    def generate_batch(self, decode_tokens: bool = False, **kwargs):
+        with self.bidirectional_audio_context(kwargs["input_ids"]) if self.bidirectional_audio else nullcontext():
+            logging.debug(f"Using bidirectional audio context: {
+                         self.bidirectional_audio}")
+
+            tokens = self.base_model.generate(**kwargs)
+
+            if decode_tokens:
+                generated_strings = []
+                
+                for batch_idx in range(len(tokens)):
+                    generated_tokens = tokens[batch_idx][kwargs["input_ids"].shape[1]:]
+                    generated_string = self.processor.tokenizer.decode(generated_tokens, skip_special_tokens=True)
+                    generated_strings.append(generated_string)
+
+                return generated_strings
+            else:
+                return tokens
+
     @property
     def seconds_to_embedding(self) -> int:
         return self.constants.SECONDS_TO_EMBEDDING
