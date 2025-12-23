@@ -20,6 +20,8 @@ class AllTimestampsTask(BaseTask):
     def __init__(self, *, key: str = "start"):
         super().__init__()
         self.key = key
+        self.min_time = None
+        self.max_time = None
 
     def _validate_adapter(self, ds_adapter: BaseDatasetAdapter) -> LibriSpeechAdapter:
         if not isinstance(ds_adapter, LibriSpeechAdapter):
@@ -29,10 +31,7 @@ class AllTimestampsTask(BaseTask):
     def _extract_events_and_transcript(
         self, *, example: Dict[str, Any], ds_adapter: LibriSpeechAdapter
     ) -> List[Dict[str, Any]]:
-        if hasattr(ds_adapter, "get_events_sorted"):
-            events: Iterable[Dict[str, Any]] = ds_adapter.get_events_sorted(example)
-        else:
-            events = ds_adapter.get_events(example)
+        events = ds_adapter.get_events_sorted(example)
 
         filtered: List[Dict[str, Any]] = []
         unknown = set(ds_adapter.unknown_events())
@@ -116,12 +115,9 @@ class AllTimestampsTask(BaseTask):
                 }
                 for ev in events
             ]
-            expected_json = textwrap.dedent(
-                f"""\
-                ```json
-                {json.dumps(target, indent=4)}
-                ```"""
-            )
+            expected_json = f"```json\n{json.dumps(target, indent=4)}\n```"
+
+            logging.info(f"Expected JSON\n{expected_json}")
 
         processor = model_adapter.processor
         prompt_text = self._build_conversation_text(
@@ -131,7 +127,7 @@ class AllTimestampsTask(BaseTask):
             eval_mode=eval_mode,
         )
 
-        logging.info(f"[ALL] Prompt Text:\n{prompt_text}")
+        # logging.info(f"[ALL] Prompt Text:\n{prompt_text}")
 
         inputs = processor(
             text=prompt_text,
@@ -220,7 +216,7 @@ class AllTimestampsTask(BaseTask):
         inputs = inputs.to(next(model.parameters()).device)
 
         generated_string = model.generate(**inputs)
-        logging.info(f"[ALL] Token prediction: {generated_string}")
+        logging.info(f"[ALL] Token prediction: \n{generated_string}")
 
         pred_starts = self._parse_prediction_list(generated_string)
         if pred_starts is None:
@@ -230,6 +226,8 @@ class AllTimestampsTask(BaseTask):
         gt_starts = [ds_adapter.get_target_seconds(ev, self.key) for ev in events]
         gt_sorted = sorted(gt_starts)
         pred_sorted = sorted([round_timestamp_python(float(p)) for p in pred_starts])
+        
+        logging.info(f"[ALL] Ground Truth: {str(gt_sorted)}\n[ALL] Predictions: {str(pred_sorted)}")
 
         if len(pred_sorted) == 0 or len(gt_sorted) == 0:
             return {"parsing_error": 1.0}
@@ -246,8 +244,120 @@ class AllTimestampsTask(BaseTask):
             if all(err <= 0.050 for err in abs_errors)
             else 0.0,
             "token_length_mismatch": 1.0 if len(pred_sorted) != len(gt_sorted) else 0.0,
+            "parsing_error": 0.0
         }
         return metrics
+
+    def evaluate_tokens_batched(
+        self,
+        *,
+        examples: List[Dict[str, Any]],
+        ds_adapter: BaseDatasetAdapter,
+        model: Any,
+        error_bound: float = 0.1,
+    ) -> List[Dict[str, Any]]:
+        ds_adapter = self._validate_adapter(ds_adapter)
+        
+        all_inputs = []
+        all_events = []
+        
+        for example in examples:
+            events = self._extract_events_and_transcript(example=example, ds_adapter=ds_adapter)
+            all_events.append(events)
+            
+            inputs = self.build_labels(
+                example=example,
+                ds_adapter=ds_adapter,
+                model_adapter=model.model_adapter,
+                eval_mode=True,
+            )
+            all_inputs.append(inputs)
+        
+        # Batch the inputs
+        batched_inputs = self._collate_inputs(all_inputs, model.model_adapter)
+        batched_inputs = {k: v.to(next(model.parameters()).device) for k, v in batched_inputs.items()}
+        
+        generated_strings = model.generate_batch(**batched_inputs, max_new_tokens=2048)
+
+        logging.info(generated_strings[-1])
+        
+        # Compute metrics per example
+        all_metrics = []
+        for generated_string, events in zip(generated_strings, all_events):
+            metrics = self._compute_metrics(generated_string, events, ds_adapter)
+            all_metrics.append(metrics)
+        
+        return all_metrics
+
+
+    def _collate_inputs(
+        self,
+        all_inputs: List[Dict[str, torch.Tensor]],
+        model_adapter: BaseModelAdapter,
+    ) -> Dict[str, torch.Tensor]:
+        """Left-pad input_ids/attention_mask, concatenate the rest."""
+        
+        pad_token_id = model_adapter.processor.tokenizer.pad_token_id or 0
+        max_len = max(inp["input_ids"].shape[1] for inp in all_inputs)
+        
+        input_ids_list = []
+        attention_mask_list = []
+        
+        for inp in all_inputs:
+            seq_len = inp["input_ids"].shape[1]
+            pad_len = max_len - seq_len
+            
+            if pad_len > 0:
+                input_ids_list.append(torch.cat([
+                    torch.full((1, pad_len), pad_token_id, dtype=inp["input_ids"].dtype),
+                    inp["input_ids"]
+                ], dim=1))
+                attention_mask_list.append(torch.cat([
+                    torch.zeros((1, pad_len), dtype=inp["attention_mask"].dtype),
+                    inp["attention_mask"]
+                ], dim=1))
+            else:
+                input_ids_list.append(inp["input_ids"])
+                attention_mask_list.append(inp["attention_mask"])
+        
+        return {
+            "input_ids": torch.cat(input_ids_list, dim=0),
+            "attention_mask": torch.cat(attention_mask_list, dim=0),
+            "input_features": torch.cat([inp["input_features"] for inp in all_inputs], dim=0),
+            "feature_attention_mask": torch.cat([inp["feature_attention_mask"] for inp in all_inputs], dim=0),
+        }
+
+
+    def _compute_metrics(
+        self,
+        generated_string: str,
+        events: List[Dict[str, Any]],
+        ds_adapter: LibriSpeechAdapter,
+    ) -> Dict[str, float]:
+        """Extract metrics for a single example."""
+        
+        pred_starts = self._parse_prediction_list(generated_string)
+        if pred_starts is None:
+            return {"parsing_error": 1.0}
+        
+        gt_sorted = sorted(ds_adapter.get_target_seconds(ev, self.key) for ev in events)
+        pred_sorted = sorted(round_timestamp_python(float(p)) for p in pred_starts)
+        
+        if len(pred_sorted) == 0 or len(gt_sorted) == 0:
+            return {"parsing_error": 1.0}
+        
+        min_len = min(len(pred_sorted), len(gt_sorted))
+        abs_errors = [
+            round_timestamp_python(abs(pred_sorted[i] - gt_sorted[i]))
+            for i in range(min_len)
+        ]
+        
+        return {
+            "token_abs_error_sum": sum(abs_errors) / min_len,
+            "token_correct_50ms": 1.0 if all(err <= 0.050 for err in abs_errors) else 0.0,
+            "token_length_mismatch": 1.0 if len(pred_sorted) != len(gt_sorted) else 0.0,
+            "parsing_error": 0.0,
+        }
 
     def evaluate_auxiliary_outputs(
         self,
@@ -370,13 +480,14 @@ class AllTimestampsTask(BaseTask):
                     torch.tensor(pred_idx, device=device) / denom
                 )
 
+                torch.set_printoptions(precision=2, sci_mode=False, linewidth=160, threshold=10000)
                 pred_count = infer_count(example_logits.unsqueeze(0), torch.ones_like(example_logits.unsqueeze(0)))
                 gt_count = example_labels.sum()
-                logging.info(f"Pred Count: {pred_count}, GT Count: {gt_count}")
 
                 if PartialState().is_main_process:
                     logging.info(example_labels)
                     logging.info(torch.exp(example_logits))
+
             else:
                 topk = torch.topk(example_logits, k=n_pred).indices.to(dtype)
                 pred_sec = round_timestamp((topk + 0.5) / denom)
@@ -407,8 +518,8 @@ class AllTimestampsTask(BaseTask):
         else:
             auxiliary_deviation = torch.stack(per_example_deviation).mean()
 
-        logging.info(f"[ALL] GT Seconds: {gt_seconds}")
-        logging.info(f"[ALL] Predicted Seconds: {predicted_seconds}")
+        # logging.info(f"[ALL] GT Seconds: {gt_seconds}")
+        # logging.info(f"[ALL] Predicted Seconds: {predicted_seconds}")
 
         return loss, auxiliary_deviation, auxiliary_prediction
 
@@ -419,47 +530,5 @@ class AllTimestampsTask(BaseTask):
         except ValueError:
             return True
         return False
-
-    def evaluate_tokens_base(
-        self, example: Dict[str, Any], ds_adapter: BaseDatasetAdapter, model_adapter: BaseModelAdapter
-    ) -> Dict[str, Any]:
-        ds_adapter = self._validate_adapter(ds_adapter)
-        events = self._extract_events_and_transcript(example=example, ds_adapter=ds_adapter)
-        words = [ds_adapter.event_name(ev) for ev in events]
-        transcript = " ".join(words)
-        prompt_text = (
-            f"Transcript:\n{transcript}\nBased on the transcript, output the timestamps for every word. "
-            f"Respond in JSON."
-        )
-        generation_prefix = "```json\n["
-
-        audio = ds_adapter.get_audio(example)
-        inputs = model_adapter.build_base_inputs(
-            prompt_text, audio, generation_prefix=generation_prefix
-        )
-        inputs = inputs.to(torch.cuda.current_device())
-
-        generated_string = model_adapter.generate(**inputs, max_new_tokens=64, decode_tokens=True)
-        full_generation = f"{generation_prefix}{generated_string}"
-        logging.info(f"[ALL] Full generation:\n{full_generation}")
-
-        pred_starts = self._parse_prediction_list(full_generation)
-        if pred_starts is None:
-            return {"parsing_error": 1.0}
-
-        gt_starts = [ds_adapter.get_target_seconds(ev, self.key) for ev in events]
-        min_len = min(len(pred_starts), len(gt_starts))
-        if min_len == 0:
-            return {"parsing_error": 1.0}
-        abs_err = sum(
-            round_timestamp_python(abs(pred_starts[i] - gt_starts[i])) for i in range(min_len)
-        ) / float(min_len)
-
-        metrics: Dict[str, float] = {
-            "token_abs_error_sum": abs_err,
-            "token_length_mismatch": 1.0 if len(pred_starts) != len(gt_starts) else 0.0,
-        }
-        return metrics
-
 
 

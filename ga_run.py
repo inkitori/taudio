@@ -209,7 +209,9 @@ def main():
     
     # preventing deadlocks from gpu stopping early
     local_len = torch.tensor(len(dataloader), device=accelerator.device)
-    min_len = accelerator.reduce(local_len, reduction="min").item()
+    dist.all_reduce(local_len, op=dist.ReduceOp.MIN)
+    min_len = local_len.item()
+
     num_update_steps_per_epoch = int(min_len) // grad_accum_steps
     dist_log(accelerator, f"Adjusted update steps per epoch (deadlock safe): {num_update_steps_per_epoch}")
 
@@ -220,7 +222,7 @@ def main():
     logging.info(f"Total training steps: {num_optim_steps}")
 
     start_epoch = 0
-    if args.load_checkpoint:
+    if args.load_checkpoint and not args.eval_only:
         ckpt_path = Path(args.load_checkpoint)
         
         if ckpt_path.is_file():
@@ -302,19 +304,46 @@ def main():
                     break
 
         local_metrics = AverageMetrics()
+        eval_tokens_batch_size = 32
         with distributed_state.split_between_processes(base_ds) as ds_shard:
-            for example in ds_shard:
+            ds_shard_pbar = tqdm(ds_shard, desc=f"Rank {accelerator.process_index}")
+
+            for example in ds_shard_pbar:
                 if task.skip_example(example, adapter):
                     continue
+
                 if eval_token_outputs:
-                    token_metrics = task.evaluate_tokens(
-                        example=example,
-                        ds_adapter=adapter,
-                        model=eval_model,
-                        error_bound=0.1,
-                    )
-                    if token_metrics is not None:
-                        local_metrics.update_dict(token_metrics)
+                    # Batched iteration for token evaluation
+                    batch = []
+                    for example in ds_shard_pbar:
+                        if task.skip_example(example, adapter):
+                            continue
+                        batch.append(example)
+                        
+                        if len(batch) >= eval_tokens_batch_size:
+                            token_metrics_list = task.evaluate_tokens_batched(
+                                examples=batch,
+                                ds_adapter=adapter,
+                                model=eval_model,
+                                error_bound=0.1,
+                            )
+                            for token_metrics in token_metrics_list:
+                                if token_metrics is not None:
+                                    local_metrics.update_dict(token_metrics)
+                            batch = []
+                    
+                    # Handle remaining examples
+                    if batch:
+                        token_metrics_list = task.evaluate_tokens_batched(
+                            examples=batch,
+                            ds_adapter=adapter,
+                            model=eval_model,
+                            error_bound=0.1,
+                        )
+                        for token_metrics in token_metrics_list:
+                            if token_metrics is not None:
+                                local_metrics.update_dict(token_metrics)
+
                 if eval_aux_outputs:
                     aux_metrics = task.evaluate_auxiliary_outputs(
                         example=example,
@@ -325,37 +354,27 @@ def main():
                     if aux_metrics is not None:
                         local_metrics.update_dict(aux_metrics)
 
-        token_metric_keys: List[str] = [
-            "token_abs_error_sum", "token_correct_5ms", "token_correct_10ms",
-            "token_correct_20ms", "token_correct_40ms", "token_correct_50ms",
-            "token_correct_80ms", "token_correct_100ms", "token_correct_200ms",
-            "parsing_error",
-        ]
-        aux_metric_keys: List[str] = [
-            "aux_abs_error_sum", "aux_correct_5ms", "aux_correct_10ms",
-            "aux_correct_20ms", "aux_correct_40ms", "aux_correct_50ms",
-            "aux_correct_80ms", "aux_correct_100ms", "aux_correct_200ms",
-        ]
+        to_reduce = {}
+        for key in local_metrics._sum.keys():
+            to_reduce[f"{key}_sum"] = torch.tensor(local_metrics.get_sum(key), device=accelerator.device)
+            to_reduce[f"{key}_cnt"] = torch.tensor(local_metrics.get_count(key), device=accelerator.device)
 
-        metric_keys: List[str] = []
-        if eval_token_outputs:
-            metric_keys.extend(token_metric_keys)
-        if eval_aux_outputs:
-            metric_keys.extend(aux_metric_keys)
+        reduced = accelerator.reduce(to_reduce, reduction='sum')
 
-        aggregated: Dict[str, float] = {}
-        device = accelerator.device
-        for key in metric_keys:
-            local_sum = torch.tensor(local_metrics.get_sum(key), device=device, dtype=torch.float32)
-            local_cnt = torch.tensor(local_metrics.get_count(key), device=device, dtype=torch.float32)
-            global_sum = accelerator.reduce(local_sum, reduction='sum')
-            global_cnt = accelerator.reduce(local_cnt, reduction='sum')
-            avg = (global_sum / torch.clamp_min(global_cnt, 1.0)).item()
-            aggregated[f"{prefix}/{key}"] = avg
+        # 3. Calculate averages
+        aggregated = {
+            f"{prefix}/{key}": (reduced[f"{key}_sum"] / torch.clamp_min(reduced[f"{key}_cnt"], 1.0)).item()
+            for key in local_metrics._sum.keys()
+        }
 
         if is_master and not args.debug and run is not None:
             log_payload = dict(aggregated)
+            # if epoch is not None:
+            #     log_payload["train/epoch"] = epoch + 1
             run.log(log_payload)
+        
+        task.min_time = original_min_time
+        task.max_time = original_max_time
         
         task.min_time = original_min_time
         task.max_time = original_max_time
@@ -405,19 +424,18 @@ def main():
             # ------------------------------------------------------------------
             # 2. Pre-Calculate Totals for Variable-Size Scaling
             # ------------------------------------------------------------------
-            local_step_tokens = 0.0
+            local_step_tokens = torch.tensor(0.0, device=accelerator.device)
 
             for batch in accum_batches:
                 # Count valid tokens for Token Loss scaling (CrossEntropy)
-                local_step_tokens += (batch['labels'] != -100).sum().item()
+                local_step_tokens += (batch['labels'] != -100).sum()
 
             # Convert to tensor for reduction
             # [token_count, sample_count]
-            counts_tensor = torch.tensor([local_step_tokens], device=accelerator.device)
+            global_total_tokens = accelerator.reduce(local_step_tokens, reduction='sum')
             
-            # Reduce across all GPUs to get Global Totals for this step
-            global_counts = accelerator.reduce(counts_tensor, reduction='sum')
-            global_total_tokens = global_counts[0].item()
+            # Prevent division by zero (good practice with tensors)
+            global_total_tokens = torch.clamp(global_total_tokens, min=1.0)
             
             # ------------------------------------------------------------------
             # 3. Forward & Backward Pass with Mixed Scaling
@@ -435,13 +453,13 @@ def main():
                 if (i < len(accum_batches) - 1 and accelerator.num_processes > 1):
                     ctx = accelerator.no_sync(model)
                 else:
-                    ctx = contextlib.nullcontext
+                    ctx = contextlib.nullcontext()
 
-                with ctx():
+                with ctx:
                     output = model(**batch)
                     
                     # --- A. Calculate Local Counts for this specific micro-batch ---
-                    current_batch_tokens = (batch['labels'] != -100).sum().item() if 'labels' in batch else 0.0
+                    current_batch_tokens = (batch['labels'] != -100).sum()
 
                     # --- B. Apply Scaling Factors ---
                     # 1. Un-average the loss (multiply by local count)
@@ -473,14 +491,14 @@ def main():
                     accelerator.backward(total_scaled_loss)
                     losses.append(total_scaled_loss.detach())
                     
-                    # --- D. Update Metrics for Logging ---
-                    with torch.no_grad():
-                        # We accumulate the raw local means for the metrics dictionary
-                        metrics.update_dict({
-                            "train/token_loss": output.token_loss.item(),
-                            "train/surrogate_loss": output.surrogate_loss.item(),
-                            "train/auxiliary_deviation": output.auxiliary_deviation.item(),
-                        })
+                    # # --- D. Update Metrics for Logging ---
+                    # with torch.no_grad():
+                    #     # We accumulate the raw local means for the metrics dictionary
+                    #     metrics.update_dict({
+                    #         "train/token_loss": output.token_loss.item(),
+                    #         "train/surrogate_loss": output.surrogate_loss.item(),
+                    #         "train/auxiliary_deviation": output.auxiliary_deviation.item(),
+                    #     })
                         
 
             # ------------------------------------------------------------------
@@ -492,12 +510,11 @@ def main():
             # ------------------------------------------------------------------
             # 5. Logging
             # ------------------------------------------------------------------
+            local_loss_sum = torch.stack(losses).sum()
+            global_loss_sum = accelerator.reduce(local_loss_sum, reduction='sum').item()
+            avg_loss = global_loss_sum / (accelerator.num_processes * grad_accum_steps)
 
-            losses = accelerator.gather(sum(losses)).sum().item() / (
-                accelerator.num_processes * grad_accum_steps
-            )
-
-            metrics.update_dict({"train/loss": losses})
+            metrics.update_dict({"train/loss": avg_loss})
 
             if is_master and not args.debug and run is not None:
                 run.log({
@@ -509,7 +526,7 @@ def main():
                 })
                 metrics.reset()
 
-            progress_bar.set_description(f"Epoch {epoch + 1}, Loss: {losses:.4f}")
+            progress_bar.set_description(f"Epoch {epoch + 1}, Loss: {avg_loss:.4f}")
 
         logging.info(f"Epoch {epoch + 1} completed.")
 
@@ -524,22 +541,25 @@ def main():
         accelerator.wait_for_everyone()
 
         # Per-epoch distributed eval on dev split
-        if not args.debug:
-            checkpoint_dir = experiment_dir / f"checkpoint_epoch{epoch+1}"
-            dev_split = dataset_config.get('dev_split', 'dev')
-            metrics = distributed_eval(dev_split, prefix="dev", epoch=epoch, state_dir=None)
+        # if not args.debug:
+        #     checkpoint_dir = experiment_dir / f"checkpoint_epoch{epoch+1}"
+        #     dev_split = dataset_config.get('dev_split', 'dev')
+        #     metrics = distributed_eval(dev_split, prefix="dev", epoch=epoch, state_dir=None)
             
-            target_metric = "dev/token_correct_100ms"
-            if not eval_token_outputs and eval_aux_outputs:
-                target_metric = "dev/aux_correct_100ms"
+        #     target_metric = "dev/token_correct_100ms"
+        #     if not eval_token_outputs and eval_aux_outputs:
+        #         target_metric = "dev/aux_correct_100ms"
                 
-            current_metric = metrics.get(target_metric, -1.0)
-            logging.info(f"Current model achieved {target_metric}: {current_metric}")
-            if current_metric > best_metric: 
-                best_metric = current_metric
-                best_checkpoint_dir = checkpoint_dir
-                if is_master:
-                    logging.info(f"New best model found with {target_metric}: {best_metric}")
+        #     current_metric = metrics.get(target_metric, -1.0)
+        #     logging.info(f"Current model achieved {target_metric}: {current_metric}")
+        #     if current_metric > best_metric: 
+        #         best_metric = current_metric
+        #         best_checkpoint_dir = checkpoint_dir
+        #         if is_master:
+        #             logging.info(f"New best model found with {target_metric}: {best_metric}")
+
+        # WE ARE SKIPPING DEV FOR NOW
+        best_checkpoint_dir = checkpoint_dir
         
         accelerator.wait_for_everyone()
 
