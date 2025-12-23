@@ -49,6 +49,8 @@ def main():
     parser.add_argument('--run-id', type=str, default=None, help='wandb run id')
     parser.add_argument('--dev', action='store_true', help='Perform final evaluation on dev')
 
+    parser.add_argument('--take-first', type=int, default=None)
+
     parser.add_argument('--bs-per-device', type=int, default=1)
 
     args = parser.parse_args()
@@ -172,7 +174,7 @@ def main():
         repository=dataset_config['repository'],
         split=dataset_config['split'],
         task=task,
-        take_first=dataset_config.get('take_first', None),
+        take_first=args.take_first,
         left_padding=dataset_config.get('left_padding', 0),
     )
 
@@ -289,7 +291,7 @@ def main():
             sampling_rate=model.model_adapter.sampling_rate,
             left_padding=dataset_config.get('left_padding', 0),
             key=task.key,
-            # take_first=dataset_config.get('take_first', None),
+            take_first=args.take_first,
         )
 
         base_ds = adapter.load_split(split_name)
@@ -308,32 +310,19 @@ def main():
         with distributed_state.split_between_processes(base_ds) as ds_shard:
             ds_shard_pbar = tqdm(ds_shard, desc=f"Rank {accelerator.process_index}")
 
+            batch = []
+
             for example in ds_shard_pbar:
+                # 1. Skip logic (same as before)
                 if task.skip_example(example, adapter):
                     continue
 
+                # 2. Accumulate batch
                 if eval_token_outputs:
-                    # Batched iteration for token evaluation
-                    batch = []
-                    for example in ds_shard_pbar:
-                        if task.skip_example(example, adapter):
-                            continue
-                        batch.append(example)
-                        
-                        if len(batch) >= eval_tokens_batch_size:
-                            token_metrics_list = task.evaluate_tokens_batched(
-                                examples=batch,
-                                ds_adapter=adapter,
-                                model=eval_model,
-                                error_bound=0.1,
-                            )
-                            for token_metrics in token_metrics_list:
-                                if token_metrics is not None:
-                                    local_metrics.update_dict(token_metrics)
-                            batch = []
+                    batch.append(example)
                     
-                    # Handle remaining examples
-                    if batch:
+                    # 3. Process when batch is full
+                    if len(batch) >= eval_tokens_batch_size:
                         token_metrics_list = task.evaluate_tokens_batched(
                             examples=batch,
                             ds_adapter=adapter,
@@ -343,6 +332,7 @@ def main():
                         for token_metrics in token_metrics_list:
                             if token_metrics is not None:
                                 local_metrics.update_dict(token_metrics)
+                        batch = [] # Reset batch
 
                 if eval_aux_outputs:
                     aux_metrics = task.evaluate_auxiliary_outputs(
@@ -353,6 +343,19 @@ def main():
                     )
                     if aux_metrics is not None:
                         local_metrics.update_dict(aux_metrics)
+
+            # 4. Process any remaining items in the batch after the loop finishes
+            if eval_token_outputs and batch:
+                token_metrics_list = task.evaluate_tokens_batched(
+                    examples=batch,
+                    ds_adapter=adapter,
+                    model=eval_model,
+                    error_bound=0.1,
+                )
+                for token_metrics in token_metrics_list:
+                    if token_metrics is not None:
+                        local_metrics.update_dict(token_metrics)
+
 
         to_reduce = {}
         for key in local_metrics._sum.keys():
@@ -376,9 +379,6 @@ def main():
         task.min_time = original_min_time
         task.max_time = original_max_time
         
-        task.min_time = original_min_time
-        task.max_time = original_max_time
-
         del eval_model
         del full_state_dict
         del adapter
