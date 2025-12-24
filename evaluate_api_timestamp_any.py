@@ -314,6 +314,7 @@ def evaluate_dataset(
         key=task.key,
     )
     dataset = ds_adapter.load_split(split)
+    dataset = task.select_indices(dataset, ds_adapter, split)
     
     metrics = AverageMetrics()
     # Restore metrics if we are resuming

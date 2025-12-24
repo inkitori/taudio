@@ -80,6 +80,8 @@ def main():
     )
 
     base_ds = dataset_adapter.load_split(args.split)
+
+    base_ds = task.select_indices(base_ds, dataset_adapter, args.split)
     # base_ds = base_ds.shuffle(seed=SEED)
 
     # Metrics aggregator (running averages)
