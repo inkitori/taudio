@@ -708,8 +708,8 @@ def infer_timestamps_binary(n_pred, logits):
     probs = expit(logits)
 
     outputs['argmax'] = np.argpartition(probs, -n_pred)[-n_pred:]
-    outputs['argmax_adjusted'] = outputs['argmax'] + 0.5
-    outputs['default'] = outputs['argmax_adjusted']
+    outputs['argmax_fixed'] = outputs['argmax'] + 0.5
+    outputs['default'] = outputs['argmax_fixed']
 
     for tolerance_ms in range(10, 101, 10):
         M = int((tolerance_ms * 2) / frame_ms)
@@ -725,6 +725,7 @@ def infer_timestamps_binary(n_pred, logits):
 
             top_indices = np.argpartition(smoothed_probs, -n_pred)[-n_pred:]
             outputs[key_base] = top_indices + 0.5
+            outputs[f"{key_base}_broken"] = top_indices
 
     return outputs
 
