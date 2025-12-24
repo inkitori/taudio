@@ -12,21 +12,22 @@ def main():
     print(f"Loading {model_id}...")
 
     # Use CUDA if available for faster inference
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+    device = "cuda" 
     
     try:
         processor = Qwen2_5OmniProcessor.from_pretrained(model_id)
         model = Qwen2_5OmniThinkerForConditionalGeneration.from_pretrained(
             model_id,
-            torch_dtype=torch.float16 if device == "cuda" else torch.float32,
+            torch_dtype=torch.bfloat16,
             device_map="auto" if device == "cuda" else None,
+            attn_implementation="flash_attention_2",
         )
+        model.generation_config.eos_token_id = [151645, 151643]
+
     except Exception as e:
         print(f"Error loading model. Ensure you have the specific dependencies for Qwen2.5-Omni installed.\nError: {e}")
         return
 
-    if device == "cpu":
-        model.to(device)
 
     # Initialize chat history
     conversation_history = []
@@ -69,7 +70,7 @@ def main():
             **inputs,
             streamer=streamer,
             max_new_tokens=512,
-            eos_token_id=[151645, 151643] # Specific EOS tokens from your code
+            # eos_token_id=[151645, 151643] # Specific EOS tokens from your code
         )
 
         # 5. Run Generation in a Separate Thread

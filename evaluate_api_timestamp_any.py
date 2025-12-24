@@ -187,7 +187,7 @@ class ChatGPTEvaluator:
         if not api_key:
             raise ValueError("Missing OpenAI API key. Set --chatgpt-api-key or OPENAI_API_KEY.")
 
-        self._client = OpenAI(api_key=api_key)
+        self._client = OpenAI(api_key=api_key, max_retries=10)
         self._model = model
         self._timeout = timeout
 
@@ -196,23 +196,68 @@ class ChatGPTEvaluator:
         # but the request specifically asked for Gemini.
         audio_bytes = _audio_to_wav_bytes(audio)
         encoded_audio = base64.b64encode(audio_bytes).decode("utf-8")
-        response = self._client.responses.parse(
-            model=self._model,
-            input=[
+        # response = self._client.chat.completions.parse(
+        #     model=self._model,
+        #     messages=[
+        #         # {"role": "system", "content": "You are a helpful math tutor."},
+        #         {
+        #             "role": "user",
+        #             "content": [
+        #                 {"type": "text", "text": prompt},
+                        # {"type": "input_audio", "input_audio": {"data": encoded_audio, "format": "wav"}},
+        #             ],
+        #         }
+        #     ],
+        #     response_format=Timestamp,
+        #     # response_format={ "type": "json_object" },
+        #     # max_output_tokens=64,
+        #     temperature=0.0,
+        #     top_p=0.1,
+        #     **({"timeout": self._timeout} if self._timeout else {}),
+        # )
+        # response = self._client.chat.completions.parse(
+        #     model="gpt-4o-mini",
+        #     messages=[
+        #         {
+        #             "role": "user",
+        #             "content": [
+        #                 {"type": "text", "text": "What’s in this image?"},
+        #                 {
+        #                     "type": "image_url",
+        #                     "image_url": {
+        #                         "url": "https://upload.wikimedia.org/wikipedia/commons/thumb/d/dd/Gfp-wisconsin-madison-the-nature-boardwalk.jpg/2560px-Gfp-wisconsin-madison-the-nature-boardwalk.jpg",
+        #                         "detail": "high"
+        #                     },
+        #                 },
+        #                 # {
+        #                 #     "type": "input_audio", 
+        #                 #     "input_audio": {"data": encoded_audio, "format": "wav"}
+        #                 # },
+        #                 {
+        #                     "type": "audio_url", 
+        #                     "audio_url": f"data:audio/wav;base64,{encoded_audio}"
+        #                 },
+        #             ],
+        #         }
+        #     ],
+        #     max_tokens=300,
+        # )
+        response = self._client.chat.completions.parse(
+            model="gpt-4o-mini",
+            modalities=["text"],
+            messages = [
                 {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": prompt},
-                        {"type": "input_audio", "audio": {"data": encoded_audio, "format": "wav"}},
-                    ],
+                "role": "user",
+                "content": [
+                    { "type": "text", "text": "What is in this recording?" },
+                    { "type": "input_audio", "input_audio": { "data": encoded_audio, "format": "wav" }}
+                ]
                 }
             ],
-            text_format=Timestamp,
-            max_output_tokens=64,
-            temperature=0.0,
-            top_p=0.1,
-            **({"timeout": self._timeout} if self._timeout else {}),
-        )
+            response_format=Timestamp,
+        );
+
+        print(response.choices[0].message.content)
         logging.info(f"[GPT] Response: {response}")
         logging.info(f"[GPT] Parsed Response: {response.output_parsed}")
 
@@ -414,7 +459,7 @@ def parse_args() -> argparse.Namespace:
 
     parser.add_argument("--gemini-model", default="gemini-2.5-flash")
     parser.add_argument("--gemini-api-key", default=os.environ.get("GEMINI_API_KEY"))
-    parser.add_argument("--chatgpt-model", default="gpt-4o-mini-transcribe")
+    parser.add_argument("--chatgpt-model", default="gpt-4o-mini")
     parser.add_argument(
         "--chatgpt-api-key",
         default=os.environ.get("OPENAI_API_KEY") or os.environ.get("CHATGPT_API_KEY"),

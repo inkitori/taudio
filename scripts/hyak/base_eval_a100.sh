@@ -1,15 +1,15 @@
 #!/bin/bash
-#SBATCH --partition=gpu-h200
+#SBATCH --job-name=base_eval
 #SBATCH --account=ark
-#SBATCH --mem-per-gpu=128G
-#SBATCH --cpus-per-gpu=10
+#SBATCH --partition=ckpt
 #SBATCH --nodes=1
-#SBATCH --gres=gpu:1
-#SBATCH --time=5:00:00
-#SBATCH --job-name=h200_ga_run
+#SBATCH --ntasks-per-node=1
+#SBATCH --cpus-per-task=16
+#SBATCH --mem=128G
+#SBATCH --time=4:00:00
+#SBATCH --gres=gpu:a100:1
 #SBATCH --output=scripts/%x/%j.out
 #SBATCH --error=scripts/%x/%j.err
-#SBATCH --dependency=singleton         # dont hog 
 
 CONDA_BASE=$(conda info --base) # This is a good way to get it if conda is in PATH
 
@@ -28,16 +28,4 @@ fi
 
 cd /gscratch/ark/anjo0/taudio
 conda activate taudio
-
-# Optional eval min/max time arguments
-EVAL_MIN_ARG=""
-if [ -n "$2" ]; then
-EVAL_MIN_ARG="--eval-min-time $2"
-fi
-
-EVAL_MAX_ARG=""
-if [ -n "$3" ]; then
-EVAL_MAX_ARG="--eval-max-time $3"
-fi
-
-accelerate launch --config_file accelerate_configs/1_gpu_bf16.yaml ga_run.py --config "$1" $EVAL_MIN_ARG $EVAL_MAX_ARG --bs-per-device 4
+python evaluate_base.py --model-id $1 --repository $2 --split $3 --task $4
