@@ -518,7 +518,7 @@ class SingleTimestampAnyTask(BaseTask):
 
             if isinstance(model_adapter, AudioFlamingo3Adapter):
                 inputs['input_features'] = inputs['input_features'].to(model_adapter.dtype) # audio flamingo for some reason emits float32 input_features
-        except ModuleNotFoundError:
+        except ImportError:
             logging.info(f"[ANY] Couldn't find AudioFlamingo3Adapter, not importing (likely too old of transformers version)")
 
         generated_string = model_adapter.generate(**inputs, max_new_tokens=10, decode_tokens=True)
