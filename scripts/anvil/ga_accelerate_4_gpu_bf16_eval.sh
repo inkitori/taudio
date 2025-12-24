@@ -4,9 +4,9 @@
 #SBATCH --mem-per-gpu=96G
 #SBATCH --cpus-per-gpu=2
 #SBATCH --nodes=1
-#SBATCH --gres=gpu:2
+#SBATCH --gres=gpu:4
 #SBATCH --time=1:00:00
-#SBATCH --job-name=2_gpu_bf16_eval
+#SBATCH --job-name=4_gpu_bf16_eval
 #SBATCH --output=scripts/anvil/logs/%x/%j.out
 #SBATCH --error=scripts/anvil/logs/%x/%j.err
 
@@ -24,17 +24,6 @@ else
     exit 1
 fi
 
-# Optional eval min/max time arguments
-EVAL_MIN_ARG=""
-if [ -n "$4" ]; then
-EVAL_MIN_ARG="--eval-min-time $4"
-fi
-
-EVAL_MAX_ARG=""
-if [ -n "$5" ]; then
-EVAL_MAX_ARG="--eval-max-time $5"
-fi
-
 export OMP_NUM_THREADS=$(lscpu -b -p=CPU | grep -v '^#' | wc -l)
 
 master_addr=$(scontrol show hostnames "$SLURM_JOB_NODELIST" | head -n 1)
@@ -47,4 +36,4 @@ echo "MASTER_PORT: $MASTER_PORT"
 module load conda
 conda activate ./env
 
-accelerate launch --main_process_port $MASTER_PORT --config_file accelerate_configs/2_gpu_bf16.yaml run.py --config "$1" --load-checkpoint "$2" --eval-only $EXTRA_FLAGS $EVAL_MIN_ARG $EVAL_MAX_ARG
+accelerate launch --config_file accelerate_configs/4_gpu_bf16.yaml ga_run.py --config "$1" --load-checkpoint "$2" --eval-only $EXTRA_FLAGS

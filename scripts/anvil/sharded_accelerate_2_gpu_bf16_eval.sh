@@ -6,7 +6,7 @@
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:2
 #SBATCH --time=1:00:00
-#SBATCH --job-name=2_gpu_bf16_eval
+#SBATCH --job-name=2_gpu_bf16_eval_sharded
 #SBATCH --output=scripts/anvil/logs/%x/%j.out
 #SBATCH --error=scripts/anvil/logs/%x/%j.err
 
@@ -47,4 +47,4 @@ echo "MASTER_PORT: $MASTER_PORT"
 module load conda
 conda activate ./env
 
-accelerate launch --main_process_port $MASTER_PORT --config_file accelerate_configs/2_gpu_bf16.yaml run.py --config "$1" --load-checkpoint "$2" --eval-only $EXTRA_FLAGS $EVAL_MIN_ARG $EVAL_MAX_ARG
+accelerate launch --main_process_port $MASTER_PORT --config_file accelerate_configs/2_gpu_bf16_sharded.yaml run.py --config "$1" --load-checkpoint "$2" --eval-only $EXTRA_FLAGS $EVAL_MIN_ARG $EVAL_MAX_ARG

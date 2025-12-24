@@ -271,13 +271,6 @@ def main():
         )
 
     def distributed_eval(split_name: str, prefix: str, epoch: int = None, min_time: float = None, max_time: float = None, state_dir: str = None) -> Dict[str, float]:
-        original_min_time = task.min_time
-        original_max_time = task.max_time
-
-        if min_time is not None or max_time is not None:
-            task.min_time = min_time
-            task.max_time = max_time
-
         full_state_dict = get_full_state_dict(state_dir)
 
         eval_model = TAudio(**taudio_config)
@@ -313,15 +306,12 @@ def main():
             batch = []
 
             for example in ds_shard_pbar:
-                # 1. Skip logic (same as before)
                 if task.skip_example(example, adapter):
                     continue
 
-                # 2. Accumulate batch
                 if eval_token_outputs:
                     batch.append(example)
                     
-                    # 3. Process when batch is full
                     if len(batch) >= eval_tokens_batch_size:
                         token_metrics_list = task.evaluate_tokens_batched(
                             examples=batch,
@@ -342,9 +332,9 @@ def main():
                         error_bound=0.1,
                     )
                     if aux_metrics is not None:
-                        local_metrics.update_dict(aux_metrics)
+                        for metrics_dict in aux_metrics:
+                            local_metrics.update_dict(metrics_dict)
 
-            # 4. Process any remaining items in the batch after the loop finishes
             if eval_token_outputs and batch:
                 token_metrics_list = task.evaluate_tokens_batched(
                     examples=batch,
@@ -364,7 +354,6 @@ def main():
 
         reduced = accelerator.reduce(to_reduce, reduction='sum')
 
-        # 3. Calculate averages
         aggregated = {
             f"{prefix}/{key}": (reduced[f"{key}_sum"] / torch.clamp_min(reduced[f"{key}_cnt"], 1.0)).item()
             for key in local_metrics._sum.keys()
@@ -372,12 +361,7 @@ def main():
 
         if is_master and not args.debug and run is not None:
             log_payload = dict(aggregated)
-            # if epoch is not None:
-            #     log_payload["train/epoch"] = epoch + 1
             run.log(log_payload)
-        
-        task.min_time = original_min_time
-        task.max_time = original_max_time
         
         del eval_model
         del full_state_dict
@@ -577,11 +561,6 @@ def main():
 
     distributed_eval(split, prefix=split, epoch=training_config['epochs'] - 1, state_dir=final_checkpoint)
 
-    accelerator.wait_for_everyone()
-
-    if args.eval_min_time is not None or args.eval_max_time is not None:
-        distributed_eval(split, prefix=split+"_ood", epoch=training_config['epochs'] - 1, min_time=args.eval_min_time, max_time=args.eval_max_time, state_dir=final_checkpoint)
-    
     accelerator.wait_for_everyone()
 
     if is_master:
