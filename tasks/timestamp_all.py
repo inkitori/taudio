@@ -1,3 +1,4 @@
+from collections import defaultdict
 from typing import Any, Dict, Iterable, List, Optional
 import logging
 import math
@@ -204,49 +205,7 @@ class AllTimestampsTask(BaseTask):
         model: Any,
         error_bound: float = 0.1,
     ) -> Optional[Dict[str, Any]]:
-        ds_adapter = self._validate_adapter(ds_adapter)
-        events = self._extract_events_and_transcript(example=example, ds_adapter=ds_adapter)
-
-        inputs = self.build_labels(
-            example=example,
-            ds_adapter=ds_adapter,
-            model_adapter=model.model_adapter,
-            eval_mode=True,
-        )
-        inputs = inputs.to(next(model.parameters()).device)
-
-        generated_string = model.generate(**inputs)
-        logging.info(f"[ALL] Token prediction: \n{generated_string}")
-
-        pred_starts = self._parse_prediction_list(generated_string)
-        if pred_starts is None:
-            logging.info("[ALL] Failed to parse token prediction.")
-            return {"parsing_error": 1.0}
-
-        gt_starts = [ds_adapter.get_target_seconds(ev, self.key) for ev in events]
-        gt_sorted = sorted(gt_starts)
-        pred_sorted = sorted([round_timestamp_python(float(p)) for p in pred_starts])
-        
-        logging.info(f"[ALL] Ground Truth: {str(gt_sorted)}\n[ALL] Predictions: {str(pred_sorted)}")
-
-        if len(pred_sorted) == 0 or len(gt_sorted) == 0:
-            return {"parsing_error": 1.0}
-
-        min_len = min(len(pred_sorted), len(gt_sorted))
-        abs_errors = [
-            round_timestamp_python(abs(pred_sorted[i] - gt_sorted[i])) for i in range(min_len)
-        ]
-        avg_err = sum(abs_errors) / float(min_len)
-
-        metrics: Dict[str, float] = {
-            "token_abs_error_sum": avg_err,
-            "token_correct_50ms": 1.0
-            if all(err <= 0.050 for err in abs_errors)
-            else 0.0,
-            "token_length_mismatch": 1.0 if len(pred_sorted) != len(gt_sorted) else 0.0,
-            "parsing_error": 0.0
-        }
-        return metrics
+        raise NotImplementedError()
 
     def evaluate_tokens_batched(
         self,
@@ -260,6 +219,7 @@ class AllTimestampsTask(BaseTask):
         
         all_inputs = []
         all_events = []
+        all_audio_lengths = []
         
         for example in examples:
             events = self._extract_events_and_transcript(example=example, ds_adapter=ds_adapter)
@@ -272,20 +232,22 @@ class AllTimestampsTask(BaseTask):
                 eval_mode=True,
             )
             all_inputs.append(inputs)
+
+            all_audio_lengths.append(ds_adapter.get_audio_frames(example).size / model.model_adapter.sampling_rate)
         
         # Batch the inputs
         batched_inputs = self._collate_inputs(all_inputs, model.model_adapter)
         batched_inputs = {k: v.to(next(model.parameters()).device) for k, v in batched_inputs.items()}
         
-        generated_strings = model.generate_batch(**batched_inputs, max_new_tokens=2048)
+        generated_strings = model.generate_batch(**batched_inputs, max_new_tokens=4096)
 
         logging.info(generated_strings[-1])
         
         # Compute metrics per example
         all_metrics = []
-        for generated_string, events in zip(generated_strings, all_events):
-            metrics = self._compute_metrics(generated_string, events, ds_adapter)
-            all_metrics.append(metrics)
+        for generated_string, events, audio_length in zip(generated_strings, all_events, all_audio_lengths):
+            metrics = self._compute_metrics(generated_string, events, ds_adapter, audio_length)
+            all_metrics.extend(metrics)
         
         return all_metrics
 
@@ -333,31 +295,72 @@ class AllTimestampsTask(BaseTask):
         generated_string: str,
         events: List[Dict[str, Any]],
         ds_adapter: LibriSpeechAdapter,
+        audio_length
     ) -> Dict[str, float]:
         """Extract metrics for a single example."""
+
+        bad_metric = {
+            "parsing_error": 1.0,
+            "token_abs_error_sum": audio_length / 2,
+            "token_correct_5ms": 0,
+            "token_correct_10ms": 0,
+            "token_correct_20ms": 0,
+            "token_correct_40ms": 0,
+            "token_correct_50ms": 0,
+            "token_correct_80ms": 0,
+            "token_correct_100ms": 0,
+            "token_correct_200ms": 0,
+        }
+
+        gt_sorted = sorted(ds_adapter.get_target_seconds(ev, self.key) for ev in events)
         
         pred_starts = self._parse_prediction_list(generated_string)
         if pred_starts is None:
-            return {"parsing_error": 1.0}
+            logging.error("Couldn't parse output: \n" + generated_string)
+            logging.info("Falling back to regex output: ")
+
+            pattern = r'([\d]+\.[\d]+)'
+            pred_starts = [float(x) for x in re.findall(pattern, str(generated_string))]
+
+            logging.info(pred_starts)
         
-        gt_sorted = sorted(ds_adapter.get_target_seconds(ev, self.key) for ev in events)
         pred_sorted = sorted(round_timestamp_python(float(p)) for p in pred_starts)
+
+        metrics = []
+
+        for gt in gt_sorted:
+            min_len = min(len(pred_sorted), len(gt_sorted))
+            abs_errors = [
+                round_timestamp_python(abs(pred_sorted[i] - gt))
+                for i in range(min_len)
+            ]
+
+            if len(abs_errors) == 0:
+                metrics.append(bad_metric)
+                logging.error("Predicted less than the number of actual events in " + generated_string)
+                continue
+
+
+            abs_err = min(abs_errors)
+            abs_err_idx = abs_errors.index(abs_err) 
+            pred_sorted.pop(abs_err_idx) 
+
+            metric = {
+                "parsing_error": 0.0,
+                "token_abs_error_sum": abs_err,
+                "token_correct_5ms": 1.0 if abs_err <= 0.005 else 0.0,
+                "token_correct_10ms": 1.0 if abs_err <= 0.010 else 0.0,
+                "token_correct_20ms": 1.0 if abs_err <= 0.020 else 0.0,
+                "token_correct_40ms": 1.0 if abs_err <= 0.040 else 0.0,
+                "token_correct_50ms": 1.0 if abs_err <= 0.050 else 0.0,
+                "token_correct_80ms": 1.0 if abs_err <= 0.080 else 0.0,
+                "token_correct_100ms": 1.0 if abs_err <= 0.100 else 0.0,
+                "token_correct_200ms": 1.0 if abs_err <= 0.200 else 0.0,
+            }
+
+            metrics.append(metric)
         
-        if len(pred_sorted) == 0 or len(gt_sorted) == 0:
-            return {"parsing_error": 1.0}
-        
-        min_len = min(len(pred_sorted), len(gt_sorted))
-        abs_errors = [
-            round_timestamp_python(abs(pred_sorted[i] - gt_sorted[i]))
-            for i in range(min_len)
-        ]
-        
-        return {
-            "token_abs_error_sum": sum(abs_errors) / min_len,
-            "token_correct_50ms": 1.0 if all(err <= 0.050 for err in abs_errors) else 0.0,
-            "token_length_mismatch": 1.0 if len(pred_sorted) != len(gt_sorted) else 0.0,
-            "parsing_error": 0.0,
-        }
+        return metrics
 
     def evaluate_auxiliary_outputs(
         self,
@@ -379,40 +382,70 @@ class AllTimestampsTask(BaseTask):
         )
         inputs = {k: v.to(next(model.parameters()).device) for k, v in inputs.items()}
 
+		# because we set eval_mode = false (which returns unbatched tensors) we have to rebatch them
+        for key in inputs.keys():
+            inputs[key] = inputs[key].unsqueeze(0)
+
         with torch.no_grad():
             outputs = model(**inputs, inference=False)
 
-        gt_starts = torch.tensor(
-            [ds_adapter.get_target_seconds(ev, self.key) for ev in events],
-            device=next(model.parameters()).device,
-            dtype=outputs.surrogate_loss.dtype,
-        )
+            preds_dict = outputs.auxiliary_prediction
 
-        pred_tensor = outputs.auxiliary_prediction
-        if pred_tensor.dim() == 1:
-            pred_tensor = pred_tensor.unsqueeze(0)
-        preds = pred_tensor[0]
-        preds = preds[preds != -100]
+        gt_starts = [ds_adapter.get_target_seconds(ev, self.key) for ev in events]
 
-        if preds.numel() == 0:
-            return {"aux_parsing_error": 1.0}
+        predictions_per_method = {}
+        for method_name, pred_list in preds_dict.items():
+            if len(pred_list) == 0:
+                raise ValueError(f"No auxiliary predictions for method: {method_name}")
+            predictions_per_method[method_name] = pred_list[0]
 
-        preds = round_timestamp(preds)
-        gt_sorted, _ = torch.sort(gt_starts)
-        pred_sorted, _ = torch.sort(preds)
-        min_len = min(gt_sorted.numel(), pred_sorted.numel())
-        if min_len == 0:
-            return {"aux_parsing_error": 1.0}
-        abs_err = torch.abs(pred_sorted[:min_len] - gt_sorted[:min_len]).mean()
+        reference_preds = predictions_per_method.get("posterior_mode")
+        pred_count = reference_preds.numel() if reference_preds is not None else 0
 
-        metrics: Dict[str, float] = {
-            "aux_abs_error_sum": round_timestamp_python(abs_err.item()),
-            "aux_correct_50ms": 1.0 if abs_err.item() <= 0.050 else 0.0,
-            "aux_length_mismatch": 1.0
-            if gt_sorted.numel() != pred_sorted.numel()
-            else 0.0,
-        }
-        return metrics
+        logging.info(f"[ALL] GT Events: {len(gt_starts)}, Pred Events: {pred_count}")
+
+        thresholds = [0.005, 0.010, 0.020, 0.040, 0.050, 0.080, 0.100, 0.200]
+
+        metrics_list = []
+
+        for gt_timestamp in gt_starts:
+            all_metrics = {}
+
+            for method_name, method_preds in predictions_per_method.items():
+                if method_preds.numel() == 0:
+                    raise ValueError(f"Empty prediction tensor for {method_name}")
+
+                diffs = torch.abs(method_preds - gt_timestamp)
+                closest_idx = torch.argmin(diffs).item()
+                pred_timestamp = round_timestamp_python(method_preds[closest_idx].item())
+                abs_err = round_timestamp_python(abs(pred_timestamp - gt_timestamp))
+
+                method_preds[closest_idx] = torch.inf # so we don't select this prediction again
+
+                all_metrics[f"{method_name}/aux_abs_error_sum"] = abs_err
+
+                for t in thresholds:
+                    ms_label = int(t * 1000)
+                    metric_key = f"{method_name}/aux_correct_{ms_label}ms"
+                    all_metrics[metric_key] = 1.0 if abs_err <= t else 0.0
+
+            metrics_list.append(all_metrics)
+
+        out = ""
+        for idx in range(pred_count):
+            METHOD = 'smooth_20ms_boxcar_iterative_resmoothing'
+            pred_starts = predictions_per_method[METHOD]
+            
+            gt_timestamp = gt_starts[idx]
+            pred_timestamp = round_timestamp_python(pred_starts[idx].item())
+            abs_err = round_timestamp_python(abs(pred_timestamp - gt_timestamp))
+
+            out += f"[{METHOD}] Pred: {pred_timestamp}, GT: {gt_timestamp}, Err: {abs_err}, Correct: {abs_err < 0.040}\n"
+        
+        logging.info(f"Rank {PartialState().process_index}\n{out}")
+
+        return metrics_list
+
 
     def calculate_loss(
         self,
@@ -426,102 +459,51 @@ class AllTimestampsTask(BaseTask):
         batch_size = audio_logits.size(0)
         device = audio_logits.device
         dtype = audio_logits.dtype
-        denom = model_adapter.seconds_to_embedding * model_adapter.scaling_factor
+        
+        # Dictionary to store a list of predictions for every method
+        # e.g., predictions_accumulator["smooth_20ms_gauss"] = [val1, val2, ...]
+        predictions_accumulator = defaultdict(lambda: [])
 
-        predicted_seconds: List[torch.Tensor] = []
-        gt_seconds: List[torch.Tensor] = []
-        per_example_deviation: List[torch.Tensor] = []
-
+        # --- Loss Calculation Logic ---
         if use_poisson_loss:
             loss = poisson_loss(audio_logits, audio_labels, audio_labels_frame_mask).mean()
         else:
-            losses = []
-            for example in range(batch_size):
-                example_logits = audio_logits[example]
-                example_labels = audio_labels[example]
-                if (example_labels == -100).any():
-                    cutoff = (example_labels == -100).nonzero(as_tuple=True)[0][0].item()
-                    example_logits = example_logits[:cutoff]
-                    example_labels = example_labels[:cutoff]
-                if class_weighting:
-                    num_ones = (example_labels == 1).sum()
-                    num_zeros = (example_labels == 0).sum()
-                    pos_weight = num_zeros / torch.clamp(num_ones, min=1)
-                    criterion = torch.nn.BCEWithLogitsLoss(pos_weight=pos_weight.to(dtype))
-                else:
-                    criterion = torch.nn.BCEWithLogitsLoss()
-                losses.append(criterion(example_logits, example_labels.to(example_logits.dtype)))
-            loss = torch.stack(losses).mean()
+            raise ValueError("Not supporting BCE for all timestamps")
 
+        # --- Prediction & Metrics Logic ---
         for example in range(batch_size):
-            example_logits = audio_logits[example]
-            example_labels = audio_labels[example]
-            if (example_labels == -100).any():
-                cutoff = (example_labels == -100).nonzero(as_tuple=True)[0][0].item()
-                example_logits = example_logits[:cutoff]
-                example_labels = example_labels[:cutoff]
+            example_audio_logits = audio_logits[example]
+            example_audio_labels = audio_labels[example].to(dtype)
 
-            gt_indices = (example_labels == 1).nonzero(as_tuple=True)[0]
-            gt_sec = round_timestamp(gt_indices.to(dtype) / denom)
-            gt_seconds.append(gt_sec)
+            # Truncate based on mask
+            if (example_audio_labels == -100).any():
+                neg_100_idx = (example_audio_labels == -100).nonzero(as_tuple=True)[0][0].item()
+                example_audio_logits = example_audio_logits[:neg_100_idx]
+                example_audio_labels = example_audio_labels[:neg_100_idx]
 
-            n_pred = gt_indices.numel()
-            if n_pred == 0:
-                predicted_seconds.append(torch.tensor([], device=device, dtype=dtype))
-                per_example_deviation.append(torch.tensor(0.0, device=device, dtype=dtype))
-                continue
-
+            n_pred = (example_audio_labels == 1).sum().item()
+            # 1. Get dictionary of predictions from the new infer_timestamps
+            # returns {"posterior_mode": [...], "smooth_20ms_boxcar": [...], etc}
             if use_poisson_loss:
-                timestamps_dict = infer_timestamps(
-                    n_pred, example_logits.cpu().float().detach().numpy()
-                )
-                pred_idx = timestamps_dict['posterior_mode']
-                pred_sec = round_timestamp(
-                    torch.tensor(pred_idx, device=device) / denom
-                )
-
-                torch.set_printoptions(precision=2, sci_mode=False, linewidth=160, threshold=10000)
-                pred_count = infer_count(example_logits.unsqueeze(0), torch.ones_like(example_logits.unsqueeze(0)))
-                gt_count = example_labels.sum()
-
-                if PartialState().is_main_process:
-                    logging.info(example_labels)
-                    logging.info(torch.exp(example_logits))
-
+                preds_dict_np = infer_timestamps(n_pred, example_audio_logits.cpu().float().detach().numpy())
             else:
-                topk = torch.topk(example_logits, k=n_pred).indices.to(dtype)
-                pred_sec = round_timestamp((topk + 0.5) / denom)
+                raise ValueError("Not supporting BCE for all timestamps")
 
-            predicted_seconds.append(pred_sec)
+            # 2. Process all method predictions
+            for method_name, pred_array in preds_dict_np.items():
+                pred_array = torch.from_numpy(pred_array)
 
-            min_len = min(pred_sec.numel(), gt_sec.numel())
-            if min_len > 0:
-                per_example_deviation.append(
-                    torch.abs(pred_sec[:min_len] - gt_sec[:min_len]).mean()
-                )
-            else:
-                per_example_deviation.append(torch.tensor(0.0, device=device, dtype=dtype))
+                logging.info(f"[ALL] pred_array dtype: {pred_array.dtype}")
 
-        max_len = max((p.numel() for p in predicted_seconds), default=0)
-        if max_len == 0:
-            auxiliary_prediction = torch.full((batch_size, 0), 0.0, device=device, dtype=dtype)
-        else:
-            auxiliary_prediction = torch.full(
-                (batch_size, max_len), -100.0, device=device, dtype=dtype
-            )
-            for idx, preds in enumerate(predicted_seconds):
-                if preds.numel() > 0:
-                    auxiliary_prediction[idx, : preds.numel()] = preds
+                pred_array = pred_array / (model_adapter.seconds_to_embedding * model_adapter.scaling_factor)
+                pred_array = round_timestamp(pred_array)
 
-        if len(per_example_deviation) == 0:
-            auxiliary_deviation = torch.tensor(0.0, device=device, dtype=dtype)
-        else:
-            auxiliary_deviation = torch.stack(per_example_deviation).mean()
+                predictions_accumulator[method_name].append(pred_array)
 
-        # logging.info(f"[ALL] GT Seconds: {gt_seconds}")
-        # logging.info(f"[ALL] Predicted Seconds: {predicted_seconds}")
+        predicted_timestamps = dict(predictions_accumulator)
+        abs_error = 0
 
-        return loss, auxiliary_deviation, auxiliary_prediction
+        return loss, abs_error, predicted_timestamps
 
     def skip_example(self, example: Dict[str, Any], adapter: BaseDatasetAdapter) -> bool:
         adapter = self._validate_adapter(adapter)
@@ -530,5 +512,3 @@ class AllTimestampsTask(BaseTask):
         except ValueError:
             return True
         return False
-
-

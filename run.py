@@ -424,10 +424,12 @@ def main():
                 if token_metric > best_token_metric:
                     best_token_metric = token_metric
                     best_token_checkpoint_dir = checkpoint_dir
+                    logging.info(f"New best token model found with {token_metric} at {best_token_checkpoint_dir}")
 
                 if poisson_metric > best_poisson_metric:
                     best_poisson_metric = poisson_metric
                     best_poisson_checkpoint_dir = checkpoint_dir
+                    logging.info(f"New best poisson model found with {poisson_metric} at {best_poisson_checkpoint_dir}")
 
         
         accelerator.wait_for_everyone()

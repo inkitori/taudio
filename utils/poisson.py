@@ -2,9 +2,132 @@ import numpy as np
 import torch
 from scipy.stats import beta
 from accelerate import PartialState
-from scipy.signal import windows
+from scipy.signal import find_peaks, windows
 
 import numpy as np
+
+def joint_mode_dynamic_programming(n_pred, log_hazards, min_dist):
+    """
+    Finds the sequence of 'n_pred' indices that maximizes the sum of log_hazards,
+    subject to the constraint that indices must be at least 'min_dist' apart.
+    
+    Mathematically: argmax_{t1...tn} sum(log_hazards[ti]) s.t. |ti - tj| >= min_dist
+    """
+    T = len(log_hazards)
+    n = int(n_pred)
+    
+    # DP Table: dp[k, t] stores the max score of placing 'k' events 
+    # such that the k-th event is EXACTLY at time 't'.
+    # initialized to -infinity
+    dp = np.full((n, T), -np.inf)
+    
+    # Backpointers to reconstruct the path
+    # parent[k, t] stores the index of the (k-1)th event 
+    parent = np.full((n, T), -1, dtype=int)
+    
+    # --- Initialization (First Event) ---
+    # The first event can be anywhere (that leaves room for n-1 others, technically, 
+    # but for simplicity we allow anywhere and mask later)
+    dp[0, :] = log_hazards
+    
+    # --- Recursion ---
+    for k in range(1, n):
+        # We need to find max(dp[k-1, :]) where index <= t - min_dist
+        # To do this efficiently in O(T), we track the running maximum.
+        
+        running_max_val = -np.inf
+        running_max_idx = -1
+        
+        # Valid range for the previous event ends at t - min_dist
+        # We iterate t from 0 to T. The "lookback" index is t - min_dist.
+        for t in range(T):
+            lookback_idx = t - min_dist
+            
+            # Update the running max with the new valid candidate from the previous row
+            if lookback_idx >= 0:
+                val = dp[k-1, lookback_idx]
+                if val > running_max_val:
+                    running_max_val = val
+                    running_max_idx = lookback_idx
+            
+            # If we have a valid previous event, add current hazard
+            if running_max_val > -np.inf:
+                dp[k, t] = running_max_val + log_hazards[t]
+                parent[k, t] = running_max_idx
+                
+    # --- Backtracking (Reconstruct Path) ---
+    # 1. Find the best position for the last (n-th) event
+    last_k = n - 1
+    best_end_idx = np.argmax(dp[last_k, :])
+    
+    # If valid path not found (e.g., sequence too short for n events)
+    if dp[last_k, best_end_idx] == -np.inf:
+        return np.array([]) 
+
+    best_sequence = np.zeros(n, dtype=int)
+    current_idx = best_end_idx
+    
+    for k in range(n - 1, -1, -1):
+        best_sequence[k] = current_idx
+        current_idx = parent[k, current_idx]
+        
+    return best_sequence
+
+def find_n_peaks(signal, n, distance=1, min_height=1e-3):
+    """
+    Guarantees exactly 'n' peaks are returned.
+    Prioritizes:
+    1. Peaks satisfying distance & min_height.
+    2. Peaks satisfying distance only.
+    3. Highest remaining values (ignoring distance).
+    """
+    n = int(n)
+    
+    # --- Stage 1: Strict Constraints ---
+    # We allow peaks at height >= min_height
+    peaks, _ = find_peaks(signal, height=min_height, distance=distance)
+    
+    if len(peaks) == n:
+        return np.sort(peaks)
+    
+    if len(peaks) > n:
+        # Too many peaks: Keep the top N by intensity
+        peak_intensities = signal[peaks]
+        # argsort gives ascending, we take last n for descending
+        top_indices = np.argsort(peak_intensities)[-n:]
+        return np.sort(peaks[top_indices])
+    
+    # --- Stage 2: Relaxed Height (Constraint: Distance) ---
+    # If we have < n, we might have missed small valid peaks.
+    # Relax height to 0, but keep distance constraint.
+    # Note: We assume inputs are probabilities/hazards >= 0.
+    peaks_relaxed, _ = find_peaks(signal, height=0, distance=distance)
+    
+    if len(peaks_relaxed) >= n:
+        peak_intensities = signal[peaks_relaxed]
+        top_indices = np.argsort(peak_intensities)[-n:]
+        return np.sort(peaks_relaxed[top_indices])
+
+    # --- Stage 3: Desperation (Constraint: None) ---
+    # If we STILL have < n, it means the 'distance' constraint makes it 
+    # mathematically impossible to find N peaks (signal too short / tolerance too wide).
+    # We must satisfy the N requirement, so we fill with best remaining points.
+    
+    # Start with the peaks we found in Stage 2 (max possible with distance constraint)
+    final_peaks = list(peaks_relaxed)
+    known_peak_set = set(peaks_relaxed)
+    
+    # Sort ALL indices by intensity (descending)
+    all_sorted_indices = np.argsort(signal)[::-1]
+    
+    for idx in all_sorted_indices:
+        if len(final_peaks) >= n:
+            break
+        if idx not in known_peak_set:
+            final_peaks.append(idx)
+            known_peak_set.add(idx)
+            
+    return np.sort(np.array(final_peaks))
 
 def run_iterative_mode(n_pred, log_hazards, kernel, window_width):
     hazards = np.exp(log_hazards)
@@ -337,6 +460,19 @@ def infer_timestamps(n_pred, log_hazards):
     hazards = np.exp(log_hazards)
     total_hazard = np.sum(hazards)
     medians = beta_medians(n_pred)
+
+    # -------------------------------------------------------------------------
+    # STRATEGY: Raw Find Peaks (The "Human Eye" Strategy)
+    # -------------------------------------------------------------------------
+    # This detects the "natural" modes you saw (e.g., 31 or 43 count).
+    # height=1e-3: Ignores numerical noise (0.00 vs 0.00001).
+    # distance=1: Allows peaks to be right next to each other (indices 12, 13).
+    outputs["raw_find_peaks"] = find_n_peaks(
+        hazards, 
+        n=n_pred, 
+        distance=1,       # Allow neighbors
+        min_height=1e-3   # Ignore tiny noise
+    ).astype(float)
     
     # 1. Base Predictions (No smoothing)
     outputs["posterior_mode"] = posterior_mode_inhomogeneous_poisson(
@@ -464,6 +600,34 @@ def infer_timestamps(n_pred, log_hazards):
             ).flatten()
             outputs[f"{key_base}_fixed_posterior_mode"] = mode_indices
 
+            outputs[f"{key_base}_find_peaks"] = find_n_peaks(
+                smoothed_hazards_lin, 
+                n=n_pred, 
+                distance=M, 
+                min_height=1e-3
+            ).astype(float)
+
+            outputs[f"{key_base}_find_peaks_double_window"] = find_n_peaks(
+                smoothed_hazards_lin, 
+                n=n_pred, 
+                distance=2*M, 
+                min_height=1e-3
+            ).astype(float)
+
+            outputs[f"{key_base}_find_peaks_no_smooth"] = find_n_peaks(
+                hazards, 
+                n=n_pred, 
+                distance=M, 
+                min_height=1e-3
+            ).astype(float)
+
+            outputs[f"{key_base}_find_peaks_double_window_no_smooth"] = find_n_peaks(
+                hazards, 
+                n=n_pred, 
+                distance=2*M, 
+                min_height=1e-3
+            ).astype(float)
+
             # mode_indices_avg = posterior_mode_inhomogeneous_poisson(
             #     n_pred=n_pred_val, 
             #     log_hazards=smoothed_log_hazards_avg[np.newaxis, :], 
@@ -525,12 +689,12 @@ def infer_timestamps(n_pred, log_hazards):
             # # F. STRATEGY: Iterative Re-Smoothing Greedy (Your Request)
             # # ----------------------------------------------------------------
             # # "Searches for mode, zeros region, smooths again"
-            # outputs[f"{key_base}_iterative_resmoothing"] = run_iterative_mode(
-            #     n_pred=n_pred,
-            #     log_hazards=log_hazards,
-            #     kernel=kernel,
-            #     window_width=M
-            # )
+            outputs[f"{key_base}_iterative_resmoothing"] = run_iterative_mode(
+                n_pred=n_pred,
+                log_hazards=log_hazards,
+                kernel=kernel,
+                window_width=M
+            )
     
     outputs['default'] = outputs['posterior_mode']
 
