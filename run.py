@@ -30,6 +30,7 @@ from utils.config_utils import (
 )
 from utils.metrics import AverageMetrics
 
+BF16_INFERENCE = False
 
 def main():
     logging.getLogger().setLevel(logging.INFO)
@@ -130,7 +131,12 @@ def main():
     }
     model = TAudio(**taudio_config)
 
-	
+    logging.info(f"BF16 INFERENCE SET TO: {BF16_INFERENCE}")
+
+    logging.info(f"Model adapter dtype before accelerator.prepare: {model.model_adapter.dtype}")
+    logging.info(f"Model linear dtype before accelerator.prepare: {model.linear.weight.dtype}")
+
+    
     # random bug where if gradients arent tracked they cause a keyerror
     # for some reason audio_bos_eos_token is also an unused param
     model.model_adapter.base_model.audio_tower.audio_bos_eos_token.requires_grad_(False)
@@ -171,21 +177,35 @@ def main():
     optim = torch.optim.AdamW(model.parameters(), lr=training_config['learning_rate'])
     num_optim_steps = len(dataloader) * training_config['epochs']
 
-	# if we are doing legacy .pt loading we will need to prefill the model before sharding it
+    # if we are doing legacy .pt loading we will need to prefill the model before sharding it
     if args.load_checkpoint:
         ckpt_path = Path(args.load_checkpoint)
         
         if ckpt_path.is_file():
+            logging.info(f"Loading pt, model adapter dtype before load: {model.model_adapter.dtype}")
+            logging.info(f"Loading pt, model linear dtype before load: {model.linear.weight.dtype}")
+
             logging.info(f"Loading checkpoint directly from file: {ckpt_path}")
             state_dict = torch.load(ckpt_path, map_location='cpu')
             
             accelerator.unwrap_model(model).load_state_dict(state_dict)
+
+            logging.info(f"Loading pt, model adapter dtype after load: {model.model_adapter.dtype}")
+            logging.info(f"Loading pt, model linear dtype after load: {model.linear.weight.dtype}")
             
 
     # Note: passing optimizer to prepare is crucial for FSDP/Accelerate to handle sharded states
     model, optim, dataloader = accelerator.prepare(model, optim, dataloader)
+
+    logging.info(f"Model adapter dtype after accelerator.prepare: {model.model_adapter.dtype}")
+    logging.info(f"Model linear dtype after accelerator.prepare: {model.linear.weight.dtype}")
+
     logging.info(f"Number of optimizer steps: {num_optim_steps}")
     logging.info(f"Dataloader length: {len(dataloader)}")
+
+    if args.eval_only:
+        logging.info("Hiding accelerator optimizers for evaluations")
+        accelerator._optimizers = []
 
     start_epoch = 0
     if args.load_checkpoint and not args.eval_only: # we will immediately skip to eval if eval_only which already loads the ckpt
@@ -197,6 +217,9 @@ def main():
         else:
             # Load from Accelerate directory structure
             accelerator.load_state(args.load_checkpoint)
+
+            logging.info(f"Model adapter dtype after accelerator.load_state: {model.model_adapter.dtype}")
+            logging.info(f"Model linear dtype after accelerator.load_state: {model.linear.weight.dtype}")
             
             # Infer start epoch from directory name
             ckpt_name = Path(args.load_checkpoint).name
@@ -252,8 +275,28 @@ def main():
 
         eval_model = TAudio(**taudio_config)
         eval_model.load_state_dict(full_state_dict, strict=True)
+
+        logging.info(f"Model adapter dtype before bfloat cast (with path): {eval_model.model_adapter.dtype}")
+        logging.info(f"Model linear dtype before bfloat cast (with path): {eval_model.linear.weight.dtype}")
+
+        if BF16_INFERENCE:
+            logging.info("---------------------ENABLING BFLOAT16 INFERENCE------------------------")
+            eval_model.to(torch.bfloat16)
+
+        logging.info(f"Model adapter dtype after bfloat cast (with path): {eval_model.model_adapter.dtype}")
+        logging.info(f"Model linear dtype after bfloat cast (with path): {eval_model.linear.weight.dtype}")
+
+        # if args.eval_only:
+        #     # note that this likely destroys the model for any later evaluations (joint, ood)
+        #     model.to('cpu')
+        #     import gc; gc.collect()
+        #     torch.cuda.empty_cache()
+
         eval_model.to(accelerator.device)
         eval_model.eval()
+
+        logging.info(f"Eval model adapter dtype after sending to GPU: {eval_model.model_adapter.dtype}")
+        logging.info(f"Eval model linear dtype after sending to GPU: {eval_model.linear.weight.dtype}")
 
         # Use raw dataset through adapter and shard across processes
         adapter = create_adapter(
@@ -278,7 +321,12 @@ def main():
 
         local_metrics = AverageMetrics()
         with distributed_state.split_between_processes(base_ds) as ds_shard:
-            for example in ds_shard:
+            ds_shard_pbar = tqdm(ds_shard, desc=f"Rank {accelerator.process_index}")
+
+            # aux_batch = []
+            # EVAL_AUX_BATCH_SIZE = 8
+
+            for example in ds_shard_pbar:
                 if task.skip_example(example, adapter):
                     continue
                 if eval_token_outputs:
@@ -286,11 +334,12 @@ def main():
                         example=example,
                         ds_adapter=adapter,
                         model=eval_model,
-                        error_bound=0.1,
                     )
                     if token_metrics is not None:
                         local_metrics.update_dict(token_metrics)
+
                 if eval_aux_outputs:
+                    # OLD
                     aux_metrics = task.evaluate_auxiliary_outputs(
                         example=example,
                         ds_adapter=adapter,
@@ -299,10 +348,32 @@ def main():
                     )
                     if aux_metrics is not None:
                         local_metrics.update_dict(aux_metrics)
+            #         aux_batch.append(example)
+
+            #         if len(aux_batch) >= EVAL_AUX_BATCH_SIZE:
+            #             aux_metrics_list = task.evaluate_auxiliary_outputs_batched(
+            #                 examples=aux_batch,
+            #                 ds_adapter=adapter,
+            #                 model=eval_model,
+            #             )
+            #             for aux_metrics in aux_metrics_list:
+            #                 if aux_metrics is not None:
+            #                     local_metrics.update_dict(aux_metrics)
+            #             aux_batch = [] # Reset batch
+            
+            # if eval_aux_outputs and aux_batch:
+            #     aux_metrics_list = task.evaluate_auxiliary_outputs_batched(
+            #         examples=aux_batch,
+            #         ds_adapter=adapter,
+            #         model=eval_model,
+            #     )
+            #     for aux_metrics in aux_metrics_list:
+            #         if aux_metrics is not None:
+            #             local_metrics.update_dict(aux_metrics)
 
 
         to_reduce = {}
-        for key in local_metrics._sum.keys():
+        for key in sorted(local_metrics._sum.keys()):
             to_reduce[f"{key}_sum"] = torch.tensor(local_metrics.get_sum(key), device=accelerator.device)
             to_reduce[f"{key}_cnt"] = torch.tensor(local_metrics.get_count(key), device=accelerator.device)
 
@@ -339,7 +410,7 @@ def main():
     best_metric = float('-inf') # negative inf accuracy is the worst case
     best_checkpoint_dir = args.load_checkpoint if args.eval_only else None
 
-	# this is only for joint training stuff
+    # this is only for joint training stuff
     best_token_metric = float('-inf') # negative inf accuracy is the worst case
     best_poisson_metric = float('-inf') # negative inf accuracy is the worst case
 
@@ -447,7 +518,7 @@ def main():
     
     logging.info(f"Evaluating final split on split {split}")
 
-	# super hacky but basically we don't care about loading checkpoints for joint training
+    # super hacky but basically we don't care about loading checkpoints for joint training
     # also don't care about doing ood evals for joint training
     if loss_config['token_loss'] and loss_config['poisson_loss']:
         if best_token_checkpoint_dir == best_poisson_checkpoint_dir:
