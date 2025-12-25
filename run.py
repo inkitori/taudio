@@ -29,8 +29,8 @@ from utils.config_utils import (
     relative_path_to_project_name,
 )
 from utils.metrics import AverageMetrics
-
-BF16_INFERENCE = False
+from test_7b_loading_single_gpu import print_gpu_memory, print_model_param_dtypes, print_state_dict_dtype_counts
+from utils.utils import dist_log
 
 def main():
     logging.getLogger().setLevel(logging.INFO)
@@ -131,10 +131,9 @@ def main():
     }
     model = TAudio(**taudio_config)
 
-    logging.info(f"BF16 INFERENCE SET TO: {BF16_INFERENCE}")
 
-    logging.info(f"Model adapter dtype before accelerator.prepare: {model.model_adapter.dtype}")
-    logging.info(f"Model linear dtype before accelerator.prepare: {model.linear.weight.dtype}")
+    logging.info("Checking dtypes before accelerator.prepare")
+    print_model_param_dtypes(model)
 
     
     # random bug where if gradients arent tracked they cause a keyerror
@@ -151,6 +150,9 @@ def main():
     model.train()
 
     accelerator = Accelerator()
+    
+    dist_log(accelerator, "Mem usage before prepare")
+    print_gpu_memory()
 
     # Build training dataset/dataloader
     ds, ds_adapter = get_ds(
@@ -182,23 +184,25 @@ def main():
         ckpt_path = Path(args.load_checkpoint)
         
         if ckpt_path.is_file():
-            logging.info(f"Loading pt, model adapter dtype before load: {model.model_adapter.dtype}")
-            logging.info(f"Loading pt, model linear dtype before load: {model.linear.weight.dtype}")
+            logging.info(f"Loading pt")
+            print_model_param_dtypes(model)
 
             logging.info(f"Loading checkpoint directly from file: {ckpt_path}")
             state_dict = torch.load(ckpt_path, map_location='cpu')
             
             accelerator.unwrap_model(model).load_state_dict(state_dict)
 
-            logging.info(f"Loading pt, model adapter dtype after load: {model.model_adapter.dtype}")
-            logging.info(f"Loading pt, model linear dtype after load: {model.linear.weight.dtype}")
+            logging.info("Loaded pt")
+            print_model_param_dtypes(model)
             
-
     # Note: passing optimizer to prepare is crucial for FSDP/Accelerate to handle sharded states
     model, optim, dataloader = accelerator.prepare(model, optim, dataloader)
 
-    logging.info(f"Model adapter dtype after accelerator.prepare: {model.model_adapter.dtype}")
-    logging.info(f"Model linear dtype after accelerator.prepare: {model.linear.weight.dtype}")
+    logging.info("Checking dtypes after accelerator.prepare")
+    print_model_param_dtypes(model)
+
+    dist_log(accelerator, "Mem usage after prepare")
+    print_gpu_memory()
 
     logging.info(f"Number of optimizer steps: {num_optim_steps}")
     logging.info(f"Dataloader length: {len(dataloader)}")
@@ -218,8 +222,11 @@ def main():
             # Load from Accelerate directory structure
             accelerator.load_state(args.load_checkpoint)
 
-            logging.info(f"Model adapter dtype after accelerator.load_state: {model.model_adapter.dtype}")
-            logging.info(f"Model linear dtype after accelerator.load_state: {model.linear.weight.dtype}")
+            logging.info("Checking dtypes after accelerator.load_state")
+            print_model_param_dtypes(model)
+
+            dist_log(accelerator, "Mem after accelerator.load_state")
+            print_gpu_memory()
             
             # Infer start epoch from directory name
             ckpt_name = Path(args.load_checkpoint).name
@@ -251,6 +258,8 @@ def main():
                     accelerator.unwrap_model(model),
                     options=StateDictOptions(full_state_dict=True, broadcast_from_rank0=True)
                 )
+
+
                 import gc; gc.collect()
                 torch.cuda.empty_cache()
                 return full_state
@@ -262,6 +271,10 @@ def main():
         )
 
     def distributed_eval(split_name: str, prefix: str, epoch: int = None, min_time: float = None, max_time: float = None, state_dir: str = None) -> Dict[str, float]:
+        logging.info("Clearing cache before eval")
+        torch.cuda.empty_cache()
+        import gc; gc.collect()
+
         original_min_time = task.min_time
         original_max_time = task.max_time
 
@@ -271,32 +284,51 @@ def main():
             task.min_time = min_time
             task.max_time = max_time
 
+        dist_log(accelerator, "Mem before collecting state dict")
+        print_gpu_memory()
+        logging.info("Collecting state dict")
         full_state_dict = get_full_state_dict(state_dir)
+        dist_log(accelerator, "Mem after collecting state dict")
+        print_gpu_memory()
+
+        print_state_dict_dtype_counts(full_state_dict)
 
         eval_model = TAudio(**taudio_config)
+
+        dist_log(accelerator, "Mem after creating eval_model")
+        print_gpu_memory()
+
+        logging.info("Checking eval model parameters before loading state dict")
+        print_model_param_dtypes(eval_model)
+
         eval_model.load_state_dict(full_state_dict, strict=True)
+        logging.info("State dict loaded. Deleting copy to free RAM...")
 
-        logging.info(f"Model adapter dtype before bfloat cast (with path): {eval_model.model_adapter.dtype}")
-        logging.info(f"Model linear dtype before bfloat cast (with path): {eval_model.linear.weight.dtype}")
+        logging.info("State dict loaded. Deleting copy to free RAM...")
+        del full_state_dict
+        import gc; gc.collect()
+        torch.cuda.empty_cache()
 
-        if BF16_INFERENCE:
-            logging.info("---------------------ENABLING BFLOAT16 INFERENCE------------------------")
-            eval_model.to(torch.bfloat16)
+        dist_log(accelerator, "Mem after loading state dict into eval_model and deleting full_state_dict")
+        print_gpu_memory()
 
-        logging.info(f"Model adapter dtype after bfloat cast (with path): {eval_model.model_adapter.dtype}")
-        logging.info(f"Model linear dtype after bfloat cast (with path): {eval_model.linear.weight.dtype}")
+        if args.eval_only:
+            # note that this likely destroys the model for any later evaluations (joint, ood)
+            model.to('cpu')
+            import gc; gc.collect()
+            torch.cuda.empty_cache()
 
-        # if args.eval_only:
-        #     # note that this likely destroys the model for any later evaluations (joint, ood)
-        #     model.to('cpu')
-        #     import gc; gc.collect()
-        #     torch.cuda.empty_cache()
+            dist_log(accelerator, "Mem after moving base model to cpu")
+            print_gpu_memory()
 
         eval_model.to(accelerator.device)
         eval_model.eval()
 
-        logging.info(f"Eval model adapter dtype after sending to GPU: {eval_model.model_adapter.dtype}")
-        logging.info(f"Eval model linear dtype after sending to GPU: {eval_model.linear.weight.dtype}")
+        dist_log(accelerator, "Mem after moving eval model to GPU")
+        print_gpu_memory()
+
+        logging.info("Checking eval model parameters after loading state dict and sending to GPU")
+        print_model_param_dtypes(eval_model)
 
         # Use raw dataset through adapter and shard across processes
         adapter = create_adapter(
@@ -396,7 +428,6 @@ def main():
 
         # cleanup
         del eval_model
-        del full_state_dict
         del adapter
         del base_ds
         import gc; gc.collect()
