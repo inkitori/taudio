@@ -20,6 +20,8 @@ from .base_task import BaseTask
 from utils.utils import clamp, round_timestamp, round_timestamp_python
 from utils.poisson import poisson_loss, infer_timestamps, infer_timestamps_binary
 
+from .timestamp_all import _collate_inputs
+
 STOPS = set(stopwords.words("english"))
 
 class SingleTimestampAnyTask(BaseTask):
@@ -390,6 +392,75 @@ class SingleTimestampAnyTask(BaseTask):
                 all_metrics[metric_key] = 1.0 if abs_err <= t else 0.0
 
         return all_metrics
+
+    def evaluate_auxiliary_outputs_batched(
+        self,
+        *,
+        examples: Dict[str, Any],
+        ds_adapter: BaseDatasetAdapter,
+        model: Any,
+    ) -> Dict[str, Any]:
+        all_inputs = []
+        all_gt_timestamps = []
+
+        for example in examples:
+            events = list(ds_adapter.get_events(example))
+            event = self._choose_event(events=events, ds_adapter=ds_adapter, apply_fallback=False, example=example)
+            if event is None: # shouldn't be happening but just in case
+                return None
+
+            gt_timestamp = ds_adapter.get_target_seconds(event, self.key)
+            all_gt_timestamps.append(gt_timestamp)
+
+            inputs = self.build_labels(
+                example=example,
+                ds_adapter=ds_adapter,
+                model_adapter=model.model_adapter,
+                eval_mode=True,
+                event=event,
+            )
+            inputs = inputs.to(next(model.parameters()).device)
+
+            all_inputs.append(inputs)
+        
+        batched_inputs = _collate_inputs(all_inputs, model.model_adapter, padding_side='right')
+        batched_inputs = {k: v.to(next(model.parameters()).device) for k, v in batched_inputs.items()}
+
+        with torch.no_grad():
+            outputs = model(**batched_inputs, inference=True)
+
+            preds_dict = outputs.auxiliary_prediction
+            if not isinstance(preds_dict, dict):
+                preds_dict = {"default": preds_dict}
+
+        thresholds = [0.005, 0.010, 0.020, 0.040, 0.050, 0.080, 0.100, 0.200]
+
+        metrics_list = []
+
+        for example_idx in range(len(preds_dict['default'])):
+            all_metrics = {}
+            gt_timestamp = all_gt_timestamps[example_idx]
+
+            for method_name, pred_tensor in preds_dict.items():
+                # Extract scalar and round
+                pred_timestamp = round_timestamp_python(pred_tensor[example_idx].item())
+                abs_err = round_timestamp_python(abs(pred_timestamp - gt_timestamp))
+
+                # logging.info(f"[{method_name.upper()}] Pred: {pred_timestamp}, GT: {gt_timestamp}, Err: {abs_err}")
+
+                # Add general error metric
+                all_metrics[f"{method_name}/aux_abs_error_sum"] = abs_err
+                
+                # Add accuracy metrics for each threshold
+                for t in thresholds:
+                    # Format key as "method/aux_correct_5ms" etc.
+                    ms_label = int(t * 1000)
+                    metric_key = f"{method_name}/aux_correct_{ms_label}ms"
+                    all_metrics[metric_key] = 1.0 if abs_err <= t else 0.0
+            
+            metrics_list.append(all_metrics)
+
+        return metrics_list
 
     def calculate_loss(
         self,

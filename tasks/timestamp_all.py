@@ -16,6 +16,42 @@ from utils.poisson import poisson_loss, infer_timestamps, infer_count
 
 from .base_task import BaseTask
 
+def _collate_inputs(
+    all_inputs: List[Dict[str, torch.Tensor]],
+    model_adapter: BaseModelAdapter,
+    padding_side: str 
+) -> Dict[str, torch.Tensor]:
+    pad_token_id = model_adapter.processor.tokenizer.pad_token_id or 0
+    max_len = max(inp["input_ids"].shape[1] for inp in all_inputs)
+    
+    input_ids_list = []
+    attention_mask_list = []
+    
+    for inp in all_inputs:
+        seq_len = inp["input_ids"].shape[1]
+        pad_len = max_len - seq_len
+        
+        # Create padding tensors
+        pad_ids = torch.full((1, pad_len), pad_token_id, dtype=inp["input_ids"].dtype, device=inp["input_ids"].device)
+        pad_mask = torch.zeros((1, pad_len), dtype=inp["attention_mask"].dtype, device=inp["input_ids"].device)
+
+        if pad_len > 0:
+            if padding_side == "left":
+                input_ids_list.append(torch.cat([pad_ids, inp["input_ids"]], dim=1))
+                attention_mask_list.append(torch.cat([pad_mask, inp["attention_mask"]], dim=1))
+            else:
+                input_ids_list.append(torch.cat([inp["input_ids"], pad_ids], dim=1))
+                attention_mask_list.append(torch.cat([inp["attention_mask"], pad_mask], dim=1))
+        else:
+            input_ids_list.append(inp["input_ids"])
+            attention_mask_list.append(inp["attention_mask"])
+    
+    return {
+        "input_ids": torch.cat(input_ids_list, dim=0),
+        "attention_mask": torch.cat(attention_mask_list, dim=0),
+        "input_features": torch.cat([inp["input_features"] for inp in all_inputs], dim=0),
+        "feature_attention_mask": torch.cat([inp["feature_attention_mask"] for inp in all_inputs], dim=0),
+    }
 
 class AllTimestampsTask(BaseTask):
     def __init__(self, *, key: str = "start"):
@@ -236,7 +272,7 @@ class AllTimestampsTask(BaseTask):
             all_audio_lengths.append(ds_adapter.get_audio_frames(example).size / model.model_adapter.sampling_rate)
         
         # Batch the inputs
-        batched_inputs = self._collate_inputs(all_inputs, model.model_adapter)
+        batched_inputs = _collate_inputs(all_inputs, model.model_adapter, padding_side='left')
         batched_inputs = {k: v.to(next(model.parameters()).device) for k, v in batched_inputs.items()}
         
         generated_strings = model.generate_batch(**batched_inputs, max_new_tokens=4096)
@@ -250,45 +286,6 @@ class AllTimestampsTask(BaseTask):
             all_metrics.extend(metrics)
         
         return all_metrics
-
-
-    def _collate_inputs(
-        self,
-        all_inputs: List[Dict[str, torch.Tensor]],
-        model_adapter: BaseModelAdapter,
-    ) -> Dict[str, torch.Tensor]:
-        """Left-pad input_ids/attention_mask, concatenate the rest."""
-        
-        pad_token_id = model_adapter.processor.tokenizer.pad_token_id or 0
-        max_len = max(inp["input_ids"].shape[1] for inp in all_inputs)
-        
-        input_ids_list = []
-        attention_mask_list = []
-        
-        for inp in all_inputs:
-            seq_len = inp["input_ids"].shape[1]
-            pad_len = max_len - seq_len
-            
-            if pad_len > 0:
-                input_ids_list.append(torch.cat([
-                    torch.full((1, pad_len), pad_token_id, dtype=inp["input_ids"].dtype),
-                    inp["input_ids"]
-                ], dim=1))
-                attention_mask_list.append(torch.cat([
-                    torch.zeros((1, pad_len), dtype=inp["attention_mask"].dtype),
-                    inp["attention_mask"]
-                ], dim=1))
-            else:
-                input_ids_list.append(inp["input_ids"])
-                attention_mask_list.append(inp["attention_mask"])
-        
-        return {
-            "input_ids": torch.cat(input_ids_list, dim=0),
-            "attention_mask": torch.cat(attention_mask_list, dim=0),
-            "input_features": torch.cat([inp["input_features"] for inp in all_inputs], dim=0),
-            "feature_attention_mask": torch.cat([inp["feature_attention_mask"] for inp in all_inputs], dim=0),
-        }
-
 
     def _compute_metrics(
         self,

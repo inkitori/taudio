@@ -99,17 +99,22 @@ class TAudio(nn.Module):
         # (batch_size, seq_len, hidden_dim)
         hidden_states = outputs.hidden_states[self.audio_layer]
 
-        audio_logits = []
+        audio_logits = [] # (OLD, unbatched eval)
+        # audio_logits_list = [] # (NEW, batched eval)
 
         for example in range(batch_size):
             audio_hidden_states = hidden_states[example][input_ids[example] == self.model_adapter.audio_id] # (num_audio_tokens, hidden_dim)
             example_audio_logits = self.linear(audio_hidden_states).flatten() # (num_audio_tokens * scaling_factor,)
-            audio_logits.append(example_audio_logits)
+            audio_logits.append(example_audio_logits) # (OLD, unbatched eval)
+            # audio_logits_list.append(example_audio_logits) # (NEW, batched eval)
 
         audio_logits = torch.nn.utils.rnn.pad_sequence(audio_logits, batch_first=True, padding_value=0, padding_side='right') # (batch_size, num_audio_tokens * scaling_factor)
+        # audio_logits = torch.nn.utils.rnn.pad_sequence(audio_logits_list, batch_first=True, padding_value=0, padding_side='right') # (batch_size, num_audio_tokens * scaling_factor)
 
         if inference:
-            audio_labels = torch.zeros_like(audio_logits)
+            audio_labels = torch.zeros_like(audio_logits) # (OLD, unbatched eval)
+            # audio_labels_list = [torch.zeros_like(example_audio_logits) for example_audio_logits in audio_logits_list] # (NEW, batched eval)
+            # audio_labels = torch.nn.utils.rnn.pad_sequence(audio_labels_list, batch_first=True, padding_value=-100, padding_side='right') # (NEW, batched_eval)
 
         audio_labels_frame_mask = torch.where(audio_labels == -100, 0, 1) # (batch_size, num_audio_tokens * scaling_factor)
 
