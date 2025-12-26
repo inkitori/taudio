@@ -465,7 +465,7 @@ class AllTimestampsTask(BaseTask):
                 pred_timestamp = round_timestamp_python(method_preds[closest_idx].item())
                 abs_err = round_timestamp_python(abs(pred_timestamp - gt_timestamp))
 
-                # method_preds[closest_idx] = torch.inf # so we don't select this prediction again
+                method_preds[closest_idx] = torch.inf # so we don't select this prediction again
 
                 all_metrics[f"greedy_pairing_{method_name}/aux_abs_error_sum"] = abs_err
 
@@ -537,8 +537,6 @@ class AllTimestampsTask(BaseTask):
             # 2. Process all method predictions
             for method_name, pred_array in preds_dict_np.items():
                 pred_array = torch.from_numpy(pred_array)
-
-                logging.info(f"[ALL] pred_array dtype: {pred_array.dtype}")
 
                 pred_array = pred_array / (model_adapter.seconds_to_embedding * model_adapter.scaling_factor)
                 pred_array = round_timestamp(pred_array)
