@@ -21,7 +21,8 @@ def _collate_inputs(
     model_adapter: BaseModelAdapter,
     padding_side: str 
 ) -> Dict[str, torch.Tensor]:
-    pad_token_id = model_adapter.processor.tokenizer.pad_token_id or 0
+	# shouldn't need to be pad_token_id based on looking at qwen source but including to be safe
+    pad_token_id = model_adapter.processor.tokenizer.pad_token_id
     max_len = max(inp["input_ids"].shape[1] for inp in all_inputs)
     
     input_ids_list = []
@@ -241,7 +242,27 @@ class AllTimestampsTask(BaseTask):
         model: Any,
         error_bound: float = 0.1,
     ) -> Optional[Dict[str, Any]]:
-        raise NotImplementedError()
+        ds_adapter = self._validate_adapter(ds_adapter)
+        
+        events = self._extract_events_and_transcript(example=example, ds_adapter=ds_adapter)
+            
+        inputs = self.build_labels(
+            example=example,
+            ds_adapter=ds_adapter,
+            model_adapter=model.model_adapter,
+            eval_mode=True,
+        )
+        inputs = {k: v.to(next(model.parameters()).device) for k, v in inputs.items()}
+
+        audio_length = ds_adapter.get_audio_frames(example).size / model.model_adapter.sampling_rate
+        
+        generated_string = model.generate(**inputs)
+
+        logging.info(generated_string)
+        
+        # Compute metrics per example
+        return self._compute_metrics(generated_string, events, ds_adapter, audio_length)
+        
 
     def evaluate_tokens_batched(
         self,
@@ -294,19 +315,29 @@ class AllTimestampsTask(BaseTask):
         ds_adapter: LibriSpeechAdapter,
         audio_length
     ) -> Dict[str, float]:
-        """Extract metrics for a single example."""
-
-        bad_metric = {
-            "parsing_error": 1.0,
-            "token_abs_error_sum": audio_length / 2,
-            "token_correct_5ms": 0,
-            "token_correct_10ms": 0,
-            "token_correct_20ms": 0,
-            "token_correct_40ms": 0,
-            "token_correct_50ms": 0,
-            "token_correct_80ms": 0,
-            "token_correct_100ms": 0,
-            "token_correct_200ms": 0,
+        bad_metric_greedy_pairing = {
+            "greedy_pairing_parsing_error": 1.0,
+            "greedy_pairing_token_abs_error_sum": audio_length / 2,
+            "greedy_pairing_token_correct_5ms": 0,
+            "greedy_pairing_token_correct_10ms": 0,
+            "greedy_pairing_token_correct_20ms": 0,
+            "greedy_pairing_token_correct_40ms": 0,
+            "greedy_pairing_token_correct_50ms": 0,
+            "greedy_pairing_token_correct_80ms": 0,
+            "greedy_pairing_token_correct_100ms": 0,
+            "greedy_pairing_token_correct_200ms": 0,
+        }
+        bad_metric_strongly_aligned = {
+            "strongly_aligned_parsing_error": 1.0,
+            "strongly_aligned_token_abs_error_sum": audio_length / 2,
+            "strongly_aligned_token_correct_5ms": 0,
+            "strongly_aligned_token_correct_10ms": 0,
+            "strongly_aligned_token_correct_20ms": 0,
+            "strongly_aligned_token_correct_40ms": 0,
+            "strongly_aligned_token_correct_50ms": 0,
+            "strongly_aligned_token_correct_80ms": 0,
+            "strongly_aligned_token_correct_100ms": 0,
+            "strongly_aligned_token_correct_200ms": 0,
         }
 
         gt_sorted = sorted(ds_adapter.get_target_seconds(ev, self.key) for ev in events)
@@ -321,41 +352,65 @@ class AllTimestampsTask(BaseTask):
 
             logging.info(pred_starts)
         
-        pred_sorted = sorted(round_timestamp_python(float(p)) for p in pred_starts)
+        pred_sorted_greedy_pairing = sorted(round_timestamp_python(float(p)) for p in pred_starts)
+        pred_sorted_strongly_aligned = sorted(round_timestamp_python(float(p)) for p in pred_starts) 
 
         metrics = []
 
-        for gt in gt_sorted:
-            min_len = min(len(pred_sorted), len(gt_sorted))
+        for idx, gt in enumerate(gt_sorted):
+            combined_metric = {}
+
+            if idx >= len(pred_sorted_strongly_aligned):
+                logging.error("Predicted less than the number of actual events in " + generated_string)
+                combined_metric = bad_metric_strongly_aligned
+            else:
+                abs_err = round_timestamp_python(abs(pred_sorted_strongly_aligned[idx] - gt_sorted[idx]))
+                combined_metric = {
+                    "strongly_aligned_parsing_error": 0.0,
+                    "strongly_aligned_token_abs_error_sum": abs_err,
+                    "strongly_aligned_token_correct_5ms": 1.0 if abs_err <= 0.005 else 0.0,
+                    "strongly_aligned_token_correct_10ms": 1.0 if abs_err <= 0.010 else 0.0,
+                    "strongly_aligned_token_correct_20ms": 1.0 if abs_err <= 0.020 else 0.0,
+                    "strongly_aligned_token_correct_40ms": 1.0 if abs_err <= 0.040 else 0.0,
+                    "strongly_aligned_token_correct_50ms": 1.0 if abs_err <= 0.050 else 0.0,
+                    "strongly_aligned_token_correct_80ms": 1.0 if abs_err <= 0.080 else 0.0,
+                    "strongly_aligned_token_correct_100ms": 1.0 if abs_err <= 0.100 else 0.0,
+                    "strongly_aligned_token_correct_200ms": 1.0 if abs_err <= 0.200 else 0.0,
+                }
+
+            # this is for the greedy pairing
+            min_len = min(len(pred_sorted_greedy_pairing), len(gt_sorted))
             abs_errors = [
-                round_timestamp_python(abs(pred_sorted[i] - gt))
+                round_timestamp_python(abs(pred_sorted_greedy_pairing[i] - gt))
                 for i in range(min_len)
             ]
 
             if len(abs_errors) == 0:
-                metrics.append(bad_metric)
+                combined_metric = combined_metric | bad_metric_greedy_pairing
+                metrics.append(combined_metric)
                 logging.error("Predicted less than the number of actual events in " + generated_string)
                 continue
 
-
             abs_err = min(abs_errors)
             abs_err_idx = abs_errors.index(abs_err) 
-            pred_sorted.pop(abs_err_idx) 
+            pred_sorted_greedy_pairing.pop(abs_err_idx) 
 
-            metric = {
-                "parsing_error": 0.0,
-                "token_abs_error_sum": abs_err,
-                "token_correct_5ms": 1.0 if abs_err <= 0.005 else 0.0,
-                "token_correct_10ms": 1.0 if abs_err <= 0.010 else 0.0,
-                "token_correct_20ms": 1.0 if abs_err <= 0.020 else 0.0,
-                "token_correct_40ms": 1.0 if abs_err <= 0.040 else 0.0,
-                "token_correct_50ms": 1.0 if abs_err <= 0.050 else 0.0,
-                "token_correct_80ms": 1.0 if abs_err <= 0.080 else 0.0,
-                "token_correct_100ms": 1.0 if abs_err <= 0.100 else 0.0,
-                "token_correct_200ms": 1.0 if abs_err <= 0.200 else 0.0,
+            greedy_pairing_metric = {
+                "greedy_pairing_parsing_error": 0.0,
+                "greedy_pairing_token_abs_error_sum": abs_err,
+                "greedy_pairing_token_correct_5ms": 1.0 if abs_err <= 0.005 else 0.0,
+                "greedy_pairing_token_correct_10ms": 1.0 if abs_err <= 0.010 else 0.0,
+                "greedy_pairing_token_correct_20ms": 1.0 if abs_err <= 0.020 else 0.0,
+                "greedy_pairing_token_correct_40ms": 1.0 if abs_err <= 0.040 else 0.0,
+                "greedy_pairing_token_correct_50ms": 1.0 if abs_err <= 0.050 else 0.0,
+                "greedy_pairing_token_correct_80ms": 1.0 if abs_err <= 0.080 else 0.0,
+                "greedy_pairing_token_correct_100ms": 1.0 if abs_err <= 0.100 else 0.0,
+                "greedy_pairing_token_correct_200ms": 1.0 if abs_err <= 0.200 else 0.0,
             }
 
-            metrics.append(metric)
+            combined_metric = combined_metric | greedy_pairing_metric
+
+            metrics.append(combined_metric)
         
         return metrics
 
@@ -370,7 +425,7 @@ class AllTimestampsTask(BaseTask):
         ds_adapter = self._validate_adapter(ds_adapter)
         events = self._extract_events_and_transcript(example=example, ds_adapter=ds_adapter)
 
-        # Build full labels so the surrogate head knows how many timestamps to predict.
+        # setting eval_mode to false so that calculate_loss knows how many events there are
         inputs = self.build_labels(
             example=example,
             ds_adapter=ds_adapter,
@@ -379,7 +434,7 @@ class AllTimestampsTask(BaseTask):
         )
         inputs = {k: v.to(next(model.parameters()).device) for k, v in inputs.items()}
 
-		# because we set eval_mode = false (which returns unbatched tensors) we have to rebatch them
+        # because we set eval_mode = false (which returns unbatched tensors) we have to rebatch them
         for key in inputs.keys():
             inputs[key] = inputs[key].unsqueeze(0)
 
@@ -391,27 +446,20 @@ class AllTimestampsTask(BaseTask):
         gt_starts = [ds_adapter.get_target_seconds(ev, self.key) for ev in events]
 
         predictions_per_method = {}
+        predictions_per_method_immutable = {}
+
         for method_name, pred_list in preds_dict.items():
-            if len(pred_list) == 0:
-                raise ValueError(f"No auxiliary predictions for method: {method_name}")
-            predictions_per_method[method_name] = pred_list[0]
-
-        reference_preds = predictions_per_method.get("posterior_mode")
-        pred_count = reference_preds.numel() if reference_preds is not None else 0
-
-        logging.info(f"[ALL] GT Events: {len(gt_starts)}, Pred Events: {pred_count}")
+            predictions_per_method[method_name] = pred_list[0].detach().clone() # we only pass in a single example
+            predictions_per_method_immutable[method_name] = pred_list[0].detach().clone() 
 
         thresholds = [0.005, 0.010, 0.020, 0.040, 0.050, 0.080, 0.100, 0.200]
 
         metrics_list = []
 
-        for gt_timestamp in gt_starts:
+        for idx, gt_timestamp in enumerate(gt_starts):
             all_metrics = {}
 
             for method_name, method_preds in predictions_per_method.items():
-                if method_preds.numel() == 0:
-                    raise ValueError(f"Empty prediction tensor for {method_name}")
-
                 diffs = torch.abs(method_preds - gt_timestamp)
                 closest_idx = torch.argmin(diffs).item()
                 pred_timestamp = round_timestamp_python(method_preds[closest_idx].item())
@@ -419,27 +467,27 @@ class AllTimestampsTask(BaseTask):
 
                 method_preds[closest_idx] = torch.inf # so we don't select this prediction again
 
-                all_metrics[f"{method_name}/aux_abs_error_sum"] = abs_err
+                all_metrics[f"greedy_pairing_{method_name}/aux_abs_error_sum"] = abs_err
 
                 for t in thresholds:
                     ms_label = int(t * 1000)
-                    metric_key = f"{method_name}/aux_correct_{ms_label}ms"
+                    metric_key = f"greedy_pairing_{method_name}/aux_correct_{ms_label}ms"
                     all_metrics[metric_key] = 1.0 if abs_err <= t else 0.0
 
+                
+                method_preds_immutable = predictions_per_method_immutable[method_name]
+                pred_immutable = round_timestamp_python(method_preds_immutable[idx].item())
+                abs_err_immutable = round_timestamp_python(abs(pred_immutable - gt_timestamp))
+
+                all_metrics[f"strongly_aligned_{method_name}/aux_abs_error_sum"] = abs_err_immutable
+
+                for t in thresholds:
+                    ms_label = int(t * 1000)
+                    metric_key = f"strongly_aligned_{method_name}/aux_correct_{ms_label}ms"
+                    all_metrics[metric_key] = 1.0 if abs_err_immutable <= t else 0.0
+                
+
             metrics_list.append(all_metrics)
-
-        out = ""
-        for idx in range(pred_count):
-            METHOD = 'smooth_20ms_boxcar_iterative_resmoothing'
-            pred_starts = predictions_per_method[METHOD]
-            
-            gt_timestamp = gt_starts[idx]
-            pred_timestamp = round_timestamp_python(pred_starts[idx].item())
-            abs_err = round_timestamp_python(abs(pred_timestamp - gt_timestamp))
-
-            out += f"[{METHOD}] Pred: {pred_timestamp}, GT: {gt_timestamp}, Err: {abs_err}, Correct: {abs_err < 0.040}\n"
-        
-        logging.info(f"Rank {PartialState().process_index}\n{out}")
 
         return metrics_list
 
