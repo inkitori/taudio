@@ -20,7 +20,6 @@ def main():
             model_id,
             torch_dtype=torch.bfloat16,
             device_map="auto" if device == "cuda" else None,
-            attn_implementation="flash_attention_2",
         )
         model.generation_config.eos_token_id = [151645, 151643]
 
