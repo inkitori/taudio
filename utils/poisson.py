@@ -129,15 +129,19 @@ def find_n_peaks(signal, n, distance=1, min_height=1e-3):
             
     return np.sort(np.array(final_peaks))
 
-def run_iterative_mode(n_pred, log_hazards, kernel, window_width):
+def run_iterative_mode(n_pred, log_hazards, kernel, window_width, resmooth=True):
     hazards = np.exp(log_hazards)
     
     half_window = window_width // 2
     
     predictions = []
+
+    if resmooth == False:
+        smoothed = np.convolve(hazards, kernel, mode='same')
     
     for _ in range(int(n_pred)):
-        smoothed = np.convolve(hazards, kernel, mode='same')
+        if resmooth == True:
+            smoothed = np.convolve(hazards, kernel, mode='same')
         
         peak_idx = np.argmax(smoothed)
         
@@ -146,7 +150,10 @@ def run_iterative_mode(n_pred, log_hazards, kernel, window_width):
         start = max(0, peak_idx - half_window)
         end = min(len(hazards), peak_idx + half_window + 1)
         
-        hazards[start:end] = 0.0
+        if resmooth == True:
+            hazards[start:end] = 0.0
+        else:
+            smoothed[start:end] = 0.0
         
     return np.sort(np.array(predictions))
 
@@ -467,12 +474,12 @@ def infer_timestamps(n_pred, log_hazards):
     # This detects the "natural" modes you saw (e.g., 31 or 43 count).
     # height=1e-3: Ignores numerical noise (0.00 vs 0.00001).
     # distance=1: Allows peaks to be right next to each other (indices 12, 13).
-    outputs["raw_find_peaks"] = find_n_peaks(
-        hazards, 
-        n=n_pred, 
-        distance=1,       # Allow neighbors
-        min_height=1e-3   # Ignore tiny noise
-    ).astype(float)
+    # outputs["raw_find_peaks"] = find_n_peaks(
+    #     hazards, 
+    #     n=n_pred, 
+    #     distance=1,       # Allow neighbors
+    #     min_height=1e-3   # Ignore tiny noise
+    # ).astype(float)
     
     # 1. Base Predictions (No smoothing)
     outputs["posterior_mode"] = posterior_mode_inhomogeneous_poisson(
@@ -600,33 +607,33 @@ def infer_timestamps(n_pred, log_hazards):
             ).flatten()
             outputs[f"{key_base}_fixed_posterior_mode"] = mode_indices
 
-            outputs[f"{key_base}_find_peaks"] = find_n_peaks(
-                smoothed_hazards_lin, 
-                n=n_pred, 
-                distance=M, 
-                min_height=1e-3
-            ).astype(float)
+            # outputs[f"{key_base}_find_peaks"] = find_n_peaks(
+            #     smoothed_hazards_lin, 
+            #     n=n_pred, 
+            #     distance=M, 
+            #     min_height=1e-3
+            # ).astype(float)
 
-            outputs[f"{key_base}_find_peaks_double_window"] = find_n_peaks(
-                smoothed_hazards_lin, 
-                n=n_pred, 
-                distance=2*M, 
-                min_height=1e-3
-            ).astype(float)
+            # outputs[f"{key_base}_find_peaks_double_window"] = find_n_peaks(
+            #     smoothed_hazards_lin, 
+            #     n=n_pred, 
+            #     distance=2*M, 
+            #     min_height=1e-3
+            # ).astype(float)
 
-            outputs[f"{key_base}_find_peaks_no_smooth"] = find_n_peaks(
-                hazards, 
-                n=n_pred, 
-                distance=M, 
-                min_height=1e-3
-            ).astype(float)
+            # outputs[f"{key_base}_find_peaks_no_smooth"] = find_n_peaks(
+            #     hazards, 
+            #     n=n_pred, 
+            #     distance=M, 
+            #     min_height=1e-3
+            # ).astype(float)
 
-            outputs[f"{key_base}_find_peaks_double_window_no_smooth"] = find_n_peaks(
-                hazards, 
-                n=n_pred, 
-                distance=2*M, 
-                min_height=1e-3
-            ).astype(float)
+            # outputs[f"{key_base}_find_peaks_double_window_no_smooth"] = find_n_peaks(
+            #     hazards, 
+            #     n=n_pred, 
+            #     distance=2*M, 
+            #     min_height=1e-3
+            # ).astype(float)
 
             # mode_indices_avg = posterior_mode_inhomogeneous_poisson(
             #     n_pred=n_pred_val, 
@@ -695,6 +702,26 @@ def infer_timestamps(n_pred, log_hazards):
                 kernel=kernel,
                 window_width=M
             )
+
+            outputs[f"{key_base}_iterative_no_resmoothing"] = run_iterative_mode(
+                n_pred=n_pred,
+                log_hazards=log_hazards,
+                kernel=kernel,
+                window_width=M,
+                resmooth=False
+            )
+
+            # outputs[f"{key_base}_dp_smoothed"] = joint_mode_dynamic_programming(
+            #     n_pred=n_pred,
+            #     log_hazards=smoothed_log_hazards,
+            #     min_dist=M
+            # )
+
+            # outputs[f"{key_base}_dp_unsmoothed"] = joint_mode_dynamic_programming(
+            #     n_pred=n_pred,
+            #     log_hazards=log_hazards,
+            #     min_dist=M
+            # )
     
     outputs['default'] = outputs['posterior_mode']
 
