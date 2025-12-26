@@ -50,6 +50,7 @@ def main():
     parser.add_argument('--eval-only', action='store_true', help='Don\'t run training')
     parser.add_argument('--run-id', type=str, default=None, help='wandb run id')
     parser.add_argument('--dev', action='store_true', help='Perform final evaluation on dev')
+    parser.add_argument('--token-single-batch', action='store_true', help='Perform batch size 1 evaluations on tokens')
 
     parser.add_argument('--take-first', type=int, default=None)
 
@@ -364,7 +365,7 @@ def main():
             take_first=args.take_first,
         )
 
-		# we don't need to select_indices here because we will always select the exact same events per example
+        # we don't need to select_indices here because we will always select the exact same events per example
         base_ds = adapter.load_split(split_name)
         
         # Simple debug print
@@ -377,24 +378,42 @@ def main():
                     break
 
         local_metrics = AverageMetrics()
-        eval_tokens_batch_size = 32
+        eval_tokens_batch_size = 64
         with distributed_state.split_between_processes(base_ds) as ds_shard:
             ds_shard_pbar = tqdm(ds_shard, desc=f"Rank {accelerator.process_index}")
+
+            eval_tokens_batch = []
 
             for example in ds_shard_pbar:
                 if task.skip_example(example, adapter):
                     continue
 
                 if eval_token_outputs:
-                    token_metrics_list = task.evaluate_tokens(
-                        example=example,
-                        ds_adapter=adapter,
-                        model=eval_model,
-                        error_bound=0.1,
-                    )
-                    for tokens_metrics in token_metrics_list:
-                        if tokens_metrics is not None:
-                            local_metrics.update_dict(tokens_metrics)
+                    if args.token_single_batch:
+                        token_metrics_list = task.evaluate_tokens(
+                            example=example,
+                            ds_adapter=adapter,
+                            model=eval_model,
+                            error_bound=0.1,
+                        )
+                        for tokens_metrics in token_metrics_list:
+                            if tokens_metrics is not None:
+                                local_metrics.update_dict(tokens_metrics)
+                    else:
+                        if len(eval_tokens_batch) < eval_tokens_batch_size:
+                            eval_tokens_batch.append(example)
+                        else:
+                            token_metrics_list = task.evaluate_tokens_batched(
+                                examples=eval_tokens_batch,
+                                ds_adapter=adapter,
+                                model=eval_model,
+                                error_bound=0.1,
+                            )
+                            for tokens_metrics in token_metrics_list:
+                                if tokens_metrics is not None:
+                                    local_metrics.update_dict(tokens_metrics)
+                            
+                            eval_tokens_batch = []
 
                 if eval_aux_outputs:
                     aux_metrics_list = task.evaluate_auxiliary_outputs(
@@ -406,6 +425,18 @@ def main():
                     for aux_metrics in aux_metrics_list:
                         if aux_metrics is not None:
                             local_metrics.update_dict(aux_metrics)
+            
+            if eval_token_outputs and not args.token_single_batch and len(eval_tokens_batch) > 0:
+                token_metrics_list = task.evaluate_tokens_batched(
+                    examples=eval_tokens_batch,
+                    ds_adapter=adapter,
+                    model=eval_model,
+                    error_bound=0.1,
+                )
+                for tokens_metrics in token_metrics_list:
+                    if tokens_metrics is not None:
+                        local_metrics.update_dict(tokens_metrics)
+
 
         to_reduce = {}
         for key in sorted(local_metrics._sum.keys()):
@@ -602,21 +633,21 @@ def main():
         
         accelerator.wait_for_everyone()
 
-    # # Final evaluation
-    # final_checkpoint = best_checkpoint_dir if best_checkpoint_dir else args.load_checkpoint
-    # if final_checkpoint:
-    #     logging.info(f"Evaluating with checkpoint: {final_checkpoint}")
+    if args.eval_only:
+        final_checkpoint = args.load_checkpoint
+        if final_checkpoint:
+            logging.info(f"Evaluating with checkpoint: {final_checkpoint}")
 
-    # if args.dev:
-    #     split = 'dev'
-    # else:
-    #     split = 'test'
-    
-    # logging.info(f"Evaluating final split on split {split}")
+        if args.dev:
+            split = 'dev'
+        else:
+            split = 'test'
+        
+        logging.info(f"Evaluating final split on split {split}")
 
-    # distributed_eval(split, prefix=split, epoch=training_config['epochs'] - 1, state_dir=final_checkpoint)
+        distributed_eval(split, prefix=split, epoch=training_config['epochs'] - 1, state_dir=final_checkpoint)
 
-    # accelerator.wait_for_everyone()
+        accelerator.wait_for_everyone()
 
     if is_master:
         logging.info(f"Training completed. All outputs saved to: {experiment_dir}")
