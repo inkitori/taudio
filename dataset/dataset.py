@@ -64,6 +64,8 @@ def collate_fn(batch: list) -> Dict[str, torch.Tensor]:
     batch_keys = batch[0].keys()
     collated = {}
 
+	# NOTE: by v4.52.4 of transformers, qwen 2.5 omni automatically constructs the correct position_ids based on attention_mask
+    # in the forward pass so theoretically the padding side should have no effect on outputs (potentially up to some nondeterminism in ops)
     for key in batch_keys:
         items = [item[key] for item in batch]
         if key == 'input_ids' or key == 'attention_mask':
