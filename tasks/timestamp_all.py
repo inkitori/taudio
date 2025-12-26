@@ -419,7 +419,7 @@ class AllTimestampsTask(BaseTask):
         logging.info(generated_string)
         
         # Compute metrics per example
-        return self._compute_metrics(generated_string, events, ds_adapter, audio_length)
+        return self._compute_metrics_refactored(generated_string, events, ds_adapter, audio_length)
         
 
     def evaluate_tokens_batched(
@@ -461,116 +461,116 @@ class AllTimestampsTask(BaseTask):
         # Compute metrics per example
         all_metrics = []
         for generated_string, events, audio_length in zip(generated_strings, all_events, all_audio_lengths):
-            metrics = self._compute_metrics(generated_string, events, ds_adapter, audio_length)
+            metrics = self._compute_metrics_refactored(generated_string, events, ds_adapter, audio_length)
             all_metrics.extend(metrics)
         
         return all_metrics
 
-    def _compute_metrics(
-        self,
-        generated_string: str,
-        events: List[Dict[str, Any]],
-        ds_adapter: LibriSpeechAdapter,
-        audio_length
-    ) -> Dict[str, float]:
-        bad_metric_greedy_pairing = {
-            "greedy_pairing_parsing_error": 1.0,
-            "greedy_pairing_token_abs_error_sum": audio_length / 2,
-            "greedy_pairing_token_correct_5ms": 0,
-            "greedy_pairing_token_correct_10ms": 0,
-            "greedy_pairing_token_correct_20ms": 0,
-            "greedy_pairing_token_correct_40ms": 0,
-            "greedy_pairing_token_correct_50ms": 0,
-            "greedy_pairing_token_correct_80ms": 0,
-            "greedy_pairing_token_correct_100ms": 0,
-            "greedy_pairing_token_correct_200ms": 0,
-        }
-        bad_metric_strongly_aligned = {
-            "strongly_aligned_parsing_error": 1.0,
-            "strongly_aligned_token_abs_error_sum": audio_length / 2,
-            "strongly_aligned_token_correct_5ms": 0,
-            "strongly_aligned_token_correct_10ms": 0,
-            "strongly_aligned_token_correct_20ms": 0,
-            "strongly_aligned_token_correct_40ms": 0,
-            "strongly_aligned_token_correct_50ms": 0,
-            "strongly_aligned_token_correct_80ms": 0,
-            "strongly_aligned_token_correct_100ms": 0,
-            "strongly_aligned_token_correct_200ms": 0,
-        }
+    # def _compute_metrics(
+    #     self,
+    #     generated_string: str,
+    #     events: List[Dict[str, Any]],
+    #     ds_adapter: LibriSpeechAdapter,
+    #     audio_length
+    # ) -> Dict[str, float]:
+    #     bad_metric_greedy_pairing = {
+    #         "greedy_pairing_parsing_error": 1.0,
+    #         "greedy_pairing_token_abs_error_sum": audio_length / 2,
+    #         "greedy_pairing_token_correct_5ms": 0,
+    #         "greedy_pairing_token_correct_10ms": 0,
+    #         "greedy_pairing_token_correct_20ms": 0,
+    #         "greedy_pairing_token_correct_40ms": 0,
+    #         "greedy_pairing_token_correct_50ms": 0,
+    #         "greedy_pairing_token_correct_80ms": 0,
+    #         "greedy_pairing_token_correct_100ms": 0,
+    #         "greedy_pairing_token_correct_200ms": 0,
+    #     }
+    #     bad_metric_strongly_aligned = {
+    #         "strongly_aligned_parsing_error": 1.0,
+    #         "strongly_aligned_token_abs_error_sum": audio_length / 2,
+    #         "strongly_aligned_token_correct_5ms": 0,
+    #         "strongly_aligned_token_correct_10ms": 0,
+    #         "strongly_aligned_token_correct_20ms": 0,
+    #         "strongly_aligned_token_correct_40ms": 0,
+    #         "strongly_aligned_token_correct_50ms": 0,
+    #         "strongly_aligned_token_correct_80ms": 0,
+    #         "strongly_aligned_token_correct_100ms": 0,
+    #         "strongly_aligned_token_correct_200ms": 0,
+    #     }
 
-        gt_sorted = sorted(ds_adapter.get_target_seconds(ev, self.key) for ev in events)
+    #     gt_sorted = sorted(ds_adapter.get_target_seconds(ev, self.key) for ev in events)
         
-        pred_starts = self._parse_prediction_list(generated_string)
-        if pred_starts is None:
-            logging.error("Couldn't parse output: \n" + generated_string)
-            logging.info("Falling back to regex output: ")
+    #     pred_starts = self._parse_prediction_list(generated_string)
+    #     if pred_starts is None:
+    #         logging.error("Couldn't parse output: \n" + generated_string)
+    #         logging.info("Falling back to regex output: ")
 
-            pattern = r'([\d]+\.[\d]+)'
-            pred_starts = [float(x) for x in re.findall(pattern, str(generated_string))]
+    #         pattern = r'([\d]+\.[\d]+)'
+    #         pred_starts = [float(x) for x in re.findall(pattern, str(generated_string))]
 
-            logging.info(pred_starts)
+    #         logging.info(pred_starts)
         
-        pred_sorted_greedy_pairing = sorted(round_timestamp_python(float(p)) for p in pred_starts)
-        pred_sorted_strongly_aligned = sorted(round_timestamp_python(float(p)) for p in pred_starts) 
+    #     pred_sorted_greedy_pairing = sorted(round_timestamp_python(float(p)) for p in pred_starts)
+    #     pred_sorted_strongly_aligned = sorted(round_timestamp_python(float(p)) for p in pred_starts) 
 
-        metrics = []
+    #     metrics = []
 
-        for idx, gt in enumerate(gt_sorted):
-            combined_metric = {}
+    #     for idx, gt in enumerate(gt_sorted):
+    #         combined_metric = {}
 
-            if idx >= len(pred_sorted_strongly_aligned):
-                logging.error("Predicted less than the number of actual events in " + generated_string)
-                combined_metric = bad_metric_strongly_aligned
-            else:
-                abs_err = round_timestamp_python(abs(pred_sorted_strongly_aligned[idx] - gt_sorted[idx]))
-                combined_metric = {
-                    "strongly_aligned_parsing_error": 0.0,
-                    "strongly_aligned_token_abs_error_sum": abs_err,
-                    "strongly_aligned_token_correct_5ms": 1.0 if abs_err <= 0.005 else 0.0,
-                    "strongly_aligned_token_correct_10ms": 1.0 if abs_err <= 0.010 else 0.0,
-                    "strongly_aligned_token_correct_20ms": 1.0 if abs_err <= 0.020 else 0.0,
-                    "strongly_aligned_token_correct_40ms": 1.0 if abs_err <= 0.040 else 0.0,
-                    "strongly_aligned_token_correct_50ms": 1.0 if abs_err <= 0.050 else 0.0,
-                    "strongly_aligned_token_correct_80ms": 1.0 if abs_err <= 0.080 else 0.0,
-                    "strongly_aligned_token_correct_100ms": 1.0 if abs_err <= 0.100 else 0.0,
-                    "strongly_aligned_token_correct_200ms": 1.0 if abs_err <= 0.200 else 0.0,
-                }
+    #         if idx >= len(pred_sorted_strongly_aligned):
+    #             logging.error("Predicted less than the number of actual events in " + generated_string)
+    #             combined_metric = bad_metric_strongly_aligned
+    #         else:
+    #             abs_err = round_timestamp_python(abs(pred_sorted_strongly_aligned[idx] - gt_sorted[idx]))
+    #             combined_metric = {
+    #                 "strongly_aligned_parsing_error": 0.0,
+    #                 "strongly_aligned_token_abs_error_sum": abs_err,
+    #                 "strongly_aligned_token_correct_5ms": 1.0 if abs_err <= 0.005 else 0.0,
+    #                 "strongly_aligned_token_correct_10ms": 1.0 if abs_err <= 0.010 else 0.0,
+    #                 "strongly_aligned_token_correct_20ms": 1.0 if abs_err <= 0.020 else 0.0,
+    #                 "strongly_aligned_token_correct_40ms": 1.0 if abs_err <= 0.040 else 0.0,
+    #                 "strongly_aligned_token_correct_50ms": 1.0 if abs_err <= 0.050 else 0.0,
+    #                 "strongly_aligned_token_correct_80ms": 1.0 if abs_err <= 0.080 else 0.0,
+    #                 "strongly_aligned_token_correct_100ms": 1.0 if abs_err <= 0.100 else 0.0,
+    #                 "strongly_aligned_token_correct_200ms": 1.0 if abs_err <= 0.200 else 0.0,
+    #             }
 
-            # this is for the greedy pairing
-            min_len = min(len(pred_sorted_greedy_pairing), len(gt_sorted))
-            abs_errors = [
-                round_timestamp_python(abs(pred_sorted_greedy_pairing[i] - gt))
-                for i in range(min_len)
-            ]
+    #         # this is for the greedy pairing
+    #         min_len = min(len(pred_sorted_greedy_pairing), len(gt_sorted))
+    #         abs_errors = [
+    #             round_timestamp_python(abs(pred_sorted_greedy_pairing[i] - gt))
+    #             for i in range(min_len)
+    #         ]
 
-            if len(abs_errors) == 0:
-                combined_metric = combined_metric | bad_metric_greedy_pairing
-                metrics.append(combined_metric)
-                logging.error("Predicted less than the number of actual events in " + generated_string)
-                continue
+    #         if len(abs_errors) == 0:
+    #             combined_metric = combined_metric | bad_metric_greedy_pairing
+    #             metrics.append(combined_metric)
+    #             logging.error("Predicted less than the number of actual events in " + generated_string)
+    #             continue
 
-            abs_err = min(abs_errors)
-            abs_err_idx = abs_errors.index(abs_err) 
-            pred_sorted_greedy_pairing.pop(abs_err_idx) 
+    #         abs_err = min(abs_errors)
+    #         abs_err_idx = abs_errors.index(abs_err) 
+    #         pred_sorted_greedy_pairing.pop(abs_err_idx) 
 
-            greedy_pairing_metric = {
-                "greedy_pairing_parsing_error": 0.0,
-                "greedy_pairing_token_abs_error_sum": abs_err,
-                "greedy_pairing_token_correct_5ms": 1.0 if abs_err <= 0.005 else 0.0,
-                "greedy_pairing_token_correct_10ms": 1.0 if abs_err <= 0.010 else 0.0,
-                "greedy_pairing_token_correct_20ms": 1.0 if abs_err <= 0.020 else 0.0,
-                "greedy_pairing_token_correct_40ms": 1.0 if abs_err <= 0.040 else 0.0,
-                "greedy_pairing_token_correct_50ms": 1.0 if abs_err <= 0.050 else 0.0,
-                "greedy_pairing_token_correct_80ms": 1.0 if abs_err <= 0.080 else 0.0,
-                "greedy_pairing_token_correct_100ms": 1.0 if abs_err <= 0.100 else 0.0,
-                "greedy_pairing_token_correct_200ms": 1.0 if abs_err <= 0.200 else 0.0,
-            }
+    #         greedy_pairing_metric = {
+    #             "greedy_pairing_parsing_error": 0.0,
+    #             "greedy_pairing_token_abs_error_sum": abs_err,
+    #             "greedy_pairing_token_correct_5ms": 1.0 if abs_err <= 0.005 else 0.0,
+    #             "greedy_pairing_token_correct_10ms": 1.0 if abs_err <= 0.010 else 0.0,
+    #             "greedy_pairing_token_correct_20ms": 1.0 if abs_err <= 0.020 else 0.0,
+    #             "greedy_pairing_token_correct_40ms": 1.0 if abs_err <= 0.040 else 0.0,
+    #             "greedy_pairing_token_correct_50ms": 1.0 if abs_err <= 0.050 else 0.0,
+    #             "greedy_pairing_token_correct_80ms": 1.0 if abs_err <= 0.080 else 0.0,
+    #             "greedy_pairing_token_correct_100ms": 1.0 if abs_err <= 0.100 else 0.0,
+    #             "greedy_pairing_token_correct_200ms": 1.0 if abs_err <= 0.200 else 0.0,
+    #         }
 
-            combined_metric = combined_metric | greedy_pairing_metric
+    #         combined_metric = combined_metric | greedy_pairing_metric
 
-            metrics.append(combined_metric)
+    #         metrics.append(combined_metric)
         
-        return metrics
+    #     return metrics
     
     def _compute_metrics_refactored(
         self,
@@ -597,120 +597,120 @@ class AllTimestampsTask(BaseTask):
         return compute_matching_metrics(gt_sorted, pred_sorted, audio_length, prefix="token_")
 
 
-    def evaluate_auxiliary_outputs(
-        self,
-        *,
-        example: Dict[str, Any],
-        ds_adapter: BaseDatasetAdapter,
-        model: Any,
-        error_bound: float = 0.1,
-    ) -> Optional[Dict[str, Any]]:
-        ds_adapter = self._validate_adapter(ds_adapter)
-        events = self._extract_events_and_transcript(example=example, ds_adapter=ds_adapter)
+    # def evaluate_auxiliary_outputs(
+    #     self,
+    #     *,
+    #     example: Dict[str, Any],
+    #     ds_adapter: BaseDatasetAdapter,
+    #     model: Any,
+    #     error_bound: float = 0.1,
+    # ) -> Optional[Dict[str, Any]]:
+    #     ds_adapter = self._validate_adapter(ds_adapter)
+    #     events = self._extract_events_and_transcript(example=example, ds_adapter=ds_adapter)
 
-        # setting eval_mode to false so that calculate_loss knows how many events there are
-        inputs = self.build_labels(
-            example=example,
-            ds_adapter=ds_adapter,
-            model_adapter=model.model_adapter,
-            eval_mode=False,
-        )
-        inputs = {k: v.to(next(model.parameters()).device) for k, v in inputs.items()}
+    #     # setting eval_mode to false so that calculate_loss knows how many events there are
+    #     inputs = self.build_labels(
+    #         example=example,
+    #         ds_adapter=ds_adapter,
+    #         model_adapter=model.model_adapter,
+    #         eval_mode=False,
+    #     )
+    #     inputs = {k: v.to(next(model.parameters()).device) for k, v in inputs.items()}
 
-        # because we set eval_mode = false (which returns unbatched tensors) we have to rebatch them
-        for key in inputs.keys():
-            inputs[key] = inputs[key].unsqueeze(0)
+    #     # because we set eval_mode = false (which returns unbatched tensors) we have to rebatch them
+    #     for key in inputs.keys():
+    #         inputs[key] = inputs[key].unsqueeze(0)
 
-        with torch.no_grad():
-            outputs = model(**inputs, inference=False)
-            preds_dict = outputs.auxiliary_prediction
+    #     with torch.no_grad():
+    #         outputs = model(**inputs, inference=False)
+    #         preds_dict = outputs.auxiliary_prediction
 
-        gt_starts = [ds_adapter.get_target_seconds(ev, self.key) for ev in events]
+    #     gt_starts = [ds_adapter.get_target_seconds(ev, self.key) for ev in events]
 
-        predictions_per_method = {}
-        predictions_per_method_immutable = {}
+    #     predictions_per_method = {}
+    #     predictions_per_method_immutable = {}
 
-        for method_name, pred_list in preds_dict.items():
-            predictions_per_method[method_name] = pred_list[0].detach().clone() # we only pass in a single example
-            predictions_per_method_immutable[method_name] = pred_list[0].detach().clone() 
+    #     for method_name, pred_list in preds_dict.items():
+    #         predictions_per_method[method_name] = pred_list[0].detach().clone() # we only pass in a single example
+    #         predictions_per_method_immutable[method_name] = pred_list[0].detach().clone() 
 
-        thresholds = [0.005, 0.010, 0.020, 0.040, 0.050, 0.080, 0.100, 0.200]
+    #     thresholds = [0.005, 0.010, 0.020, 0.040, 0.050, 0.080, 0.100, 0.200]
 
-        metrics_list = []
+    #     metrics_list = []
 
-        # Precompute distance matrices once per method
-        distance_matrices = {}
-        for method_name, method_preds in predictions_per_method_immutable.items():
-            distance_matrices[method_name] = torch.abs(
-                torch.tensor(gt_starts).unsqueeze(1) - method_preds.cpu().unsqueeze(0)
-            ).numpy()
+    #     # Precompute distance matrices once per method
+    #     distance_matrices = {}
+    #     for method_name, method_preds in predictions_per_method_immutable.items():
+    #         distance_matrices[method_name] = torch.abs(
+    #             torch.tensor(gt_starts).unsqueeze(1) - method_preds.cpu().unsqueeze(0)
+    #         ).numpy()
 
-        # L1-optimal matching (one per method)
-        l1_optimal_pairings = {}
-        for method_name, dist_matrix in distance_matrices.items():
-            gt_indices, pred_indices = linear_sum_assignment(dist_matrix)
-            l1_optimal_pairings[method_name] = {
-                gt_idx: pred_idx for gt_idx, pred_idx in zip(gt_indices, pred_indices)
-            }
+    #     # L1-optimal matching (one per method)
+    #     l1_optimal_pairings = {}
+    #     for method_name, dist_matrix in distance_matrices.items():
+    #         gt_indices, pred_indices = linear_sum_assignment(dist_matrix)
+    #         l1_optimal_pairings[method_name] = {
+    #             gt_idx: pred_idx for gt_idx, pred_idx in zip(gt_indices, pred_indices)
+    #         }
 
-        # Accuracy-optimal matching (one per method per threshold)
-        acc_optimal_pairings = {}
-        for method_name, dist_matrix in distance_matrices.items():
-            for t in thresholds:
-                cost_matrix = (dist_matrix > t).astype(float)
-                gt_indices, pred_indices = linear_sum_assignment(cost_matrix)
-                acc_optimal_pairings[(method_name, t)] = {
-                    gt_idx: pred_idx for gt_idx, pred_idx in zip(gt_indices, pred_indices)
-                }
+    #     # Accuracy-optimal matching (one per method per threshold)
+    #     acc_optimal_pairings = {}
+    #     for method_name, dist_matrix in distance_matrices.items():
+    #         for t in thresholds:
+    #             cost_matrix = (dist_matrix > t).astype(float)
+    #             gt_indices, pred_indices = linear_sum_assignment(cost_matrix)
+    #             acc_optimal_pairings[(method_name, t)] = {
+    #                 gt_idx: pred_idx for gt_idx, pred_idx in zip(gt_indices, pred_indices)
+    #             }
 
-        for idx, gt_timestamp in enumerate(gt_starts):
-            all_metrics = {}
+    #     for idx, gt_timestamp in enumerate(gt_starts):
+    #         all_metrics = {}
 
-            for method_name, method_preds in predictions_per_method.items():
-                method_preds_immutable = predictions_per_method_immutable[method_name]
+    #         for method_name, method_preds in predictions_per_method.items():
+    #             method_preds_immutable = predictions_per_method_immutable[method_name]
 
-                # --- Greedy pairing (existing) ---
-                diffs = torch.abs(method_preds - gt_timestamp)
-                closest_idx = torch.argmin(diffs).item()
-                pred_timestamp = round_timestamp_python(method_preds[closest_idx].item())
-                abs_err = round_timestamp_python(abs(pred_timestamp - gt_timestamp))
+    #             # --- Greedy pairing (existing) ---
+    #             diffs = torch.abs(method_preds - gt_timestamp)
+    #             closest_idx = torch.argmin(diffs).item()
+    #             pred_timestamp = round_timestamp_python(method_preds[closest_idx].item())
+    #             abs_err = round_timestamp_python(abs(pred_timestamp - gt_timestamp))
 
-                method_preds[closest_idx] = torch.inf # so we don't select this prediction again
+    #             method_preds[closest_idx] = torch.inf # so we don't select this prediction again
 
-                all_metrics[f"greedy_pairing_{method_name}/aux_abs_error_sum"] = abs_err
+    #             all_metrics[f"greedy_pairing_{method_name}/aux_abs_error_sum"] = abs_err
 
-                for t in thresholds:
-                    ms_label = int(t * 1000)
-                    all_metrics[f"greedy_pairing_{method_name}/aux_correct_{ms_label}ms"] = 1.0 if abs_err <= t else 0.0
+    #             for t in thresholds:
+    #                 ms_label = int(t * 1000)
+    #                 all_metrics[f"greedy_pairing_{method_name}/aux_correct_{ms_label}ms"] = 1.0 if abs_err <= t else 0.0
 
-                # --- Strongly aligned (existing) ---
-                pred_immutable = round_timestamp_python(method_preds_immutable[idx].item())
-                abs_err_immutable = round_timestamp_python(abs(pred_immutable - gt_timestamp))
-                all_metrics[f"strongly_aligned_{method_name}/aux_abs_error_sum"] = abs_err_immutable
-                for t in thresholds:
-                    ms_label = int(t * 1000)
-                    all_metrics[f"strongly_aligned_{method_name}/aux_correct_{ms_label}ms"] = 1.0 if abs_err_immutable <= t else 0.0
+    #             # --- Strongly aligned (existing) ---
+    #             pred_immutable = round_timestamp_python(method_preds_immutable[idx].item())
+    #             abs_err_immutable = round_timestamp_python(abs(pred_immutable - gt_timestamp))
+    #             all_metrics[f"strongly_aligned_{method_name}/aux_abs_error_sum"] = abs_err_immutable
+    #             for t in thresholds:
+    #                 ms_label = int(t * 1000)
+    #                 all_metrics[f"strongly_aligned_{method_name}/aux_correct_{ms_label}ms"] = 1.0 if abs_err_immutable <= t else 0.0
 
-                # --- L1-optimal matching (new) ---
-                l1_pred_idx = l1_optimal_pairings[method_name][idx]
-                pred_l1 = round_timestamp_python(method_preds_immutable[l1_pred_idx].item())
-                abs_err_l1 = round_timestamp_python(abs(pred_l1 - gt_timestamp))
-                all_metrics[f"l1_optimal_{method_name}/aux_abs_error_sum"] = abs_err_l1
-                for t in thresholds:
-                    ms_label = int(t * 1000)
-                    all_metrics[f"l1_optimal_{method_name}/aux_correct_{ms_label}ms"] = 1.0 if abs_err_l1 <= t else 0.0
+    #             # --- L1-optimal matching (new) ---
+    #             l1_pred_idx = l1_optimal_pairings[method_name][idx]
+    #             pred_l1 = round_timestamp_python(method_preds_immutable[l1_pred_idx].item())
+    #             abs_err_l1 = round_timestamp_python(abs(pred_l1 - gt_timestamp))
+    #             all_metrics[f"l1_optimal_{method_name}/aux_abs_error_sum"] = abs_err_l1
+    #             for t in thresholds:
+    #                 ms_label = int(t * 1000)
+    #                 all_metrics[f"l1_optimal_{method_name}/aux_correct_{ms_label}ms"] = 1.0 if abs_err_l1 <= t else 0.0
 
-                # --- Accuracy-optimal matching (new) ---
-                for t in thresholds:
-                    acc_pred_idx = acc_optimal_pairings[(method_name, t)][idx]
-                    pred_acc = round_timestamp_python(method_preds_immutable[acc_pred_idx].item())
-                    abs_err_acc = round_timestamp_python(abs(pred_acc - gt_timestamp))
-                    ms_label = int(t * 1000)
-                    all_metrics[f"acc_optimal_{method_name}/aux_correct_{ms_label}ms"] = 1.0 if abs_err_acc <= t else 0.0
+    #             # --- Accuracy-optimal matching (new) ---
+    #             for t in thresholds:
+    #                 acc_pred_idx = acc_optimal_pairings[(method_name, t)][idx]
+    #                 pred_acc = round_timestamp_python(method_preds_immutable[acc_pred_idx].item())
+    #                 abs_err_acc = round_timestamp_python(abs(pred_acc - gt_timestamp))
+    #                 ms_label = int(t * 1000)
+    #                 all_metrics[f"acc_optimal_{method_name}/aux_correct_{ms_label}ms"] = 1.0 if abs_err_acc <= t else 0.0
 
-            metrics_list.append(all_metrics)
+    #         metrics_list.append(all_metrics)
 
-        return metrics_list
+    #     return metrics_list
 
     def evaluate_auxiliary_outputs_refactored(
         self,
