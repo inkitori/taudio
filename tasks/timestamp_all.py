@@ -19,6 +19,129 @@ import numpy as np
 
 from .base_task import BaseTask
 
+THRESHOLDS = [0.005, 0.010, 0.020, 0.040, 0.050, 0.080, 0.100, 0.200]
+
+def compute_matching_metrics(
+    gt_timestamps: list,
+    pred_timestamps: list,
+    audio_length: float,
+    prefix: str = "",  # e.g., "token_" for backwards compatibility
+) -> list:
+    """
+    Compute metrics for all matching strategies.
+    
+    Returns a list of dicts, one per GT timestamp, with metrics for:
+    - greedy_pairing: Process GTs in order, match to closest remaining prediction
+    - strongly_aligned: Positional matching (GT[i] vs Pred[i])
+    - l1_optimal: Hungarian algorithm minimizing total L1 error
+    - acc_optimal: Hungarian algorithm minimizing errors above each threshold
+    """
+    if len(gt_timestamps) == 0:
+        raise ValueError("Length of gt_timestamps should not be 0")
+
+    gt_timestamps = sorted(gt_timestamps)
+    pred_timestamps = sorted(pred_timestamps)[:len(gt_timestamps)] # we are truncating pred timestamps in case it is longer
+    
+    n_gt = len(gt_timestamps)
+    n_pred = len(pred_timestamps)
+    fallback_error = audio_length / 2
+    
+    gt_array = np.array(gt_timestamps)
+    pred_array = np.array(pred_timestamps) if n_pred > 0 else np.array([])
+    
+    # Precompute distance matrix
+    if n_pred > 0:
+        distance_matrix = np.abs(gt_array[:, np.newaxis] - pred_array[np.newaxis, :])
+    else:
+        distance_matrix = None
+    
+    # Compute optimal matchings
+    l1_optimal_pairing = {}
+    acc_optimal_pairings = {t: {} for t in THRESHOLDS}
+    
+    if distance_matrix is not None:
+        # L1-optimal
+        gt_indices, pred_indices = linear_sum_assignment(distance_matrix)
+        l1_optimal_pairing = dict(zip(gt_indices, pred_indices))
+        
+        # Accuracy-optimal per threshold
+        for t in THRESHOLDS:
+            cost_matrix = (distance_matrix > t).astype(float)
+            gt_indices, pred_indices = linear_sum_assignment(cost_matrix)
+            acc_optimal_pairings[t] = dict(zip(gt_indices, pred_indices))
+    
+    metrics_list = []
+    pred_remaining = list(pred_timestamps)
+    
+    for gt_idx, gt_ts in enumerate(gt_timestamps):
+        metrics = {}
+        
+        # Helper to build metric keys with optional prefix
+        def key(strategy, metric):
+            return f"{strategy}/{prefix}{metric}"
+        
+        # --- Greedy pairing ---
+        if len(pred_remaining) > 0:
+            diffs = [abs(p - gt_ts) for p in pred_remaining]
+            closest_idx = int(np.argmin(diffs))
+            abs_err = round_timestamp_python(diffs[closest_idx])
+            pred_remaining.pop(closest_idx)
+            
+            metrics[key("greedy_pairing", "parsing_error")] = 0.0
+            metrics[key("greedy_pairing", "abs_error_sum")] = abs_err
+            for t in THRESHOLDS:
+                ms = int(t * 1000)
+                metrics[key("greedy_pairing", f"correct_{ms}ms")] = 1.0 if abs_err <= t else 0.0
+        else:
+            metrics[key("greedy_pairing", "parsing_error")] = 1.0
+            metrics[key("greedy_pairing", "abs_error_sum")] = fallback_error
+            for t in THRESHOLDS:
+                ms = int(t * 1000)
+                metrics[key("greedy_pairing", f"correct_{ms}ms")] = 0.0
+        
+        # --- Strongly aligned ---
+        if gt_idx < n_pred:
+            abs_err = round_timestamp_python(abs(pred_timestamps[gt_idx] - gt_ts))
+            metrics[key("strongly_aligned", "parsing_error")] = 0.0
+            metrics[key("strongly_aligned", "abs_error_sum")] = abs_err
+            for t in THRESHOLDS:
+                ms = int(t * 1000)
+                metrics[key("strongly_aligned", f"correct_{ms}ms")] = 1.0 if abs_err <= t else 0.0
+        else:
+            metrics[key("strongly_aligned", "parsing_error")] = 1.0
+            metrics[key("strongly_aligned", "abs_error_sum")] = fallback_error
+            for t in THRESHOLDS:
+                ms = int(t * 1000)
+                metrics[key("strongly_aligned", f"correct_{ms}ms")] = 0.0
+        
+        # --- L1-optimal ---
+        if gt_idx in l1_optimal_pairing:
+            pred_idx = l1_optimal_pairing[gt_idx]
+            abs_err = round_timestamp_python(abs(pred_timestamps[pred_idx] - gt_ts))
+            metrics[key("l1_optimal", "abs_error_sum")] = abs_err
+            for t in THRESHOLDS:
+                ms = int(t * 1000)
+                metrics[key("l1_optimal", f"correct_{ms}ms")] = 1.0 if abs_err <= t else 0.0
+        else:
+            metrics[key("l1_optimal", "abs_error_sum")] = fallback_error
+            for t in THRESHOLDS:
+                ms = int(t * 1000)
+                metrics[key("l1_optimal", f"correct_{ms}ms")] = 0.0
+        
+        # --- Accuracy-optimal ---
+        for t in THRESHOLDS:
+            ms = int(t * 1000)
+            if gt_idx in acc_optimal_pairings[t]:
+                pred_idx = acc_optimal_pairings[t][gt_idx]
+                abs_err = round_timestamp_python(abs(pred_timestamps[pred_idx] - gt_ts))
+                metrics[key("acc_optimal", f"correct_{ms}ms")] = 1.0 if abs_err <= t else 0.0
+            else:
+                metrics[key("acc_optimal", f"correct_{ms}ms")] = 0.0
+        
+        metrics_list.append(metrics)
+    
+    return metrics_list
+
 def colorize_tensor_log(audio_labels, audio_logits, precision=2):
     """
     Colors for terminal output:
@@ -448,6 +571,31 @@ class AllTimestampsTask(BaseTask):
             metrics.append(combined_metric)
         
         return metrics
+    
+    def _compute_metrics_refactored(
+        self,
+        generated_string: str,
+        events: list,
+        ds_adapter,  # LibriSpeechAdapter
+        audio_length: float,
+    ) -> list:
+        """Refactored to use shared compute_matching_metrics."""
+        
+        # Parse predictions
+        pred_starts = self._parse_prediction_list(generated_string)
+        if pred_starts is None:
+            logging.error("Couldn't parse output: \n" + generated_string)
+            pattern = r'([\d]+\.[\d]+)'
+            pred_starts = [float(x) for x in re.findall(pattern, str(generated_string))]
+            logging.info(f"Fallback regex output: {pred_starts}")
+        
+        # Get ground truth
+        gt_sorted = sorted(ds_adapter.get_target_seconds(ev, self.key) for ev in events)
+        pred_sorted = sorted(round_timestamp_python(float(p)) for p in pred_starts)
+        
+        # Use shared function with "token_" prefix for backwards compatibility
+        return compute_matching_metrics(gt_sorted, pred_sorted, audio_length, prefix="token_")
+
 
     def evaluate_auxiliary_outputs(
         self,
@@ -475,7 +623,6 @@ class AllTimestampsTask(BaseTask):
 
         with torch.no_grad():
             outputs = model(**inputs, inference=False)
-
             preds_dict = outputs.auxiliary_prediction
 
         gt_starts = [ds_adapter.get_target_seconds(ev, self.key) for ev in events]
@@ -565,6 +712,57 @@ class AllTimestampsTask(BaseTask):
 
         return metrics_list
 
+    def evaluate_auxiliary_outputs_refactored(
+        self,
+        *,
+        example: dict,
+        ds_adapter,
+        model,
+        error_bound: float = 0.1,
+    ):
+        ds_adapter = self._validate_adapter(ds_adapter)
+        events = self._extract_events_and_transcript(example=example, ds_adapter=ds_adapter)
+        
+        inputs = self.build_labels(
+            example=example,
+            ds_adapter=ds_adapter,
+            model_adapter=model.model_adapter,
+            eval_mode=False,
+        )
+        inputs = {k: v.to(next(model.parameters()).device) for k, v in inputs.items()}
+        for key in inputs:
+            inputs[key] = inputs[key].unsqueeze(0)
+        
+        with torch.no_grad():
+            outputs = model(**inputs, inference=False)
+            preds_dict = outputs.auxiliary_prediction
+        
+        gt_starts = [ds_adapter.get_target_seconds(ev, self.key) for ev in events]
+        audio_length = ds_adapter.get_audio_frames(example).size / model.model_adapter.sampling_rate
+        
+        # Initialize one dict per GT timestamp
+        metrics_list = [{} for _ in gt_starts]
+        
+        for method_name, pred_list in preds_dict.items():
+            pred_timestamps = [round_timestamp_python(p.item()) for p in pred_list[0].detach().cpu()]
+            
+            # Get metrics for this method
+            method_metrics = compute_matching_metrics(
+                gt_starts, 
+                pred_timestamps, 
+                audio_length,
+            )
+            
+            # Merge into per-GT dicts with method-specific key names
+            for gt_idx, m in enumerate(method_metrics):
+                for k, v in m.items():
+                    # k is like "greedy_pairing/abs_error_sum"
+                    # Transform to "greedy_pairing/method_name/aux_abs_error_sum"
+                    strategy, metric = k.split("/", 1)
+                    new_key = f"{strategy}/{method_name}/aux_{metric}"
+                    metrics_list[gt_idx][new_key] = v
+        
+        return metrics_list
 
     def calculate_loss(
         self,
