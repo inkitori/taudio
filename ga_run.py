@@ -31,6 +31,7 @@ from utils.config_utils import (
     relative_path_to_project_name,
 )
 from utils.metrics import AverageMetrics
+from test_7b_loading_single_gpu import print_gpu_memory, print_model_param_dtypes, print_state_dict_dtype_counts
 from utils.utils import dist_log
 
 
@@ -151,6 +152,9 @@ def main():
     }
     model = TAudio(**taudio_config)
 
+    logging.info("Checking dtypes before accelerator.prepare")
+    print_model_param_dtypes(model)
+
     # random bug where if gradients arent tracked they cause a keyerror
     # for some reason audio_bos_eos_token is also an unused param
     model.model_adapter.base_model.audio_tower.audio_bos_eos_token.requires_grad_(False)
@@ -167,6 +171,9 @@ def main():
     # Initialize Accelerator with specific gradient accumulation steps
     # This helps internal state management, though we do manual accumulation in the loop.
     accelerator = Accelerator(gradient_accumulation_steps=grad_accum_steps)
+
+    dist_log(accelerator, "Mem usage before prepare")
+    print_gpu_memory()
 
     # Build training dataset/dataloader
     ds, ds_adapter = get_ds(
@@ -205,6 +212,12 @@ def main():
 
     # Note: passing optimizer to prepare is crucial for FSDP/Accelerate to handle sharded states
     model, optim, dataloader = accelerator.prepare(model, optim, dataloader)
+
+    logging.info("Checking dtypes after accelerator.prepare")
+    print_model_param_dtypes(model)
+
+    dist_log(accelerator, "Mem usage after prepare")
+    print_gpu_memory()
     
     # Calculate total update steps
     dist_log(accelerator, f"Dataloader Length: {len(dataloader)}")
@@ -223,6 +236,10 @@ def main():
     logging.info(f"Optimizer update steps per epoch: {num_update_steps_per_epoch}")
     logging.info(f"Total training steps: {num_optim_steps}")
 
+    if args.eval_only:
+        logging.info("Hiding accelerator optimizers for evaluations")
+        accelerator._optimizers = []
+
     start_epoch = 0
     if args.load_checkpoint and not args.eval_only:
         ckpt_path = Path(args.load_checkpoint)
@@ -232,6 +249,12 @@ def main():
         else:
             # Load from Accelerate directory structure
             accelerator.load_state(args.load_checkpoint)
+
+            logging.info("Checking dtypes after accelerator.load_state")
+            print_model_param_dtypes(model)
+
+            dist_log(accelerator, "Mem after accelerator.load_state")
+            print_gpu_memory()
             
             # Infer start epoch from directory name
             ckpt_name = Path(args.load_checkpoint).name
@@ -271,13 +294,66 @@ def main():
         )
 
     def distributed_eval(split_name: str, prefix: str, epoch: int = None, min_time: float = None, max_time: float = None, state_dir: str = None) -> Dict[str, float]:
+        logging.info("Clearing cache before eval")
+        torch.cuda.empty_cache()
+        import gc; gc.collect()
+
+        original_min_time = task.min_time
+        original_max_time = task.max_time
+
+        # If either bound is specified for this eval, explicitly set both,
+        # allowing None to clear prior training-time constraints.
+        if min_time is not None or max_time is not None:
+            task.min_time = min_time
+            task.max_time = max_time
+
+        dist_log(accelerator, "Mem before collecting state dict")
+        print_gpu_memory()
+        logging.info("Collecting state dict")
         full_state_dict = get_full_state_dict(state_dir)
+        dist_log(accelerator, "Mem after collecting state dict")
+        print_gpu_memory()
+
+        print_state_dict_dtype_counts(full_state_dict)
 
         eval_model = TAudio(**taudio_config)
+
+        dist_log(accelerator, "Mem after creating eval_model")
+        print_gpu_memory()
+
+        logging.info("Checking eval model parameters before loading state dict")
+        print_model_param_dtypes(eval_model)
+
         eval_model.load_state_dict(full_state_dict, strict=True)
+        logging.info("State dict loaded. Deleting copy to free RAM...")
+
+        logging.info("State dict loaded. Deleting copy to free RAM...")
+        del full_state_dict
+        import gc; gc.collect()
+        torch.cuda.empty_cache()
+
+        dist_log(accelerator, "Mem after loading state dict into eval_model and deleting full_state_dict")
+        print_gpu_memory()
+
+        if args.eval_only:
+            # note that this likely destroys the model for any later evaluations (joint, ood)
+            model.to('cpu')
+            import gc; gc.collect()
+            torch.cuda.empty_cache()
+
+            dist_log(accelerator, "Mem after moving base model to cpu")
+            print_gpu_memory()
+
         eval_model.to(accelerator.device)
         eval_model.eval()
 
+        dist_log(accelerator, "Mem after moving eval model to GPU")
+        print_gpu_memory()
+
+        logging.info("Checking eval model parameters after loading state dict and sending to GPU")
+        print_model_param_dtypes(eval_model)
+
+        # Use raw dataset through adapter and shard across processes
         adapter = create_adapter(
             infer_adapter_from_repository(dataset_config['repository']),
             repository=dataset_config['repository'],
@@ -303,52 +379,34 @@ def main():
         with distributed_state.split_between_processes(base_ds) as ds_shard:
             ds_shard_pbar = tqdm(ds_shard, desc=f"Rank {accelerator.process_index}")
 
-            batch = []
-
             for example in ds_shard_pbar:
                 if task.skip_example(example, adapter):
                     continue
 
                 if eval_token_outputs:
-                    batch.append(example)
-                    
-                    if len(batch) >= eval_tokens_batch_size:
-                        token_metrics_list = task.evaluate_tokens_batched(
-                            examples=batch,
-                            ds_adapter=adapter,
-                            model=eval_model,
-                            error_bound=0.1,
-                        )
-                        for token_metrics in token_metrics_list:
-                            if token_metrics is not None:
-                                local_metrics.update_dict(token_metrics)
-                        batch = [] # Reset batch
-
-                if eval_aux_outputs:
-                    aux_metrics = task.evaluate_auxiliary_outputs(
+                    token_metrics_list = task.evaluate_tokens(
                         example=example,
                         ds_adapter=adapter,
                         model=eval_model,
                         error_bound=0.1,
                     )
-                    if aux_metrics is not None:
-                        for metrics_dict in aux_metrics:
-                            local_metrics.update_dict(metrics_dict)
+                    for tokens_metrics in token_metrics_list:
+                        if tokens_metrics is not None:
+                            local_metrics.update_dict(tokens_metrics)
 
-            if eval_token_outputs and batch:
-                token_metrics_list = task.evaluate_tokens_batched(
-                    examples=batch,
-                    ds_adapter=adapter,
-                    model=eval_model,
-                    error_bound=0.1,
-                )
-                for token_metrics in token_metrics_list:
-                    if token_metrics is not None:
-                        local_metrics.update_dict(token_metrics)
-
+                if eval_aux_outputs:
+                    aux_metrics_list = task.evaluate_auxiliary_outputs(
+                        example=example,
+                        ds_adapter=adapter,
+                        model=eval_model,
+                        error_bound=0.1,
+                    )
+                    for aux_metrics in aux_metrics_list:
+                        if aux_metrics is not None:
+                            local_metrics.update_dict(aux_metrics)
 
         to_reduce = {}
-        for key in local_metrics._sum.keys():
+        for key in sorted(local_metrics._sum.keys()):
             to_reduce[f"{key}_sum"] = torch.tensor(local_metrics.get_sum(key), device=accelerator.device)
             to_reduce[f"{key}_cnt"] = torch.tensor(local_metrics.get_count(key), device=accelerator.device)
 
@@ -364,7 +422,6 @@ def main():
             run.log(log_payload)
         
         del eval_model
-        del full_state_dict
         del adapter
         del base_ds
         import gc; gc.collect()
