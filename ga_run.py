@@ -378,7 +378,7 @@ def main():
                     break
 
         local_metrics = AverageMetrics()
-        eval_tokens_batch_size = 64
+        eval_tokens_batch_size = 32
         with distributed_state.split_between_processes(base_ds) as ds_shard:
             ds_shard_pbar = tqdm(ds_shard, desc=f"Rank {accelerator.process_index}")
 
