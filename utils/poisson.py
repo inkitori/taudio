@@ -157,6 +157,49 @@ def run_iterative_mode(n_pred, log_hazards, kernel, window_width, resmooth=True)
         
     return np.sort(np.array(predictions))
 
+def run_iterative_posterior_mode(n_pred, hazards, kernel, window_width):
+    half_window = window_width // 2
+    
+    predictions = []
+    
+    # seq_lens needed for posterior_mode_inhomogeneous_poisson
+    seq_lens = np.array([len(hazards)])
+    
+    # Work on a copy so we can suppress events
+    current_hazards = hazards.copy()
+    
+    for _ in range(int(n_pred)):
+        # 1. Smooth the hazards in linear space (re-smooth each iteration)
+        smoothed_hazards = np.convolve(current_hazards, kernel, mode='same')
+        
+        # 2. Convert to log space safely (same as infer_timestamps does)
+        smoothed_log_hazards = np.log(smoothed_hazards + 1e-12)
+        
+        # 3. Call posterior_mode_inhomogeneous_poisson with n_pred=1
+        # It expects shape (batch_size, max_seq_len)
+        mode_result = posterior_mode_inhomogeneous_poisson(
+            n_pred=np.array([1]),  # Finding 1 event at a time
+            log_hazards=smoothed_log_hazards[np.newaxis, :],  # Add batch dimension
+            seq_lens=seq_lens
+        )
+        
+        # Extract the single prediction (shape is (batch_size, max_n))
+        peak_idx = mode_result[0, 0]  # First batch, first prediction
+        
+        predictions.append(peak_idx)
+        
+        # 4. Suppression - zero out the window around the prediction
+        # peak_idx might be a float, so use its integer part for the window
+        peak_int = int(round(peak_idx))
+        start = max(0, peak_int - half_window)
+        end = min(len(hazards), peak_int + half_window + 1)
+        
+        # Zero out the current hazards so next iteration finds a different peak
+        current_hazards[start:end] = 0.0
+    
+    return np.sort(np.array(predictions))
+
+
 def get_beta_mode_fraction(k, n):
     """
     Computes the mode of the Beta distribution in [0, 1].
@@ -709,6 +752,13 @@ def infer_timestamps(n_pred, log_hazards):
                 kernel=kernel,
                 window_width=M,
                 resmooth=False
+            )
+
+            outputs[f"{key_base}_iterative_resmoothing_posterior_mode"] = run_iterative_posterior_mode(
+                n_pred=n_pred,
+                hazards=hazards,
+                kernel=kernel,
+                window_width=M,
             )
 
             # outputs[f"{key_base}_dp_smoothed"] = joint_mode_dynamic_programming(
