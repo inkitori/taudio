@@ -9,15 +9,6 @@ from .base_dataset_adapter import BaseDatasetAdapter
 from utils.utils import round_timestamp_python
 from utils.utils import remove_indices
 
-train_exclude_indices = [16103, 23870, 52776, 58610, 68716]
-eval_exclude_indices = [5929]
-
-def start_filter_fn(example):
-    for event in example['events']:
-        if event['start'] == 0:
-            return False
-    return True
-
 class AudioSetAdapter(BaseDatasetAdapter):
     EVENT_NAME = "event"
     def load_streaming_split(self, split: str):
@@ -28,24 +19,15 @@ class AudioSetAdapter(BaseDatasetAdapter):
         return ds
 
     def load_split(self, split: str):
-        # if split == "test":
-        #     split = "eval"
-
-        effective_split = split
+        effective_split = split # this is the actual split from audioset that we will construct our split from
         if split == 'dev':
             effective_split = 'train'
 
         ds = load_dataset(self.repository, split=effective_split)
         
-        if self.repository == "enyoukai/AudioSet-Strong":
-            if effective_split == "train":
-                ds = remove_indices(ds, train_exclude_indices)
-            elif effective_split == "eval":
-                ds = remove_indices(ds, eval_exclude_indices)
-        
         if split in ['train', 'dev']:
             ds = ds.shuffle(seed=80)
-            half_size = len(ds) // 2
+            half_size = len(ds) // 2 # audioset is too long so we halve the size
             ds = ds.select(range(half_size))
 
             local_rank = int(os.environ.get("LOCAL_RANK", 0)) 
