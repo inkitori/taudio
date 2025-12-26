@@ -364,6 +364,7 @@ def main():
             take_first=args.take_first,
         )
 
+		# we don't need to select_indices here because we will always select the exact same events per example
         base_ds = adapter.load_split(split_name)
         
         # Simple debug print
@@ -582,43 +583,40 @@ def main():
         accelerator.wait_for_everyone()
 
         # Per-epoch distributed eval on dev split
-        # if not args.debug:
-        #     checkpoint_dir = experiment_dir / f"checkpoint_epoch{epoch+1}"
-        #     dev_split = dataset_config.get('dev_split', 'dev')
-        #     metrics = distributed_eval(dev_split, prefix="dev", epoch=epoch, state_dir=None)
+        if not args.debug:
+            metrics = distributed_eval('dev', prefix="dev", epoch=epoch, state_dir=None)
             
-        #     target_metric = "dev/token_correct_100ms"
-        #     if not eval_token_outputs and eval_aux_outputs:
-        #         target_metric = "dev/aux_correct_100ms"
+            # target_metric = "dev/token_correct_40ms"
+            # if not eval_token_outputs and eval_aux_outputs:
+            #     target_metric = "dev/aux_correct_100ms"
                 
-        #     current_metric = metrics.get(target_metric, -1.0)
-        #     logging.info(f"Current model achieved {target_metric}: {current_metric}")
-        #     if current_metric > best_metric: 
-        #         best_metric = current_metric
-        #         best_checkpoint_dir = checkpoint_dir
-        #         if is_master:
-        #             logging.info(f"New best model found with {target_metric}: {best_metric}")
+            # current_metric = metrics.get(target_metric, -1.0)
+            # logging.info(f"Current model achieved {target_metric}: {current_metric}")
+            # if current_metric > best_metric: 
+            #     best_metric = current_metric
+            #     best_checkpoint_dir = checkpoint_dir
+            #     if is_master:
+            #         logging.info(f"New best model found with {target_metric}: {best_metric}")
 
-        # WE ARE SKIPPING DEV FOR NOW
         best_checkpoint_dir = checkpoint_dir
         
         accelerator.wait_for_everyone()
 
-    # Final evaluation
-    final_checkpoint = best_checkpoint_dir if best_checkpoint_dir else args.load_checkpoint
-    if final_checkpoint:
-        logging.info(f"Evaluating with checkpoint: {final_checkpoint}")
+    # # Final evaluation
+    # final_checkpoint = best_checkpoint_dir if best_checkpoint_dir else args.load_checkpoint
+    # if final_checkpoint:
+    #     logging.info(f"Evaluating with checkpoint: {final_checkpoint}")
 
-    if args.dev:
-        split = 'dev'
-    else:
-        split = 'test'
+    # if args.dev:
+    #     split = 'dev'
+    # else:
+    #     split = 'test'
     
-    logging.info(f"Evaluating final split on split {split}")
+    # logging.info(f"Evaluating final split on split {split}")
 
-    distributed_eval(split, prefix=split, epoch=training_config['epochs'] - 1, state_dir=final_checkpoint)
+    # distributed_eval(split, prefix=split, epoch=training_config['epochs'] - 1, state_dir=final_checkpoint)
 
-    accelerator.wait_for_everyone()
+    # accelerator.wait_for_everyone()
 
     if is_master:
         logging.info(f"Training completed. All outputs saved to: {experiment_dir}")
