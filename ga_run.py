@@ -443,7 +443,6 @@ def main():
         
         progress_bar = tqdm(
             range(num_update_steps_per_epoch),
-            desc=f"Epoch {epoch + 1}, Rank {accelerator.process_index}",
             disable=not is_master,
         )
         
@@ -568,7 +567,7 @@ def main():
                 })
                 metrics.reset()
 
-            progress_bar.set_description(f"Epoch {epoch + 1}, Loss: {avg_loss:.4f}")
+            progress_bar.set_description(f"Epoch {epoch + 1}, Loss: {avg_loss:.4f}, Rank: {accelerator.process_index}")
 
         logging.info(f"Epoch {epoch + 1} completed.")
 

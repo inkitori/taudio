@@ -453,7 +453,6 @@ def main():
     for epoch in range(start_epoch, epochs):
         progress_bar = tqdm(
             dataloader,
-            desc=f"Epoch {epoch + 1}, Rank {accelerator.process_index}",
             disable=not is_master,
         )
         metrics = AverageMetrics()
@@ -486,7 +485,7 @@ def main():
                 })
                 metrics.reset()
 
-            progress_bar.set_description(f"Epoch {epoch + 1}, Loss: {loss.item():.4f}")
+            progress_bar.set_description(f"Epoch {epoch + 1}, Loss: {loss.item():.4f}, Rank: {accelerator.process_index}")
 
         logging.info(f"Epoch {epoch + 1} completed.")
 
