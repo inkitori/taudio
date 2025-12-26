@@ -18,11 +18,6 @@ else
     exit 1
 fi
 
-# TAKE_FIRST=""
-# if [ -n "$4" ]; then
-# TAKE_FIRST="--take-first $4"
-# fi
-
 CMD=(
   accelerate launch
   --config_file accelerate_configs/1_gpu_bf16.yaml
@@ -31,7 +26,7 @@ CMD=(
   --load-checkpoint "$2"
   --eval-only
   $EXTRA_FLAGS
-  # $TAKE_FIRST
+  "$4"
 )
 
 echo $CMD
