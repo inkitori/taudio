@@ -4,6 +4,7 @@ import logging
 import math
 import json
 from accelerate import PartialState
+from scipy.optimize import linear_sum_assignment
 import torch
 import textwrap
 import re
@@ -456,10 +457,38 @@ class AllTimestampsTask(BaseTask):
 
         metrics_list = []
 
+        # Precompute distance matrices once per method
+        distance_matrices = {}
+        for method_name, method_preds in predictions_per_method_immutable.items():
+            distance_matrices[method_name] = torch.abs(
+                torch.tensor(gt_starts).unsqueeze(1) - method_preds.cpu().unsqueeze(0)
+            ).numpy()
+
+        # L1-optimal matching (one per method)
+        l1_optimal_pairings = {}
+        for method_name, dist_matrix in distance_matrices.items():
+            gt_indices, pred_indices = linear_sum_assignment(dist_matrix)
+            l1_optimal_pairings[method_name] = {
+                gt_idx: pred_idx for gt_idx, pred_idx in zip(gt_indices, pred_indices)
+            }
+
+        # Accuracy-optimal matching (one per method per threshold)
+        acc_optimal_pairings = {}
+        for method_name, dist_matrix in distance_matrices.items():
+            for t in thresholds:
+                cost_matrix = (dist_matrix > t).astype(float)
+                gt_indices, pred_indices = linear_sum_assignment(cost_matrix)
+                acc_optimal_pairings[(method_name, t)] = {
+                    gt_idx: pred_idx for gt_idx, pred_idx in zip(gt_indices, pred_indices)
+                }
+
         for idx, gt_timestamp in enumerate(gt_starts):
             all_metrics = {}
 
             for method_name, method_preds in predictions_per_method.items():
+                method_preds_immutable = predictions_per_method_immutable[method_name]
+
+                # --- Greedy pairing (existing) ---
                 diffs = torch.abs(method_preds - gt_timestamp)
                 closest_idx = torch.argmin(diffs).item()
                 pred_timestamp = round_timestamp_python(method_preds[closest_idx].item())
@@ -471,21 +500,32 @@ class AllTimestampsTask(BaseTask):
 
                 for t in thresholds:
                     ms_label = int(t * 1000)
-                    metric_key = f"greedy_pairing_{method_name}/aux_correct_{ms_label}ms"
-                    all_metrics[metric_key] = 1.0 if abs_err <= t else 0.0
+                    all_metrics[f"greedy_pairing_{method_name}/aux_correct_{ms_label}ms"] = 1.0 if abs_err <= t else 0.0
 
-                
-                method_preds_immutable = predictions_per_method_immutable[method_name]
+                # --- Strongly aligned (existing) ---
                 pred_immutable = round_timestamp_python(method_preds_immutable[idx].item())
                 abs_err_immutable = round_timestamp_python(abs(pred_immutable - gt_timestamp))
-
                 all_metrics[f"strongly_aligned_{method_name}/aux_abs_error_sum"] = abs_err_immutable
-
                 for t in thresholds:
                     ms_label = int(t * 1000)
-                    metric_key = f"strongly_aligned_{method_name}/aux_correct_{ms_label}ms"
-                    all_metrics[metric_key] = 1.0 if abs_err_immutable <= t else 0.0
-                
+                    all_metrics[f"strongly_aligned_{method_name}/aux_correct_{ms_label}ms"] = 1.0 if abs_err_immutable <= t else 0.0
+
+                # --- L1-optimal matching (new) ---
+                l1_pred_idx = l1_optimal_pairings[method_name][idx]
+                pred_l1 = round_timestamp_python(method_preds_immutable[l1_pred_idx].item())
+                abs_err_l1 = round_timestamp_python(abs(pred_l1 - gt_timestamp))
+                all_metrics[f"l1_optimal_{method_name}/aux_abs_error_sum"] = abs_err_l1
+                for t in thresholds:
+                    ms_label = int(t * 1000)
+                    all_metrics[f"l1_optimal_{method_name}/aux_correct_{ms_label}ms"] = 1.0 if abs_err_l1 <= t else 0.0
+
+                # --- Accuracy-optimal matching (new) ---
+                for t in thresholds:
+                    acc_pred_idx = acc_optimal_pairings[(method_name, t)][idx]
+                    pred_acc = round_timestamp_python(method_preds_immutable[acc_pred_idx].item())
+                    abs_err_acc = round_timestamp_python(abs(pred_acc - gt_timestamp))
+                    ms_label = int(t * 1000)
+                    all_metrics[f"acc_optimal_{method_name}/aux_correct_{ms_label}ms"] = 1.0 if abs_err_acc <= t else 0.0
 
             metrics_list.append(all_metrics)
 
