@@ -31,7 +31,7 @@ def colorize_tensor_log(audio_labels, audio_logits, precision=2):
     YELLOW = '\033[93m'
     RESET = '\033[0m'
     
-    labels = audio_labels.squeeze().cpu().numpy()
+    labels = audio_labels.float().squeeze().cpu().numpy()
     logits = audio_logits.float().squeeze().cpu().numpy()
     
     label_indices = set(np.where(labels == 1)[0])
@@ -575,7 +575,7 @@ class AllTimestampsTask(BaseTask):
         use_poisson_loss: bool,
         class_weighting: bool,
     ) -> torch.Tensor:
-        logging.info(colorize_tensor_log(audio_labels, torch.exp(audio_logits)))
+        # logging.info(colorize_tensor_log(audio_labels, torch.exp(audio_logits)))
 
         batch_size = audio_logits.size(0)
         device = audio_logits.device
