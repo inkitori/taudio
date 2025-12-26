@@ -746,13 +746,13 @@ def infer_timestamps(n_pred, log_hazards):
                 window_width=M
             )
 
-            outputs[f"{key_base}_iterative_no_resmoothing"] = run_iterative_mode(
-                n_pred=n_pred,
-                log_hazards=log_hazards,
-                kernel=kernel,
-                window_width=M,
-                resmooth=False
-            )
+            # outputs[f"{key_base}_iterative_no_resmoothing"] = run_iterative_mode(
+            #     n_pred=n_pred,
+            #     log_hazards=log_hazards,
+            #     kernel=kernel,
+            #     window_width=M,
+            #     resmooth=False
+            # )
 
             outputs[f"{key_base}_iterative_resmoothing_posterior_mode"] = run_iterative_posterior_mode(
                 n_pred=n_pred,
