@@ -712,7 +712,7 @@ class AllTimestampsTask(BaseTask):
 
     #     return metrics_list
 
-    def evaluate_auxiliary_outputs_refactored(
+    def evaluate_auxiliary_outputs(
         self,
         *,
         example: dict,

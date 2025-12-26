@@ -416,7 +416,7 @@ def main():
                             eval_tokens_batch = []
 
                 if eval_aux_outputs:
-                    aux_metrics_list = task.evaluate_auxiliary_outputs_refactored(
+                    aux_metrics_list = task.evaluate_auxiliary_outputs(
                         example=example,
                         ds_adapter=adapter,
                         model=eval_model,
