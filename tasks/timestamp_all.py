@@ -155,7 +155,7 @@ class AllTimestampsTask(BaseTask):
             ]
             expected_json = f"```json\n{json.dumps(target, indent=4)}\n```"
 
-            logging.info(f"Expected JSON\n{expected_json}")
+            # logging.info(f"Expected JSON\n{expected_json}")
 
         processor = model_adapter.processor
         prompt_text = self._build_conversation_text(
