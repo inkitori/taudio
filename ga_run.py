@@ -33,8 +33,9 @@ from utils.config_utils import (
 from utils.metrics import AverageMetrics
 from test_7b_loading_single_gpu import print_gpu_memory, print_model_param_dtypes, print_state_dict_dtype_counts
 from utils.utils import dist_log
+from tqdm.contrib.logging import logging_redirect_tqdm
 
-
+@logging_redirect_tqdm()
 def main():
     logging.getLogger().setLevel(logging.INFO)
 
@@ -442,7 +443,7 @@ def main():
         
         progress_bar = tqdm(
             range(num_update_steps_per_epoch),
-            desc=f"Epoch {epoch + 1}",
+            desc=f"Epoch {epoch + 1}, Rank {accelerator.process_index}",
             disable=not is_master,
         )
         
