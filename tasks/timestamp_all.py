@@ -15,14 +15,48 @@ from models.base_model_adapter import BaseModelAdapter
 from utils.utils import clamp, round_timestamp, round_timestamp_python
 from utils.poisson import poisson_loss, infer_timestamps, infer_count
 
+import numpy as np
+
 from .base_task import BaseTask
 
+def colorize_tensor_log(audio_labels, audio_logits, precision=2):
+    """
+    Colors for terminal output:
+    - Green: positions where audio_labels == 1
+    - Yellow: positions where audio_logits is nonzero but audio_labels != 1
+    - Default: everything else
+    """
+    # ANSI codes
+    GREEN = '\033[92m'
+    YELLOW = '\033[93m'
+    RESET = '\033[0m'
+    
+    labels = audio_labels.squeeze().cpu().numpy()
+    logits = audio_logits.float().squeeze().cpu().numpy()
+    
+    label_indices = set(np.where(labels == 1)[0])
+    
+    # Format audio_logits
+    logit_strs = []
+    for i, val in enumerate(logits):
+        s = f"{val:.{precision}f}"
+        if i in label_indices:
+            s = f"{GREEN}{s}{RESET}"
+        elif val >= 0.01:
+            s = f"{YELLOW}{s}{RESET}"
+        logit_strs.append(s)
+    
+    return (
+        f"audio_logits: [{', '.join(logit_strs)}]"
+    )
+
+# Usage
 def _collate_inputs(
     all_inputs: List[Dict[str, torch.Tensor]],
     model_adapter: BaseModelAdapter,
     padding_side: str 
 ) -> Dict[str, torch.Tensor]:
-	# shouldn't need to be pad_token_id based on looking at qwen source but including to be safe
+    # shouldn't need to be pad_token_id based on looking at qwen source but including to be safe
     pad_token_id = model_adapter.processor.tokenizer.pad_token_id
     max_len = max(inp["input_ids"].shape[1] for inp in all_inputs)
     
@@ -541,6 +575,8 @@ class AllTimestampsTask(BaseTask):
         use_poisson_loss: bool,
         class_weighting: bool,
     ) -> torch.Tensor:
+        logging.info(colorize_tensor_log(audio_labels, torch.exp(audio_logits)))
+
         batch_size = audio_logits.size(0)
         device = audio_logits.device
         dtype = audio_logits.dtype
