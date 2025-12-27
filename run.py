@@ -314,7 +314,7 @@ def main():
         dist_log(accelerator, "Mem after loading state dict into eval_model and deleting full_state_dict")
         print_gpu_memory()
 
-        if args.eval_only:
+        if args.eval_only and args.eval_min_time is None and args.eval_max_time is None: # this is only fixing it for when we pass --eval-only for ood evals
             # note that this likely destroys the model for any later evaluations (joint, ood)
             model.to('cpu')
             import gc; gc.collect()
@@ -552,12 +552,12 @@ def main():
 
     # super hacky but basically we don't care about loading checkpoints for joint training
     # also don't care about doing ood evals for joint training
-    if loss_config['token_loss'] and loss_config['poisson_loss']:
+    if not args.eval_only and loss_config['token_loss'] and loss_config['poisson_loss']: # we only enter this if we are actually doing joint training, otherwise if we pass --eval-only we will evaluate only the checkpoint we pass
         if best_token_checkpoint_dir == best_poisson_checkpoint_dir:
-            distributed_eval(split, prefix=f'token+poisson-{split}', epoch=training_config['epochs'] - 1, state_dir=best_token_checkpoint_dir) # first do evaluation on the constraints imposed during training
+            distributed_eval(split, prefix=f'token+poisson-{split}', epoch=training_config['epochs'] - 1, state_dir=best_token_checkpoint_dir) 
         else:
-            distributed_eval(split, prefix=f'token-{split}', epoch=training_config['epochs'] - 1, state_dir=best_token_checkpoint_dir) # first do evaluation on the constraints imposed during training
-            distributed_eval(split, prefix=f'poisson-{split}', epoch=training_config['epochs'] - 1, state_dir=best_poisson_checkpoint_dir) # first do evaluation on the constraints imposed during training
+            distributed_eval(split, prefix=f'token-{split}', epoch=training_config['epochs'] - 1, state_dir=best_token_checkpoint_dir) 
+            distributed_eval(split, prefix=f'poisson-{split}', epoch=training_config['epochs'] - 1, state_dir=best_poisson_checkpoint_dir) 
 
     else:
         distributed_eval(split, prefix=split, epoch=training_config['epochs'] - 1, state_dir=final_checkpoint) # first do evaluation on the constraints imposed during training
