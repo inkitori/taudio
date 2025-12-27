@@ -20,6 +20,7 @@ from torch.distributed.checkpoint.state_dict import StateDictOptions, get_model_
 
 from dataset.dataset import collate_fn, get_ds
 from dataset import create_adapter, infer_adapter_from_repository
+from dataset.librispeech import LibriSpeechAdapter
 from tasks import create_task
 from taudio import TAudio
 from utils.config_utils import (
@@ -504,12 +505,14 @@ def main():
             dev_split = dataset_config.get('dev_split', 'dev')
             metrics = distributed_eval(dev_split, prefix="dev", epoch=epoch, state_dir=None)
             
-            target_metric = "dev/token_correct_40ms"
+            ms = "20" if isinstance(ds_adapter, LibriSpeechAdapter) else "40"
+            
+            target_metric = f"dev/token_correct_{ms}ms"
             if not eval_token_outputs and eval_aux_outputs:
                 if loss_config['poisson_loss']:
-                    target_metric = "dev/smooth_40ms_boxcar_fixed_posterior_mode/aux_correct_40ms"
+                    target_metric = f"dev/smooth_{ms}ms_boxcar_fixed_posterior_mode/aux_correct_{ms}ms"
                 else:
-                    target_metric = 'dev/smooth_40ms_boxcar/aux_correct_40ms'
+                    target_metric = f'dev/smooth_{ms}ms_boxcar/aux_correct_{ms}ms'
                 
             current_metric = metrics.get(target_metric, -1.0)
             logging.info(f"Current model achieved {target_metric}: {current_metric}")
@@ -521,8 +524,8 @@ def main():
 
             # joint training check
             if loss_config['token_loss'] and loss_config['poisson_loss']:
-                token_metric = metrics.get('dev/token_correct_40ms')
-                poisson_metric = metrics.get('dev/smooth_40ms_boxcar_fixed_posterior_mode/aux_correct_40ms')
+                token_metric = metrics.get(f'dev/token_correct_{ms}ms')
+                poisson_metric = metrics.get(f'dev/smooth_{ms}ms_boxcar_fixed_posterior_mode/aux_correct_{ms}ms')
 
                 if token_metric > best_token_metric:
                     best_token_metric = token_metric
@@ -549,6 +552,10 @@ def main():
         split = 'test'
     
     logging.info(f"Evaluating final split on split {split}")
+
+    if loss_config['token_loss'] and loss_config['poisson_loss']:
+        logging.info(f"Evaluating token checkpoint: {best_token_checkpoint_dir}")
+        logging.info(f"Evaluating poisson checkpoint: {best_poisson_checkpoint_dir}")
 
     # super hacky but basically we don't care about loading checkpoints for joint training
     # also don't care about doing ood evals for joint training
