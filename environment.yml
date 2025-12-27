@@ -272,5 +272,6 @@ dependencies:
       - yarl==1.20.1
 variables:
   HF_HOME: .cache/huggingface
-  TRITON_CACHE_DIR: .triton_cache
-  CONDA_PKGS_DIRS: .conda_pkgs_dirs
+  PIP_CACHE_DIR: .cache/pip
+  TRITON_CACHE_DIR: .cache/triton
+  CONDA_PKGS_DIRS: .cache/conda_pkgs_dirs
