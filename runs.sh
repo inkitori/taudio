@@ -180,9 +180,6 @@ sbatch $EXCLUDE_NODES scripts/anvil/accelerate_1_gpu_bf16_eval.sh configs/qwen3b
 # Tokens <16, best 20ms
 # Tokens <20, best 20ms
 
-# WE ALREADY HAVE <4, <8, <12 for poisson
+# WE ALREADY HAVE <4, <8, <12, <20 for poisson
 # Poisson <16, best 20ms
 sbatch $EXCLUDE_NODES scripts/anvil/accelerate_1_gpu_bf16_eval.sh configs/qwen3b/librispeech/timestamp_any/ablation/poisson+bidirectional_audio[start][bias_-6][bf16][max_16].yaml outputs/qwen3b/librispeech/timestamp_any/ablation/poisson+bidirectional_audio[start][bias_-6][bf16][max_16]/20251224_222331/checkpoint_epoch3 test 16 20
-
-# Poisson <20, best 20ms
-sbatch $EXCLUDE_NODES scripts/anvil/accelerate_1_gpu_bf16_eval.sh configs/qwen3b/librispeech/timestamp_any/ablation/poisson+bidirectional_audio[start][bias_-6][bf16][max_20].yaml outputs/qwen3b/librispeech/timestamp_any/ablation/poisson+bidirectional_audio[start][bias_-6][bf16][max_20]/20251224_195759/checkpoint_epoch2 test 20
