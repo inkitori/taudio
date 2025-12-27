@@ -79,9 +79,9 @@ sbatch $EXCLUDE_NODES scripts/anvil/accelerate_4_gpu_bf16_run.sh configs/qwen3b/
 sbatch $EXCLUDE_NODES scripts/anvil/accelerate_4_gpu_bf16_run.sh configs/qwen3b/audioset_humans_resampled/timestamp_any/token+poisson[start][bias_-6][bf16][upscale_4][lr_1e-6][epoch_3][no_schedule].yaml
 
 # lambda=0.05
-sbatch $EXCLUDE_NODES scripts/anvil/accelerate_4_gpu_bf16_run.sh configs/qwen3b/librispeech/timestamp_any/new_inference/token+poisson[start][bias_-6][bf16][upscale_4][lr_1e-6][epoch_3][no_schedule][lambda=5e-2].yaml
-sbatch $EXCLUDE_NODES scripts/anvil/accelerate_4_gpu_bf16_run.sh configs/qwen3b/libricount/timestamp_any/new_inference/token+poisson[start][bias_-6.9][bf16][upscale_4][lr_1e-6][no_schedule][epoch_3][lambda=5e-2].yaml
-sbatch $EXCLUDE_NODES scripts/anvil/accelerate_4_gpu_bf16_run.sh configs/qwen3b/audioset_humans_resampled/timestamp_any/token+poisson[start][bias_-6][bf16][upscale_4][lr_1e-6][epoch_3][no_schedule][lambda=5e-2].yaml
+sbatch $EXCLUDE_NODES scripts/anvil/accelerate_4_gpu_bf16_run.sh configs/qwen3b/librispeech/timestamp_any/new_inference/token+poisson[start][bias_-6][bf16][upscale_4][lr_1e-6][epoch_3][no_schedule][5e-2].yaml
+sbatch $EXCLUDE_NODES scripts/anvil/accelerate_4_gpu_bf16_run.sh configs/qwen3b/libricount/timestamp_any/new_inference/token+poisson[start][bias_-6.9][bf16][upscale_4][lr_1e-6][no_schedule][epoch_3][5e-2].yaml
+sbatch $EXCLUDE_NODES scripts/anvil/accelerate_4_gpu_bf16_run.sh configs/qwen3b/audioset_humans_resampled/timestamp_any/token+poisson[start][bias_-6][bf16][upscale_4][lr_1e-6][epoch_3][no_schedule][5e-2].yaml
 
 # ----------- MULTI TIMESTAMPS -----------
 sbatch $EXCLUDE_NODES scripts/anvil/ga_accelerate_4_gpu_bf16_run.sh configs/qwen3b/librispeech/timestamp_all/token[start][bf16][lr_1e-6][epoch_1][no_schedule].yaml
@@ -157,3 +157,32 @@ sbatch $EXCLUDE_NODES scripts/anvil/accelerate_1_gpu_bf16_eval.sh configs/qwen7b
 sbatch $EXCLUDE_NODES scripts/anvil/accelerate_1_gpu_bf16_eval.sh configs/qwen7b/audioset_humans_resampled/timestamp_any/binary[class_weighting][start][bf16][upscale_4][lr_1e-6][epoch_6].yaml outputs/qwen7b/audioset_humans_resampled/timestamp_any/binary[class_weighting][start][bf16][upscale_4][lr_1e-6][epoch_6]/20251222_054053/checkpoint_epoch3 dev
 sbatch $EXCLUDE_NODES scripts/anvil/accelerate_1_gpu_bf16_eval.sh configs/qwen7b/audioset_humans_resampled/timestamp_any/binary[class_weighting][start][bf16][upscale_4][lr_1e-6][epoch_6].yaml outputs/qwen7b/audioset_humans_resampled/timestamp_any/binary[class_weighting][start][bf16][upscale_4][lr_1e-6][epoch_6]/20251222_054053/checkpoint_epoch2 dev
 sbatch $EXCLUDE_NODES scripts/anvil/accelerate_1_gpu_bf16_eval.sh configs/qwen7b/audioset_humans_resampled/timestamp_any/binary[class_weighting][start][bf16][upscale_4][lr_1e-6][epoch_6].yaml outputs/qwen7b/audioset_humans_resampled/timestamp_any/binary[class_weighting][start][bf16][upscale_4][lr_1e-6][epoch_6]/20251222_054053/checkpoint_epoch1 dev
+
+# ----------- LIBRISPEECH SWEEP -----------
+
+# Tokens 3B, best 20ms
+sbatch $EXCLUDE_NODES scripts/anvil/accelerate_1_gpu_bf16_eval.sh configs/qwen3b/librispeech/timestamp_any/new_inference/token[start][bf16][lr_1e-6][epoch_3][no_schedule].yaml outputs/qwen3b/librispeech/timestamp_any/new_inference/token[start][bf16][lr_1e-6][epoch_3][no_schedule]/20251211_180507/model_epoch1.pt test
+
+# Poisson 3B, best 40ms
+sbatch $EXCLUDE_NODES scripts/anvil/accelerate_1_gpu_bf16_eval.sh configs/qwen3b/librispeech/timestamp_any/new_inference/poisson[start][bias_-6][bf16][upscale_4][lr_1e-6][epoch_3][no_schedule].yaml outputs/qwen3b/librispeech/timestamp_any/new_inference/poisson[start][bias_-6][bf16][upscale_4][lr_1e-6][epoch_3][no_schedule]/20251210_233504/model_epoch1.pt test
+
+# ABLATIONS
+# Tokens <4, best 20ms
+sbatch $EXCLUDE_NODES scripts/anvil/accelerate_1_gpu_bf16_eval.sh configs/qwen3b/librispeech/timestamp_any/ablation/token+bidirectional_audio[start][bf16][max_4].yaml outputs/qwen3b/librispeech/timestamp_any/ablation/token+bidirectional_audio[start][bf16][max_4]/20251221_040529/checkpoint_epoch3 test 4 8
+
+# Tokens <8, best 20ms
+sbatch $EXCLUDE_NODES scripts/anvil/accelerate_1_gpu_bf16_eval.sh configs/qwen3b/librispeech/timestamp_any/ablation/token+bidirectional_audio[start][bf16][max_8].yaml outputs/qwen3b/librispeech/timestamp_any/ablation/token+bidirectional_audio[start][bf16][max_8]/20251221_100430/checkpoint_epoch2 test 8 12
+
+# Tokens <12, best 20ms
+sbatch $EXCLUDE_NODES scripts/anvil/accelerate_1_gpu_bf16_eval.sh configs/qwen3b/librispeech/timestamp_any/ablation/token+bidirectional_audio[start][bf16][max_12].yaml outputs/qwen3b/librispeech/timestamp_any/ablation/token+bidirectional_audio[start][bf16][max_12]/20251221_112231/checkpoint_epoch3 test 12 16
+
+# WE ALREADY EVALUATED CHECKPOINT 3 FOR BOTH OF THESE
+# Tokens <16, best 20ms
+# Tokens <20, best 20ms
+
+# WE ALREADY HAVE <4, <8, <12 for poisson
+# Poisson <16, best 20ms
+sbatch $EXCLUDE_NODES scripts/anvil/accelerate_1_gpu_bf16_eval.sh configs/qwen3b/librispeech/timestamp_any/ablation/poisson+bidirectional_audio[start][bias_-6][bf16][max_16].yaml outputs/qwen3b/librispeech/timestamp_any/ablation/poisson+bidirectional_audio[start][bias_-6][bf16][max_16]/20251224_222331/checkpoint_epoch3 test 16 20
+
+# Poisson <20, best 20ms
+sbatch $EXCLUDE_NODES scripts/anvil/accelerate_1_gpu_bf16_eval.sh configs/qwen3b/librispeech/timestamp_any/ablation/poisson+bidirectional_audio[start][bias_-6][bf16][max_20].yaml outputs/qwen3b/librispeech/timestamp_any/ablation/poisson+bidirectional_audio[start][bias_-6][bf16][max_20]/20251224_195759/checkpoint_epoch2 test 20
