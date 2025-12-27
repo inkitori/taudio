@@ -11,5 +11,5 @@
 #SBATCH --error=scripts/anvil/logs/%x/%j.err
 
 module load conda
-conda activate ./env
+conda activate $SCRATCH/envs/taudio
 python evaluate_base.py --model-id $1 --repository $2 --split $3 --task $4

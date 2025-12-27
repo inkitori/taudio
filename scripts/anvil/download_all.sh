@@ -12,6 +12,6 @@
 
 
 module load conda
-conda activate ./env
+conda activate $SCRATCH/envs/taudio
 
 python download_all.py

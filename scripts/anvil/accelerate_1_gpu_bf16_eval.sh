@@ -44,6 +44,6 @@ export MASTER_PORT=$(expr 10000 + $(echo -n $SLURM_JOBID | tail -c 4))
 echo "MASTER_PORT: $MASTER_PORT"
 
 module load conda
-conda activate ./env
+conda activate $SCRATCH/envs/taudio
 
 accelerate launch --main_process_port $MASTER_PORT --config_file accelerate_configs/1_gpu_bf16.yaml run.py --config "$1" --load-checkpoint "$2" --eval-only $EXTRA_FLAGS $EVAL_MIN_ARG $EVAL_MAX_ARG
