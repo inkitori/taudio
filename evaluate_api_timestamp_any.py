@@ -276,7 +276,7 @@ def _audio_to_wav_bytes(audio: Dict[str, object]) -> bytes:
 
 def _build_prompt(ds_adapter, task: SingleTimestampAnyTask, example: Dict[str, object]) -> Tuple[str, Dict[str, object], float]:
     events = list(ds_adapter.get_events(example))
-    event = task._choose_event(events=events, ds_adapter=ds_adapter, apply_fallback=False)  # type: ignore[attr-defined]
+    event = task._choose_event(events=events, ds_adapter=ds_adapter, apply_fallback=False, example=example)  # type: ignore[attr-defined]
     event_name = ds_adapter.event_name(event)
     ordinal = task._compute_ordinal(all_events=events, ds_adapter=ds_adapter, selected_event=event)
     base_prompt = ds_adapter.get_timestamp_single_any_prompt(event_name, task.key, ordinal)
