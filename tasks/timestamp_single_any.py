@@ -15,6 +15,7 @@ import hashlib
 from dataset.base_dataset_adapter import BaseDatasetAdapter
 from models.base_model_adapter import BaseModelAdapter
 from dataset.audioset import AudioSetAdapter
+import numpy as np
 
 from .base_task import BaseTask
 from utils.utils import clamp, round_timestamp, round_timestamp_python
@@ -363,7 +364,7 @@ class SingleTimestampAnyTask(BaseTask):
         inputs = inputs.to(next(model.parameters()).device)
 
         with torch.no_grad():
-            outputs = model(**inputs, inference=True)
+            outputs = model(**inputs, inference=True, true_inference=True)
 
             preds_dict = outputs.auxiliary_prediction
             if not isinstance(preds_dict, dict):
@@ -427,7 +428,7 @@ class SingleTimestampAnyTask(BaseTask):
         batched_inputs = {k: v.to(next(model.parameters()).device) for k, v in batched_inputs.items()}
 
         with torch.no_grad():
-            outputs = model(**batched_inputs, inference=True)
+            outputs = model(**batched_inputs, inference=True, true_inference=True)
 
             preds_dict = outputs.auxiliary_prediction
             if not isinstance(preds_dict, dict):
@@ -470,6 +471,7 @@ class SingleTimestampAnyTask(BaseTask):
         model_adapter: BaseModelAdapter,
         use_poisson_loss: bool,
         class_weighting: bool,
+        true_inference=False 
     ) -> torch.Tensor:
         batch_size = audio_logits.size(0)
         device = audio_logits.device
@@ -525,10 +527,13 @@ class SingleTimestampAnyTask(BaseTask):
 
             # 1. Get dictionary of predictions from the new infer_timestamps
             # returns {"posterior_mode": [...], "smooth_20ms_boxcar": [...], etc}
-            if use_poisson_loss:
-                preds_dict_np = infer_timestamps(1, example_audio_logits.cpu().float().detach().numpy())
-            else:
-                preds_dict_np = infer_timestamps_binary(1, example_audio_logits.cpu().float().detach().numpy())
+            preds_dict_np = {'fake_prediction': np.array([0])}
+
+            if true_inference:
+                if use_poisson_loss:
+                    preds_dict_np = infer_timestamps(1, example_audio_logits.cpu().float().detach().numpy(), model_adapter.embedding_to_frame_adjusted_milliseconds)
+                else:
+                    preds_dict_np = infer_timestamps_binary(1, example_audio_logits.cpu().float().detach().numpy(), model_adapter.embedding_to_frame_adjusted_milliseconds)
 
             # 2. Process all method predictions
             for method_name, pred_array in preds_dict_np.items():

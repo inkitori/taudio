@@ -69,6 +69,7 @@ class TAudio(nn.Module):
         labels: torch.Tensor = None,  # (batch_size, seq_len)
         audio_labels: torch.Tensor = None,  # (batch_size, num_audio_tokens) or (num_audio_tokens)
         inference: bool = False,
+        true_inference = False # basically inference is just whether we want to construct the audio labels too, and true inference is if we should actually infer for the aux loss (ik bad naming)
     ) -> torch.Tensor:
         if not inference and (labels is None or audio_labels is None):
             raise ValueError("Labels and audio labels must be provided if not in inference mode")
@@ -126,6 +127,7 @@ class TAudio(nn.Module):
                 model_adapter=self.model_adapter, 
                 use_poisson_loss=self.poisson_loss, 
                 class_weighting=self.class_weighting,
+                true_inference=true_inference
             )
         else:
             surrogate_loss = torch.tensor(

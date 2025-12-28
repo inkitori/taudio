@@ -734,7 +734,7 @@ class AllTimestampsTask(BaseTask):
             inputs[key] = inputs[key].unsqueeze(0)
         
         with torch.no_grad():
-            outputs = model(**inputs, inference=False)
+            outputs = model(**inputs, inference=False, true_inference=True)
             preds_dict = outputs.auxiliary_prediction
         
         gt_starts = [ds_adapter.get_target_seconds(ev, self.key) for ev in events]
@@ -772,6 +772,7 @@ class AllTimestampsTask(BaseTask):
         model_adapter: BaseModelAdapter,
         use_poisson_loss: bool,
         class_weighting: bool,
+        true_inference=False
     ) -> torch.Tensor:
         # logging.info(colorize_tensor_log(audio_labels, torch.exp(audio_logits)))
 
@@ -803,10 +804,13 @@ class AllTimestampsTask(BaseTask):
             n_pred = (example_audio_labels == 1).sum().item()
             # 1. Get dictionary of predictions from the new infer_timestamps
             # returns {"posterior_mode": [...], "smooth_20ms_boxcar": [...], etc}
-            if use_poisson_loss:
-                preds_dict_np = infer_timestamps(n_pred, example_audio_logits.cpu().float().detach().numpy())
-            else:
-                raise ValueError("Not supporting BCE for all timestamps")
+            preds_dict_np = {'fake_prediction': np.array([0])}
+
+            if true_inference:
+                if use_poisson_loss:
+                    preds_dict_np = infer_timestamps(n_pred, example_audio_logits.cpu().float().detach().numpy(), model_adapter.embedding_to_frame_adjusted_milliseconds)
+                else:
+                    raise ValueError("Not supporting BCE for all timestamps")
 
             # 2. Process all method predictions
             for method_name, pred_array in preds_dict_np.items():
