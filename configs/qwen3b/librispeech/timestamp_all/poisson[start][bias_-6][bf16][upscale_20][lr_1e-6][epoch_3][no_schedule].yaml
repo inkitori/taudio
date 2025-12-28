@@ -6,11 +6,11 @@ model:
   bidirectional_audio: true
   linear_bias: -6 # MAKE SURE TO SET THIS BIAS CORRECTLY
   dtype: "auto"
-  scaling_factor: 10
+  scaling_factor: 20
 
 # Training configuration
 training:
-  epochs: 6
+  epochs: 3
   effective_batch_size: 8
   learning_rate: 1.0e-6
   eta_min_scale: 1.0
