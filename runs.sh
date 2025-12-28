@@ -90,6 +90,9 @@ sbatch $EXCLUDE_NODES scripts/anvil/ga_accelerate_4_gpu_bf16_run.sh configs/qwen
 # higher frame resolutions for poisson
 sbatch $EXCLUDE_NODES scripts/anvil/ga_accelerate_4_gpu_bf16_run.sh configs/qwen3b/librispeech/timestamp_all/poisson[start][bias_-6][bf16][upscale_10][lr_1e-6][epoch_3][no_schedule].yaml
 
+# no frame resolutions for poisson
+sbatch $EXCLUDE_NODES scripts/anvil/ga_accelerate_4_gpu_bf16_run.sh configs/qwen3b/librispeech/timestamp_all/poisson[start][bias_-6][bf16][upscale_1][lr_1e-6][epoch_1][no_schedule].yaml 
+
 
 
 # ----------- BERNOULLI DEV SWEEP -----------
