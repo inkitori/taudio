@@ -3,6 +3,7 @@ import torch
 from scipy.stats import beta
 from accelerate import PartialState
 from scipy.signal import find_peaks, windows
+import logging
 
 import numpy as np
 
@@ -180,6 +181,45 @@ def run_iterative_posterior_mode(n_pred, hazards, kernel, window_width):
         mode_result = posterior_mode_inhomogeneous_poisson(
             n_pred=np.array([1]),  # Finding 1 event at a time
             log_hazards=smoothed_log_hazards[np.newaxis, :],  # Add batch dimension
+            seq_lens=seq_lens
+        )
+        
+        # Extract the single prediction (shape is (batch_size, max_n))
+        peak_idx = mode_result[0, 0]  # First batch, first prediction
+        
+        predictions.append(peak_idx)
+        
+        # 4. Suppression - zero out the window around the prediction
+        # peak_idx might be a float, so use its integer part for the window
+        peak_int = int(round(peak_idx))
+        start = max(0, peak_int - half_window)
+        end = min(len(hazards), peak_int + half_window + 1)
+        
+        # Zero out the current hazards so next iteration finds a different peak
+        current_hazards[start:end] = 0.0
+    
+    return np.sort(np.array(predictions))
+
+def run_iterative_posterior_mode_no_kernel(n_pred, hazards, kernel, window_width):
+    half_window = window_width // 2
+    
+    predictions = []
+    
+    # seq_lens needed for posterior_mode_inhomogeneous_poisson
+    seq_lens = np.array([len(hazards)])
+    
+    # Work on a copy so we can suppress events
+    current_hazards = hazards.copy()
+    
+    for _ in range(int(n_pred)):
+        # 2. Convert to log space safely (same as infer_timestamps does)
+        log_hazards = np.log(current_hazards + 1e-12)
+        
+        # 3. Call posterior_mode_inhomogeneous_poisson with n_pred=1
+        # It expects shape (batch_size, max_seq_len)
+        mode_result = posterior_mode_inhomogeneous_poisson(
+            n_pred=np.array([1]),  # Finding 1 event at a time
+            log_hazards=log_hazards[np.newaxis, :],  # Add batch dimension
             seq_lens=seq_lens
         )
         
@@ -432,79 +472,11 @@ def run_iterative_bayesian_greedy(n_pred, log_hazards, tolerance_ms, frame_ms, k
 
     return np.sort(np.array(outputs))
 
-def infer_timestamps(n_pred, log_hazards):
+def infer_timestamps(n_pred, log_hazards, frame_ms):
     outputs = {}
 
-    # frame_ms = 10
-    # tolerance_ms = 40
-
-    # hazards = np.exp(log_hazards)
-    
-    # # 1. Define the Window Size
-    # # We want a window of +/- 100ms (Total 200ms)
-    # # If frame is 40ms, 200/40 = 5 frames.
-    # window_frames = int((tolerance_ms * 2) / frame_ms)
-    
-    # # Ensure window is odd so it has a distinct center
-    # if window_frames % 2 == 0:
-    #     window_frames += 1
-        
-    # half_window = window_frames // 2
-    
-    # # Create a convolution kernel to find 'Mass within Window'
-    # kernel = np.ones(window_frames)
-    
-    # # We work on a copy so we can "suppress" peaks as we find them
-    # search_probs = hazards.copy()
-    
-    # predicted_indices = []
-
-    # for _ in range(int(n_pred)):
-    #     # 2. Convolve to find the region with Maximum Accuracy
-    #     # (The window with the highest sum of probability)
-    #     # Using 'same' keeps the indices aligned with the original array
-    #     window_sums = np.convolve(search_probs, kernel, mode='same')
-        
-    #     # Find the center index of the best window
-    #     # This maximizes P(hit) within tolerance
-    #     global_peak_idx = np.argmax(window_sums)
-        
-    #     # If the max probability is effectively 0, stop (no more events found)
-    #     if window_sums[global_peak_idx] < 1e-9:
-    #         break
-
-    #     # 3. Local Refinement: Minimize L1 Loss (Local Median)
-    #     # We look strictly inside the winning window
-    #     start = max(0, global_peak_idx - half_window)
-    #     end = min(len(hazards), global_peak_idx + half_window + 1)
-        
-    #     local_mass = hazards[start:end]
-        
-    #     # Calculate Local Median within this specific window
-    #     # (Normalize so it sums to 1, then find 0.5 crossing)
-    #     local_cumsum = np.cumsum(local_mass)
-    #     total_local_mass = local_cumsum[-1]
-        
-    #     if total_local_mass > 0:
-    #         # searchsorted finds the first index where value >= target
-    #         median_offset = np.searchsorted(local_cumsum, total_local_mass * 0.5)
-    #         refined_idx = start + median_offset
-    #     else:
-    #         refined_idx = global_peak_idx
-
-    #     predicted_indices.append(refined_idx)
-        
-    #     # 4. Suppression (The "Greedy" step)
-    #     # Zero out the mass in this window so the next iteration 
-    #     # finds the *next* highest peak, not the same one.
-    #     # We suppress the full window area.
-    #     search_probs[start:end] = 0
-
-    # # Return sorted indices (as floats)
-    # outputs['default'] = np.sort(np.array(predicted_indices))
-    
     # Configuration
-    frame_ms = 10
+    # frame_ms = 10
     n_pred_val = np.atleast_1d(n_pred)
     seq_lens = np.array([len(log_hazards)])
     hazards = np.exp(log_hazards)
@@ -590,7 +562,8 @@ def infer_timestamps(n_pred, log_hazards):
             return np.sort(np.array(predicted_indices))
 
     # --- 3. Sweeping through kernels and tolerances ---
-    for tolerance_ms in range(10, 101, 10):
+    logging.info(f"frame_ms is: {frame_ms}")
+    for tolerance_ms in range(frame_ms, 101, frame_ms):
         M = int((tolerance_ms * 2) / frame_ms)
         if M % 2 == 0: M += 1
             
@@ -761,6 +734,13 @@ def infer_timestamps(n_pred, log_hazards):
                 window_width=M,
             )
 
+            outputs[f"{key_base}_iterative_posterior_mode_no_kernel"] = run_iterative_posterior_mode_no_kernel(
+                n_pred=n_pred,
+                hazards=hazards,
+                kernel=kernel,
+                window_width=M,
+            )
+
             # outputs[f"{key_base}_dp_smoothed"] = joint_mode_dynamic_programming(
             #     n_pred=n_pred,
             #     log_hazards=smoothed_log_hazards,
@@ -778,9 +758,8 @@ def infer_timestamps(n_pred, log_hazards):
     return outputs
 
 from scipy.special import expit  
-def infer_timestamps_binary(n_pred, logits):
+def infer_timestamps_binary(n_pred, logits, frame_ms):
     outputs = {}
-    frame_ms = 10
 
     probs = expit(logits)
 
@@ -788,7 +767,8 @@ def infer_timestamps_binary(n_pred, logits):
     outputs['argmax_fixed'] = outputs['argmax'] + 0.5
     outputs['default'] = outputs['argmax_fixed']
 
-    for tolerance_ms in range(10, 101, 10):
+    logging.info(f"frame_ms is: {frame_ms}")
+    for tolerance_ms in range(frame_ms, 101, frame_ms):
         M = int((tolerance_ms * 2) / frame_ms)
         if M % 2 == 0: M += 1
             
