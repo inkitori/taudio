@@ -135,6 +135,10 @@ class Qwen2_5OmniAdapter(BaseModelAdapter):
     def seconds_to_embedding(self) -> int:
         return self.constants.SECONDS_TO_EMBEDDING
 
+    @property
+    def embedding_to_frame_adjusted_milliseconds(self):
+        return int(40 / self.scaling_factor) # the raw embedding to milliseconds is one embedding represents 40 milliseconds
+
     # --- Bidirectional audio mask patching (Qwen-specific) ---
     def _patch_causal_mask_zero_region(self, starts, ends):
         model = self._actual_text_model
