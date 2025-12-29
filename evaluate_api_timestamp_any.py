@@ -10,14 +10,20 @@ existing dataset/task adapters to stay consistent with the rest of the codebase.
 """
 
 from __future__ import annotations
-
+from tenacity import (
+    retry,
+    stop_after_attempt,
+    wait_random_exponential,
+)  # for exponential backoff
 import argparse
 import base64
+from collections import defaultdict
 import io
 import logging
 import os
 import random
 import re
+import sys
 import time
 from dataclasses import dataclass
 from typing import Dict, Optional, Protocol, Tuple, List, Any
@@ -33,13 +39,6 @@ from tasks.timestamp_single_any import SingleTimestampAnyTask
 from utils.metrics import AverageMetrics
 from utils.utils import round_timestamp_python, ensure_audio_path
 
-try:
-    from google import genai  # type: ignore
-    from google.genai import types
-except ImportError as exc:  # pragma: no cover - dependency hint
-    raise RuntimeError(
-        "google-genai is required. Install via `pip install google-genai`."
-    ) from exc
 
 class Timestamp(BaseModel):
     # event_name: str = Field(description="Name of the event")
@@ -67,6 +66,18 @@ THIRD_PARTY_LOGGERS = (
     "google_genai",
     "google_genai.models",
 )
+
+
+def _supports_ansi_color() -> bool:
+    # logging's default StreamHandler writes to stderr; only use ANSI when it's a TTY.
+    return sys.stderr.isatty() and os.getenv("NO_COLOR") is None
+
+
+def _ansi(code: str, text: str) -> str:
+    """Wrap text with an ANSI color/style code if supported (e.g. '1;36' for bright cyan)."""
+    if not _supports_ansi_color():
+        return text
+    return f"\033[{code}m{text}\033[0m"
 def _silence_third_party_logs(level: int = logging.WARNING) -> None:
     """Silence noisy SDK loggers without touching application logging."""
     for name in THIRD_PARTY_LOGGERS:
@@ -82,12 +93,20 @@ class TimestampPredictor(Protocol):
 
     name: str
 
-    def predict_timestamp(self, prompt: str, audio: Dict[str, object]) -> str:
+    def predict_timestamp(self, prompt: str, audio: Dict[str, object], transcript: str = None, event_name=None) -> str:
         """Return the raw text response from the provider."""
 
 
 class GeminiTimestampClient:
     def __init__(self, api_key: str, model: str, timeout: Optional[int], max_retries: int = 5) -> None:
+        try:
+            from google import genai  # type: ignore
+            from google.genai import types
+        except ImportError as exc:  # pragma: no cover - dependency hint
+            raise RuntimeError(
+                "google-genai is required. Install via `pip install google-genai`."
+            ) from exc
+
         self.name = "gemini"
         self._max_retries = max_retries
 
@@ -191,78 +210,67 @@ class ChatGPTEvaluator:
         self._model = model
         self._timeout = timeout
 
+    @retry(wait=wait_random_exponential(min=1, max=60), stop=stop_after_attempt(6))
+    def _completion_with_backoff(self, **kwargs):
+        return self._client.chat.completions.create(**kwargs)
+
     def predict_timestamp(self, prompt: str, audio: Dict[str, object]) -> str:
-        # Note: Depending on flakiness, retry logic could be added here too, 
-        # but the request specifically asked for Gemini.
         audio_bytes = _audio_to_wav_bytes(audio)
         encoded_audio = base64.b64encode(audio_bytes).decode("utf-8")
-        # response = self._client.chat.completions.parse(
-        #     model=self._model,
-        #     messages=[
-        #         # {"role": "system", "content": "You are a helpful math tutor."},
-        #         {
-        #             "role": "user",
-        #             "content": [
-        #                 {"type": "text", "text": prompt},
-                        # {"type": "input_audio", "input_audio": {"data": encoded_audio, "format": "wav"}},
-        #             ],
-        #         }
-        #     ],
-        #     response_format=Timestamp,
-        #     # response_format={ "type": "json_object" },
-        #     # max_output_tokens=64,
-        #     temperature=0.0,
-        #     top_p=0.1,
-        #     **({"timeout": self._timeout} if self._timeout else {}),
-        # )
-        # response = self._client.chat.completions.parse(
-        #     model="gpt-4o-mini",
-        #     messages=[
-        #         {
-        #             "role": "user",
-        #             "content": [
-        #                 {"type": "text", "text": "What’s in this image?"},
-        #                 {
-        #                     "type": "image_url",
-        #                     "image_url": {
-        #                         "url": "https://upload.wikimedia.org/wikipedia/commons/thumb/d/dd/Gfp-wisconsin-madison-the-nature-boardwalk.jpg/2560px-Gfp-wisconsin-madison-the-nature-boardwalk.jpg",
-        #                         "detail": "high"
-        #                     },
-        #                 },
-        #                 # {
-        #                 #     "type": "input_audio", 
-        #                 #     "input_audio": {"data": encoded_audio, "format": "wav"}
-        #                 # },
-        #                 {
-        #                     "type": "audio_url", 
-        #                     "audio_url": f"data:audio/wav;base64,{encoded_audio}"
-        #                 },
-        #             ],
-        #         }
-        #     ],
-        #     max_tokens=300,
-        # )
-        response = self._client.chat.completions.parse(
-            model="gpt-4o-mini",
-            modalities=["text"],
+
+        prompt = prompt + f" Output the start time in seconds and nothing else."
+
+        logging.info(f"[GPT] GPT Prompt: {prompt}")
+        logging.info(f"[GPT] Using model: {self._model}")
+
+        response = self._completion_with_backoff(
+            model=self._model,
+            modalities=["text", "audio"],
+            audio={"voice": "alloy", "format": "wav"},
             messages = [
                 {
                 "role": "user",
                 "content": [
-                    { "type": "text", "text": "What is in this recording?" },
+                    { "type": "text", "text": prompt},
                     { "type": "input_audio", "input_audio": { "data": encoded_audio, "format": "wav" }}
                 ]
                 }
             ],
-            response_format=Timestamp,
+            temperature=0,
+            max_tokens=512
         );
 
-        print(response.choices[0].message.content)
-        logging.info(f"[GPT] Response: {response}")
-        logging.info(f"[GPT] Parsed Response: {response.output_parsed}")
+        header = _ansi("1;36", "[GPT] Message:")
+        
+        audio = response.choices[0].message.audio
+        message = audio.transcript if audio else ""
 
-        return response.output_parsed
+        logging.info("\n\n%s %s\n", header, message)
 
+        completion_text_tokens = response.usage.completion_tokens_details.text_tokens
+        completion_audio_tokens = response.usage.completion_tokens_details.audio_tokens
+        prompt_text_tokens = response.usage.prompt_tokens_details.text_tokens
+        prompt_audio_tokens = response.usage.prompt_tokens_details.audio_tokens
+
+        logging.info(f"Completion text tokens: {completion_text_tokens}")
+        logging.info(f"Completion audio tokens: {completion_audio_tokens}")
+
+        logging.info(f"Prompt text tokens: {prompt_text_tokens}")
+        logging.info(f"Prompt audio tokens: {prompt_audio_tokens}")
+
+        token_usage = {
+            'completion_text_tokens': completion_text_tokens,
+            'completion_audio_tokens': completion_audio_tokens,
+            'prompt_text_tokens': prompt_text_tokens,
+            'prompt_audio_tokens': prompt_audio_tokens
+        }
+
+        matches = re.findall(r"\d*\.?\d+", message)
+
+        if len(matches) > 0:
+            return {'start': float(matches[0])}, token_usage
+        else:
+            return None, token_usage
 
 def _audio_to_wav_bytes(audio: Dict[str, object]) -> bytes:
     buffer = io.BytesIO()
@@ -348,8 +356,11 @@ def evaluate_dataset(
     wandb_run,
     left_padding: float,
     resume_from_count: int = 0,
+    resume_from_dataset_index: int = -1,
     initial_metrics: Optional[Dict[str, float]] = None
 ) -> EvaluationResult:
+    logging.info(f"evaluate_dataset called with\nresume_from_count: {resume_from_count}\nresume_from_dataset_index: {resume_from_dataset_index}\ninitial_metrics: {initial_metrics}")
+
     dataset_name = infer_adapter_from_repository(repository)
     ds_adapter = create_dataset_adapter(
         dataset_name,
@@ -362,36 +373,59 @@ def evaluate_dataset(
     dataset = task.select_indices(dataset, ds_adapter, split)
     
     metrics = AverageMetrics()
-    # Restore metrics if we are resuming
+
     if resume_from_count > 0 and initial_metrics:
         logging.info(f"Restoring metrics state from {resume_from_count} previous examples...")
-        metrics.restore_from_averages(resume_from_count, initial_metrics)
 
-    processed = 0
+        avg_metrics: Dict[str, float] = {}
+
+        for k, v in initial_metrics.items():
+            if k.startswith("token_usage_sum/") or k.startswith("resume/"):
+                continue
+            
+            if k.startswith("_"):
+                continue
+
+            avg_metrics[k] = float(v)
+
+        metrics.restore_from_averages(resume_from_count, avg_metrics)
+
+    logging.info(f"Metrics initialized as: {metrics.to_dict()}")
+
     total_processed_history = resume_from_count
 
+    running_token_usage: Dict[str, int] = defaultdict(int)
+
+    if resume_from_count > 0 and initial_metrics:
+        for k, v in initial_metrics.items():
+            if not k.startswith("token_usage_sum/"):
+                continue
+
+            usage_key = k.split("/", 1)[1]
+            running_token_usage[usage_key] = int(v)
+    
+    logging.info(f"Token usage initialized as: {running_token_usage}")
+
     for i, example in enumerate(dataset):
-        # Skip examples that were already processed in the previous run
-        if i < resume_from_count:
-            continue
+        if resume_from_dataset_index >= 0: # resume_from_dataset_index isn't really where we should resume from but what was the last processsed dataset index
+            if i <= resume_from_dataset_index:
+                continue
 
         if task.skip_example(example, ds_adapter):
             continue
         
-        try:
-            prompt, audio, gt = _build_prompt(ds_adapter, task, example)
-        except ValueError:
-            continue
+        prompt, audio, gt = _build_prompt(ds_adapter, task, example)
 
         logging.info(f"Prompt: " + prompt)
         
         try:
-            raw_text = predictor.predict_timestamp(prompt, audio)
+            output = predictor.predict_timestamp(prompt, audio)
+            raw_text = output
+            token_usage = None
+            if isinstance(output, tuple) and len(output) == 2:
+                raw_text, token_usage = output
         except Exception as e:
             logging.error(f"Prediction failed permanently for example {i}: {e}")
-            # Depending on policy, we might want to break or continue. 
-            # Here we continue but treat as failure/fallback or just stop the run.
-            # To allow resume next time, crashing might be better if it's a system issue.
             raise e
 
         logging.info(
@@ -402,11 +436,7 @@ def evaluate_dataset(
             gt,
         )
         
-        # Determine format (dict or str)
-        # if isinstance(raw_text, dict):
         parsed = _parse_timestamp_json(raw_text)
-        # else:
-        #      parsed = _parse_timestamp(raw_text)
 
         if parsed is None:
             parsed = _fallback_timestamp(audio)
@@ -422,12 +452,30 @@ def evaluate_dataset(
         logging.info(f"Current metrics: ")
         logging.info(example_metrics)
         metrics.update_dict(example_metrics)
+
+        # Running sum of token usage across processed examples (if provided by the predictor).
+        if isinstance(token_usage, dict):
+            for k, v in token_usage.items():
+                if v is None:
+                    continue
+
+                running_token_usage[str(k)] += int(v)
+
+            logging.info("Running token usage sum: %s", dict(running_token_usage))
         
-        processed += 1
         total_processed_history += 1
 
         if wandb_run:
-            wandb_run.log(metrics.to_dict())
+            log_payload = metrics.to_dict()
+            log_payload.update({f"token_usage_sum/{k}": v for k, v in dict(running_token_usage).items()})
+            # Track resume state explicitly so resuming is robust even with skipped examples.
+            log_payload.update(
+                {
+                    "resume/processed_total": total_processed_history,
+                    "resume/last_dataset_index": i,
+                }
+            )
+            wandb_run.log(log_payload)
 
         if max_examples and total_processed_history >= max_examples:
             logging.info("Reached max examples limit.")
@@ -460,7 +508,7 @@ def parse_args() -> argparse.Namespace:
 
     parser.add_argument("--gemini-model", default="gemini-2.5-flash")
     parser.add_argument("--gemini-api-key", default=os.environ.get("GEMINI_API_KEY"))
-    parser.add_argument("--chatgpt-model", default="gpt-4o-mini")
+    parser.add_argument("--chatgpt-model", default="gpt-4o-mini-audio-preview-2024-12-17")
     parser.add_argument(
         "--chatgpt-api-key",
         default=os.environ.get("OPENAI_API_KEY") or os.environ.get("CHATGPT_API_KEY"),
@@ -488,7 +536,7 @@ def build_predictor(name: str, args: argparse.Namespace) -> TimestampPredictor:
     raise ValueError(f"Unsupported provider: {name}")
 
 
-def get_wandb_run_state(run_path: str) -> Tuple[int, Dict[str, float]]:
+def get_wandb_run_state(run_path: str) -> Tuple[int, int, Dict[str, float]]:
     """
     Connects to WandB API, fetches the run history, finds the last step,
     and returns the count (processed examples) and the metric dictionary.
@@ -513,12 +561,13 @@ def get_wandb_run_state(run_path: str) -> Tuple[int, Dict[str, float]]:
     # Filter out system metrics (starting with _)
     metrics = {k: v for k, v in last_row.items() if not k.startswith("_")}
     
-    # The script doesn't explicitly log a "step" counter variable other than relying on 
-    # wandb's internal step.
-    # However, since we log once per example, len(history) is the number of examples processed.
-    count = len(list(run.scan_history(keys=["token_abs_error_sum"])))
+    processed_total = metrics.get("resume/processed_total")
+    last_dataset_index = metrics.get("resume/last_dataset_index")
+
+    count = int(processed_total)
+    resume_dataset_index = int(last_dataset_index)
     
-    return count, metrics
+    return count, resume_dataset_index, metrics
 
 
 def main() -> None:
@@ -545,6 +594,7 @@ def main() -> None:
             
             run = None
             resume_count = 0
+            resume_dataset_index = -1
             initial_metrics = None
             
             # Setup Wandb
@@ -561,8 +611,9 @@ def main() -> None:
                     # 1. Fetch previous state via API
                     run_path = f"{args.wandb_entity}/{args.wandb_project}/{resume_id}"
                     try:
-                        resume_count, initial_metrics = get_wandb_run_state(run_path)
+                        resume_count, resume_dataset_index, initial_metrics = get_wandb_run_state(run_path)
                         logging.info(f"Recovered state: {resume_count} examples processed.")
+                        logging.info(f"Recovered state: last dataset index processed: {resume_dataset_index}")
                         logging.info(f"Recovered metrics: {initial_metrics}")
                         run_id = resume_id
                         resume_mode = "allow" # "must" or "allow"
@@ -599,6 +650,7 @@ def main() -> None:
                 wandb_run=run,
                 left_padding=args.left_padding,
                 resume_from_count=resume_count,
+                resume_from_dataset_index=resume_dataset_index,
                 initial_metrics=initial_metrics
             )
 
