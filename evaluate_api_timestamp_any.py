@@ -37,7 +37,7 @@ from dataset import create_adapter as create_dataset_adapter
 from dataset import infer_adapter_from_repository
 from tasks.timestamp_single_any import SingleTimestampAnyTask
 from utils.metrics import AverageMetrics
-from utils.utils import round_timestamp_python, ensure_audio_path
+from utils.utils import clamp, round_timestamp_python, ensure_audio_path
 
 
 class Timestamp(BaseModel):
@@ -268,7 +268,7 @@ class ChatGPTEvaluator:
         matches = re.findall(r"\d*\.?\d+", message)
 
         if len(matches) > 0:
-            return {'start': float(matches[0])}, token_usage
+            return {'start': float(matches[-1])}, token_usage
         else:
             return None, token_usage
 
@@ -446,6 +446,15 @@ def evaluate_dataset(
                 repository,
                 raw_text,
             )
+        
+        audio_duration = audio['array'].size / audio['sampling_rate']
+
+        logging.info(f"Audio Duration: {audio_duration}")
+
+        if parsed < 0 or parsed > audio_duration:
+            logging.info(f"Initial prediction {parsed} out of bounds, applying clamping")
+
+        parsed = clamp(parsed, 0, audio['array'].size / audio['sampling_rate'])
         
         logging.info(f"Parsed timestamp: " + str(parsed))
         example_metrics = _metrics_from_prediction(parsed, gt)
