@@ -27,3 +27,5 @@ audioset_train_strong.tsv
 ontology.json
 *.tar.gz
 dataset_scripts/beat_this/groove_midi/
+env
+*.pt
