@@ -292,6 +292,7 @@ class AllTimestampsTask(BaseTask):
         ds_adapter: BaseDatasetAdapter,
         model_adapter: BaseModelAdapter,
         eval_mode: bool,
+        include_counts = False # if we should return the number of events too if eval_mode is true
     ) -> Dict[str, Any]:
         ds_adapter = self._validate_adapter(ds_adapter)
 
@@ -334,6 +335,10 @@ class AllTimestampsTask(BaseTask):
 
 
         if eval_mode:
+            if include_counts:
+                inputs['num_events'] = torch.tensor([len(events)])
+                inputs['start_times'] = torch.tensor([[ds_adapter.get_target_seconds(ev, self.key) for ev in events]])
+
             return inputs
 
         input_ids = inputs["input_ids"]

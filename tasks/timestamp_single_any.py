@@ -191,6 +191,7 @@ class SingleTimestampAnyTask(BaseTask):
         model_adapter: BaseModelAdapter,
         eval_mode: bool,
         event: Optional[Dict[str, Any]] = None,
+        include_counts=False # if eval_mode is true but we still want the number of events (doesn't really apply in this case)
     ) -> Dict[str, Any]:
         audio_frames = ds_adapter.get_audio_frames(example)
         events = list(ds_adapter.get_events(example))
@@ -229,6 +230,9 @@ class SingleTimestampAnyTask(BaseTask):
         )
 
         if eval_mode:
+            if include_counts:
+                inputs['num_events'] = torch.tensor([1])
+                inputs['start_times'] = torch.tensor([[t_sec]])
             return inputs
 
         input_ids = inputs["input_ids"]
