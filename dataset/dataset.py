@@ -77,7 +77,50 @@ def collate_fn(batch: list) -> Dict[str, torch.Tensor]:
         elif key == 'audio_labels':
             collated[key] = torch.nn.utils.rnn.pad_sequence(
                 items, batch_first=True, padding_value=-100, padding_side='right')
+        elif key == 'start_times':
+            collated[key] = torch.nn.utils.rnn.pad_sequence(
+                items, batch_first=True, padding_value=-100, padding_side='right')
         else:
             collated[key] = torch.stack(items)
 
     return collated
+
+def get_benchmark_ds(
+    model_adapter: BaseModelAdapter,
+    repository: str,
+    split: str,
+    task: BaseTask,
+    take_first: Optional[int] = None,
+    left_padding: int = 0,
+) -> Dataset:
+    def transform_fn(batch: Dict[str, List[Any]]) -> Dict[str, List[Any]]:
+        processed_examples = []
+        batch_size = len(next(iter(batch.values())))
+
+        for i in range(batch_size):
+            example = {key: value[i] for key, value in batch.items()}
+            
+            processed_example = task.build_labels(
+                example=example,
+                ds_adapter=ds_adapter,
+                model_adapter=model_adapter,
+                eval_mode=True,
+                include_counts=True
+            )
+            processed_examples.append(processed_example)
+
+        processed_batch = {
+            key: [dic[key][0] for dic in processed_examples] # we have to unbatch it because we call with eval_mode=True
+            for key in processed_examples[0]
+        }
+
+        return processed_batch
+
+    ds_adapter = create_adapter(infer_adapter_from_repository(
+        repository), sampling_rate=model_adapter.sampling_rate, repository=repository, take_first=take_first, left_padding=left_padding, key=task.key)
+
+    base_ds = ds_adapter.load_split(split).filter(lambda x: not task.skip_example(x, ds_adapter))
+        
+    base_ds = base_ds.with_transform(transform_fn)
+        
+    return base_ds, ds_adapter
