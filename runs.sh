@@ -84,8 +84,8 @@ sbatch $EXCLUDE_NODES scripts/anvil/accelerate_4_gpu_bf16_run.sh configs/qwen3b/
 sbatch $EXCLUDE_NODES scripts/anvil/accelerate_4_gpu_bf16_run.sh configs/qwen3b/audioset_humans_resampled/timestamp_any/token+poisson[start][bias_-6][bf16][upscale_4][lr_1e-6][epoch_3][no_schedule][lambda=5e-2].yaml
 
 # ----------- MULTI TIMESTAMPS -----------
-sbatch $EXCLUDE_NODES scripts/anvil/ga_accelerate_4_gpu_bf16_run.sh configs/qwen3b/librispeech/timestamp_all/token[start][bf16][lr_1e-6][epoch_1][no_schedule].yaml
-sbatch $EXCLUDE_NODES scripts/anvil/ga_accelerate_4_gpu_bf16_run.sh configs/qwen3b/librispeech/timestamp_all/poisson[start][bias_-6][bf16][upscale_4][lr_1e-6][epoch_1][no_schedule].yaml
+sbatch $EXCLUDE_NODES scripts/anvil/ga_accelerate_4_gpu_bf16_run.sh configs/qwen3b/librispeech/timestamp_all/token[start][bf16][lr_1e-6][epoch_3][no_schedule].yaml
+sbatch $EXCLUDE_NODES scripts/anvil/ga_accelerate_4_gpu_bf16_run.sh configs/qwen3b/librispeech/timestamp_all/poisson[start][bias_-6][bf16][upscale_4][lr_1e-6][epoch_3][no_schedule].yaml
 
 # higher frame resolutions for poisson
 sbatch $EXCLUDE_NODES scripts/anvil/ga_accelerate_4_gpu_bf16_run.sh configs/qwen3b/librispeech/timestamp_all/poisson[start][bias_-6][bf16][upscale_10][lr_1e-6][epoch_3][no_schedule].yaml
