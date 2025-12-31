@@ -305,16 +305,10 @@ class AllTimestampsTask(BaseTask):
         # Training supervision JSON
         expected_json = None
         if not eval_mode:
-            target = [
-                {
-                    ds_adapter.EVENT_NAME: ds_adapter.event_name(ev),
-                    "start": ds_adapter.get_target_seconds(ev, self.key),
-                }
-                for ev in events
-            ]
-            expected_json = f"```json\n{json.dumps(target, indent=4)}\n```"
+            target = [ds_adapter.get_target_seconds(ev, self.key) for ev in events]
+            expected_json = f"```json\n{json.dumps(target)}\n```"
 
-            # logging.info(f"Expected JSON\n{expected_json}")
+            logging.info(f"Expected JSON\n{expected_json}")
 
         processor = model_adapter.processor
         prompt_text = self._build_conversation_text(
@@ -388,10 +382,7 @@ class AllTimestampsTask(BaseTask):
             parsed = json.loads(json_candidate)
             starts = []
             for item in parsed:
-                start_val = item.get("start")
-                if start_val is None:
-                    continue
-                starts.append(float(start_val))
+                starts.append(float(item))
             return starts if len(starts) > 0 else None
         except Exception:
             return None
