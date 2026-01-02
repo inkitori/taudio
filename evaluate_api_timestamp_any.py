@@ -236,8 +236,8 @@ class ChatGPTEvaluator:
                 ]
                 }
             ],
-            temperature=0,
-            max_tokens=512
+            temperature=0.00000000001,
+            max_tokens=64
         );
 
         header = _ansi("1;36", "[GPT] Message:")
@@ -517,7 +517,7 @@ def parse_args() -> argparse.Namespace:
 
     parser.add_argument("--gemini-model", default="gemini-2.5-flash")
     parser.add_argument("--gemini-api-key", default=os.environ.get("GEMINI_API_KEY"))
-    parser.add_argument("--chatgpt-model", default="gpt-4o-mini-audio-preview-2024-12-17")
+    parser.add_argument("--chatgpt-model", default="gpt-4o-audio-preview-2025-06-03")
     parser.add_argument(
         "--chatgpt-api-key",
         default=os.environ.get("OPENAI_API_KEY") or os.environ.get("CHATGPT_API_KEY"),
