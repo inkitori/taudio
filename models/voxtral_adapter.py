@@ -82,11 +82,26 @@ class VoxtralAdapter(BaseModelAdapter):
                 conversation,
                 # add_generation_prompt=True, add_generation_prompt not supported by voxtral
                 return_tensors="pt",)
+            
+            
         else:
             inputs = self.processor.apply_chat_template(
                 conversation,
                 continue_final_message=True,
                 return_tensors="pt",)
 
+            logging.info(f"[Voxtral] Original input_ids: {str(inputs['input_ids'])}")
+
+			# weird bug where the processor adds eos even if continue_final_message is true
+            if inputs['input_ids'][0, -1] == self.processor.tokenizer.eos_token_id:
+                inputs['input_ids'] = inputs['input_ids'][:, :-1]
+                inputs['attention_mask'] = inputs['attention_mask'][:, :-1]
+
+                logging.info(f"[Voxtral] Modified input_ids: {str(inputs['input_ids'])}")
+
+
+        for input_key in inputs.keys():
+            logging.info(f"{input_key} shape: {inputs[input_key].shape}")
+        
 
         return inputs
