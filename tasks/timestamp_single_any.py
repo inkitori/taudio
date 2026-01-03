@@ -531,7 +531,7 @@ class SingleTimestampAnyTask(BaseTask):
 
             # 1. Get dictionary of predictions from the new infer_timestamps
             # returns {"posterior_mode": [...], "smooth_20ms_boxcar": [...], etc}
-            preds_dict_np = {'fake_prediction': np.array([0])}
+            preds_dict_np = {'default': np.array([0])}
 
             if true_inference:
                 if use_poisson_loss:
