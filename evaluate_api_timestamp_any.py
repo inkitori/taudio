@@ -237,7 +237,7 @@ class ChatGPTEvaluator:
                 }
             ],
             temperature=0.00000000001,
-            max_tokens=64
+            max_tokens=128
         );
 
         header = _ansi("1;36", "[GPT] Message:")
