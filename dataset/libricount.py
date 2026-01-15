@@ -54,6 +54,9 @@ class LibriCountAdapter(BaseDatasetAdapter):
                 'start': component['first_word_start_sec'],
             })
         return events
+    
+    def get_events_sorted(self, example: Dict[str, Any]) -> Iterable[Dict[str, Any]]:
+        return sorted(self.get_events(example), key=lambda event: event['start'])
 
     def event_name(self, event: Dict[str, Any]) -> str:
         # There are <unk> tokens which the generic pipeline can filter if desired

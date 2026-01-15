@@ -10,7 +10,11 @@ import textwrap
 import re
 
 from dataset.base_dataset_adapter import BaseDatasetAdapter
+
 from dataset.librispeech import LibriSpeechAdapter
+from dataset.libricount import LibriCountAdapter
+from dataset.audioset import AudioSetAdapter
+
 from models.base_model_adapter import BaseModelAdapter
 from utils.utils import clamp, round_timestamp, round_timestamp_python
 from utils.poisson import poisson_loss, infer_timestamps, infer_count
@@ -219,9 +223,9 @@ class AllTimestampsTask(BaseTask):
         self.min_time = None
         self.max_time = None
 
-    def _validate_adapter(self, ds_adapter: BaseDatasetAdapter) -> LibriSpeechAdapter:
-        if not isinstance(ds_adapter, LibriSpeechAdapter):
-            raise ValueError("AllTimestampsTask only supports the LibriSpeechAdapter.")
+    def _validate_adapter(self, ds_adapter: BaseDatasetAdapter):
+        # if not isinstance(ds_adapter, LibriSpeechAdapter):
+            # raise ValueError("AllTimestampsTask only supports the LibriSpeechAdapter.")
         return ds_adapter
 
     def _extract_events_and_transcript(
@@ -247,11 +251,11 @@ class AllTimestampsTask(BaseTask):
         self,
         *,
         model_processor: Any,
-        transcript: str,
+        user_prompt: str,
         expected_json: Optional[str],
         eval_mode: bool,
     ) -> str:
-        user_prompt = f"Transcript:\n{transcript}\nBased on the transcript, output the timestamps for every word"
+        logging.info(f"Prompt:\n{user_prompt}")
         conversation = [
             {
                 "role": "system",
@@ -299,8 +303,6 @@ class AllTimestampsTask(BaseTask):
         audio_frames = ds_adapter.get_audio_frames(example)
         events = self._extract_events_and_transcript(example=example, ds_adapter=ds_adapter)
 
-        words = [ds_adapter.event_name(ev) for ev in events]
-        transcript = " ".join(words)
 
         # Training supervision JSON
         expected_json = None
@@ -311,9 +313,24 @@ class AllTimestampsTask(BaseTask):
             logging.info(f"Expected JSON\n{expected_json}")
 
         processor = model_adapter.processor
+        
+        if isinstance(ds_adapter, LibriSpeechAdapter):
+            words = [ds_adapter.event_name(ev) for ev in events]
+            transcript = " ".join(words)
+            user_prompt = f"Transcript:\n{transcript}\nBased on the transcript, output the timestamps for every word"
+        elif isinstance(ds_adapter, LibriCountAdapter):
+            speaker_names = [ds_adapter.event_name(ev) for ev in events]
+            user_prompt = f"There are {len(speaker_names)} speakers\nBased on the number of speakers, output the timestamps for when each speaker starts speaking"
+        elif isinstance(ds_adapter, AudioSetAdapter):
+            event_names = [ds_adapter.event_name(ev) for ev in events]
+            transcript = "\n".join(event_names)
+            user_prompt = f"Transcript:\n{transcript}\nBased on the transcript, output the timestamps for every event"
+        else:
+            raise ValueError("Unknown ds_adapter")
+
         prompt_text = self._build_conversation_text(
             model_processor=processor,
-            transcript=transcript,
+            user_prompt=user_prompt,
             expected_json=expected_json,
             eval_mode=eval_mode,
         )
