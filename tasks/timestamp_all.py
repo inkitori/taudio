@@ -324,7 +324,7 @@ class AllTimestampsTask(BaseTask):
         elif isinstance(ds_adapter, AudioSetAdapter):
             event_names = [ds_adapter.event_name(ev) for ev in events]
             transcript = "\n".join(event_names)
-            user_prompt = f"Transcript:\n{transcript}\nBased on the transcript, output the timestamps for every event"
+            user_prompt = f"The following sequence of events occurred in the audio:\n{transcript}\nBased on this sequence, output the timestamp for each event."
         else:
             raise ValueError("Unknown ds_adapter")
 
