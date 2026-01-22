@@ -109,8 +109,8 @@ sbatch $EXCLUDE_NODES scripts/anvil/ga_accelerate_4_gpu_bf16_run.sh configs/qwen
 sbatch $EXCLUDE_NODES scripts/anvil/ga_accelerate_4_gpu_bf16_run.sh configs/qwen3b/audioset_humans_resampled/timestamp_all/poisson[start][bias_-6][bf16][upscale_4][lr_1e-6][epoch_3][no_schedule].yaml
 
 # 7B
-sbatch $EXCLUDE_NODES scripts/anvil/ga_accelerate_4_gpu_bf16_run.sh configs/qwen7b/librispeech/timestamp_all/token[start][bf16][lr_1e-6][epoch_3][no_schedule].yaml
-sbatch $EXCLUDE_NODES scripts/anvil/ga_accelerate_4_gpu_bf16_run.sh configs/qwen7b/librispeech/timestamp_all/poisson[start][bias_-6][bf16][upscale_4][lr_1e-6][epoch_3][no_schedule].yaml
+sbatch $EXCLUDE_NODES scripts/anvil/ga_accelerate_4_gpu_bf16_run.sh configs/qwen7b/librispeech/timestamp_all/token[start][bf16][lr_1e-6][epoch_6][no_schedule].yaml
+sbatch $EXCLUDE_NODES scripts/anvil/ga_accelerate_4_gpu_bf16_run.sh configs/qwen7b/librispeech/timestamp_all/poisson[start][bias_-6][bf16][upscale_4][lr_1e-6][epoch_6][no_schedule].yaml
 
 # ----------- BERNOULLI DEV SWEEP -----------
 
