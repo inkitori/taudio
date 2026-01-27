@@ -1,375 +1,348 @@
+"""
+Measures average inference time per batch for TAudio models.
+Supports both token loss (text generation) and poisson/surrogate loss (auxiliary outputs).
+Works with timestamp_single_any and timestamp_all tasks.
+"""
+
 import argparse
 import logging
 import time
-from typing import Dict, List, Tuple
+from typing import List
 
 import torch
+from torch.utils.data import DataLoader
+from tqdm import tqdm
 
+from dataset.dataset import collate_fn, get_benchmark_ds
 from tasks import create_task
-from utils.config_utils import ConfigManager
-from models import create_adapter
-from dataset import create_adapter as create_ds_adapter, infer_adapter_from_repository
 from taudio import TAudio
-from pathlib import Path
+from utils.config_utils import ConfigManager
+from utils.poisson import infer_timestamps_benchmark
 
 
-def _cuda_sync():
-    if torch.cuda.is_available():
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
+
+
+def measure_token_inference_time(
+    model: TAudio,
+    dataloader: DataLoader,
+    num_batches: int,
+    task_type: str,
+) -> List[float]:
+    times = []
+    
+    for batch_idx, batch in enumerate(tqdm(dataloader, total=num_batches, desc="Token Inference")):
+        if num_batches is not None and batch_idx >= num_batches:
+            break
+        
+        # Move batch to device
+        batch = {k: v.to(next(model.parameters()).device) for k, v in batch.items()}
+
+        # logging.info(batch)
+        
+        # Prepare inputs for generation (exclude labels and audio_labels)
+        gen_inputs = {
+            "input_ids": batch["input_ids"],
+            "attention_mask": batch["attention_mask"],
+            "input_features": batch["input_features"],
+            "feature_attention_mask": batch["feature_attention_mask"],
+        }
+        
+        # Synchronize before timing
         torch.cuda.synchronize()
+        start_time = time.perf_counter()
+        
+        with torch.no_grad():
+            # logging.info("DECODED OUTPUT")
+            output = model.model_adapter.generate_batch(**gen_inputs, max_new_tokens=4096, decode_tokens=True)
+        
+        torch.cuda.synchronize()
+        end_time = time.perf_counter()
+
+        logging.info(output)
+        
+        times.append(end_time - start_time)
+    
+    return times
 
 
-@torch.inference_mode()
-def prefill_with_kv(adapter, inputs: Dict[str, torch.Tensor]):
+def measure_poisson_inference_time(
+    model: TAudio,
+    dataloader: DataLoader,
+    num_batches: int,
+) -> List[float]:
     """
-    Runs a prefill forward pass to build KV cache for the full prompt (text + audio),
-    returning the model outputs (including past_key_values) and the input length.
+    Measure inference time for poisson/surrogate loss models.
+    Inference involves a forward pass with inference=True to get auxiliary predictions.
     """
-    device = next(adapter.parameters()).device
-    # Ensure tensors are on the correct device
-    model_inputs = {
-        "input_ids": inputs["input_ids"].to(device),
-        "attention_mask": inputs["attention_mask"].to(device),
-        "input_features": inputs["input_features"].to(device),
-        "feature_attention_mask": inputs["feature_attention_mask"].to(device),
-        "use_cache": True,
-    }
+    times = []
+    
+    for batch_idx, batch in enumerate(tqdm(dataloader, total=num_batches, desc="Poisson Inference")):
+        if num_batches is not None and batch_idx >= num_batches:
+            break
+        
+        # Move batch to device
+        batch = {k: v.to(next(model.parameters()).device) for k, v in batch.items()}
+        
+        # Synchronize before timing
+        torch.cuda.synchronize()
+        start_time = time.perf_counter()
+        
+        batch_size = batch['input_ids'].size(0)
 
-    # Maintain bidirectional audio mask if enabled for the adapter
-    with adapter.bidirectional_audio_context(model_inputs["input_ids"]):
-        outputs = adapter(**model_inputs)
-    return outputs, model_inputs["input_ids"].shape[1], model_inputs
+        with torch.no_grad():
+            outputs = model.model_adapter(
+                input_ids=batch["input_ids"],
+                attention_mask=batch["attention_mask"],
+                input_features=batch["input_features"],
+                feature_attention_mask=batch["feature_attention_mask"],
+                output_hidden_states=True
+            )
 
+            hidden_states = outputs.hidden_states[model.audio_layer]
 
-@torch.inference_mode()
-def measure_generation_time_kv(
-    adapter,
-    processor,
-    inputs: Dict[str, torch.Tensor],
-    max_new_tokens: int = 32,
-) -> Tuple[float, int, str]:
-    """
-    Measures only the wall-clock time of generating new tokens using an explicit KV-cache loop.
-    Excludes the prefill time.
-    Returns (elapsed_seconds, num_generated_tokens, decoded_text).
-    """
-    device = next(adapter.parameters()).device
+            for example in range(batch_size):
+                audio_hidden_states = hidden_states[example][batch['input_ids'][example] == model.model_adapter.audio_id] # (num_audio_tokens, hidden_dim)
+                example_audio_logits = model.linear(audio_hidden_states).flatten() # (num_audio_tokens * scaling_factor,)
+                
+                example_audio_labels = batch['audio_labels'][example]
 
-    # 1) Prefill (NOT TIMED)
-    prefill_outputs, input_len, prefill_inputs = prefill_with_kv(adapter, inputs)
-    past_key_values = prefill_outputs.past_key_values
+                if (example_audio_labels == -100).any():
+                    neg_100_idx = (example_audio_labels == -100).nonzero(as_tuple=True)[0][0].item()
+                    example_audio_logits = example_audio_logits[:neg_100_idx]
+                    example_audio_labels = example_audio_labels[:neg_100_idx]
 
-    # The first step uses the last prompt token
-    next_token = prefill_inputs["input_ids"][:, -1:]
-    eos_token_id = processor.tokenizer.eos_token_id
+                num_pred = (batch['audio_labels'][example] == 1).sum().item()
 
-    generated = []
-    elapsed = 0.0
+                predictions = infer_timestamps_benchmark(num_pred, example_audio_logits.cpu().float().detach().numpy(), model.model_adapter.embedding_to_frame_adjusted_milliseconds, 20)
+            
+                # logging.info("GROUND TRUTH")
+                # logging.info(torch.where(batch['audio_labels'][example] == 1)[0] / (model.model_adapter.seconds_to_embedding * model.model_adapter.scaling_factor))
+                # logging.info("PREDICTED")
+                # logging.info(predictions / (model.model_adapter.seconds_to_embedding * model.model_adapter.scaling_factor))
 
-    # 2) Decode loop (TIMED)
-    _cuda_sync()
-    t0 = time.perf_counter()
-    with adapter.bidirectional_audio_context(prefill_inputs["input_ids"]):
-        for _ in range(max_new_tokens):
-            step_inputs = {
-                "input_ids": next_token,  # (1, 1)
-                "past_key_values": past_key_values,
-            }
-            # For decoding steps, we do not resend audio features; KV holds the context.
-            outputs = adapter.base_model(**step_inputs)
-            logits = outputs.logits[:, -1, :]  # (1, vocab)
-            next_token = torch.argmax(logits, dim=-1, keepdim=True)  # (1, 1)
-            generated.append(next_token.item())
-            past_key_values = outputs.past_key_values
-
-            if eos_token_id is not None and next_token.item() == eos_token_id:
-                break
-    _cuda_sync()
-    elapsed = time.perf_counter() - t0
-
-    decoded_text = processor.tokenizer.decode(generated, skip_special_tokens=True)
-    return elapsed, len(generated), decoded_text
-
-
-@torch.inference_mode()
-def measure_generation_time_no_kv(
-    adapter,
-    processor,
-    inputs: Dict[str, torch.Tensor],
-    max_new_tokens: int = 32,
-) -> Tuple[float, int, str]:
-    """
-    Measures wall-clock time of generation using the model's built-in generate (includes context/prefill).
-    Returns (elapsed_seconds, num_generated_tokens, decoded_text).
-    """
-    device = next(adapter.parameters()).device
-    gen_kwargs = {
-        "input_ids": inputs["input_ids"].to(device),
-        "attention_mask": inputs["attention_mask"].to(device),
-        "input_features": inputs["input_features"].to(device),
-        "feature_attention_mask": inputs["feature_attention_mask"].to(device),
-        "max_new_tokens": max_new_tokens,
-        "eos_token_id": processor.tokenizer.eos_token_id,
-        "do_sample": False,
-        "use_cache": False,
-    }
-    prompt_len = inputs["input_ids"].shape[1]
-
-    _cuda_sync()
-    t0 = time.perf_counter()
-    with adapter.bidirectional_audio_context(gen_kwargs["input_ids"]):
-        tokens = adapter.base_model.generate(**gen_kwargs)
-    _cuda_sync()
-    elapsed = time.perf_counter() - t0
-
-    out_ids = tokens[0]
-    # drop EOS if present at end
-    gen_ids = out_ids[prompt_len:-1] if out_ids.shape[0] > prompt_len else out_ids[prompt_len:]
-    decoded_text = processor.tokenizer.decode(gen_ids, skip_special_tokens=True)
-    return elapsed, int(gen_ids.shape[0]), decoded_text
-
-
-@torch.inference_mode()
-def measure_surrogate_time(
-    taudio_model,
-    task,
-    adapter,
-    inputs: Dict[str, torch.Tensor],
-    poisson_loss: bool,
-    class_weighting: bool,
-) -> float:
-    """
-    Measures only:
-      - passing last-layer audio embeddings through the linear layer
-      - then running Poisson or Bernoulli timestamp inference via task.calculate_loss
-    Excludes the forward pass to compute hidden states.
-    """
-    device = next(adapter.parameters()).device
-    # 1) Run a forward to obtain hidden states (NOT TIMED)
-    with adapter.bidirectional_audio_context(inputs["input_ids"]):
-        outputs = adapter(
-            input_ids=inputs["input_ids"].to(device),
-            attention_mask=inputs["attention_mask"].to(device),
-            input_features=inputs["input_features"].to(device),
-            feature_attention_mask=inputs["feature_attention_mask"].to(device),
-            output_hidden_states=True,
-        )
-
-    # 2) Slice out audio token hidden states and compute logits with linear (TIMED)
-    hidden_states = outputs.hidden_states[taudio_model.audio_layer]  # (1, seq_len, hidden_dim)
-    input_ids_b = inputs["input_ids"].to(device)
-    audio_token_mask = (input_ids_b == adapter.audio_id)[0]  # (seq_len,)
-    audio_hidden_states = hidden_states[0][audio_token_mask]  # (num_audio_tokens, hidden_dim)
-
-    _cuda_sync()
-    t0 = time.perf_counter()
-    audio_logits = taudio_model.linear(audio_hidden_states).flatten().unsqueeze(0)  # (1, num_audio_tokens*scaling)
-
-    # Build minimal inference labels/mask for calculate_loss
-    audio_labels = torch.zeros_like(audio_logits)
-    audio_labels_frame_mask = torch.where(audio_labels == -100, 0, 1)
-
-    # Run the task's inference (Poisson/Bernoulli) on logits
-    task.calculate_loss(
-        audio_logits=audio_logits,
-        audio_labels=audio_labels,
-        audio_labels_frame_mask=audio_labels_frame_mask,
-        model_adapter=adapter,
-        use_poisson_loss=poisson_loss,
-        class_weighting=class_weighting,
-    )
-    _cuda_sync()
-    elapsed = time.perf_counter() - t0
-    return elapsed
+        
+        torch.cuda.synchronize()
+        end_time = time.perf_counter()
+        
+        times.append(end_time - start_time)
+    
+    return times
 
 
 def main():
-    logging.getLogger().setLevel(logging.INFO)
-    parser = argparse.ArgumentParser(description="Measure inference timing for token and surrogate paths.")
-    parser.add_argument("--config", type=str, required=False, help="Path to config YAML.")
-    parser.add_argument("--experiment", type=str, required=False, help="Path to experiment directory (loads config.yaml and latest or specified checkpoint).")
-    parser.add_argument("--epoch", type=int, default=None, help="Specific epoch checkpoint to load (defaults to latest).")
-    parser.add_argument("--split", type=str, default="test_clean", help="Dataset split to evaluate on.")
-    parser.add_argument("--num-samples", type=int, default=8, help="Number of samples to time.")
-    parser.add_argument("--max-new-tokens", type=int, default=32, help="Max new tokens for generation timing.")
-    parser.add_argument("--no-kv-cache", action="store_true", help="Disable KV-cache timing and use full generate timing instead.")
-    args = parser.parse_args()
-
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-
-    # Resolve configuration and model initialization
-    if args.experiment:
-        exp_dir = Path(args.experiment)
-        config_path = exp_dir / "config.yaml"
-        if not config_path.exists():
-            raise ValueError(f"Config file not found in experiment: {config_path}")
-        cfg = ConfigManager().load_config(str(config_path))
-        model_cfg = cfg["model"]
-        dataset_cfg = cfg["dataset"]
-        loss_cfg = cfg["loss"]
-        task_cfg = cfg["task"]
-
-        # Build task (same type/kwargs as training)
-        task = create_task(task_type=task_cfg["type"], **task_cfg.get("kwargs", {}))
-
-        # Build full model and load checkpoint
-        taudio_config = {**model_cfg, **loss_cfg, "task": task}
-        model = TAudio(**taudio_config).to(device)
-
-        # Find checkpoint in experiment directory
-        checkpoint_path = ConfigManager().get_model_checkpoint(exp_dir, args.epoch)
-        if checkpoint_path is None:
-            raise ValueError(f"No checkpoint found in {exp_dir}")
-        state = torch.load(checkpoint_path, map_location=device)
-        model.load_state_dict(state)
-        model.eval()
-
-        adapter = model.model_adapter
-        audio_layer = model.audio_layer
-        scaling_factor = model_cfg.get("scaling_factor", 1)
-    else:
-        # Backward compatibility: --config path without checkpoint
-        if not args.config:
-            raise ValueError("Either --experiment or --config must be provided.")
-        cfg = ConfigManager().load_config(args.config)
-        model_cfg = cfg["model"]
-        dataset_cfg = cfg["dataset"]
-        loss_cfg = cfg["loss"]
-        task_cfg = cfg["task"]
-
-        # Create adapter/model components (no checkpoint)
-        dtype_cfg = model_cfg.get("dtype", "auto")
-        if isinstance(dtype_cfg, str) and dtype_cfg.lower() == "bf16":
-            torch_dtype = torch.bfloat16
-        else:
-            torch_dtype = "auto"
-
-        adapter = create_adapter(
-            model_id=model_cfg["model_id"],
-            bidirectional_audio=model_cfg.get("bidirectional_audio", False),
-            dtype=torch_dtype,
-            scaling_factor=model_cfg.get("scaling_factor", 1),
-        )
-        adapter = adapter.to(device)
-        adapter.eval()
-
-        # Create a minimal linear holder to mirror trained head shape
-        class _TAudioLite(torch.nn.Module):
-            def __init__(self, audio_layer: int, scaling_factor: int):
-                super().__init__()
-                self.model_adapter = adapter
-                self.audio_layer = audio_layer
-                self.linear = torch.nn.Linear(adapter.hidden_dim, scaling_factor, dtype=adapter.dtype).to(next(adapter.parameters()).device)
-
-        model = _TAudioLite(audio_layer=model_cfg["audio_layer"], scaling_factor=model_cfg.get("scaling_factor", 1))
-        model.eval()
-        audio_layer = model.audio_layer
-        scaling_factor = model_cfg.get("scaling_factor", 1)
-
-    # Build dataset adapter directly (no transforms), to use task.build_labels(eval_mode=True)
-    repo = dataset_cfg["repository"]
-    ds_adapter = create_ds_adapter(
-        infer_adapter_from_repository(repo),
-        sampling_rate=adapter.sampling_rate,
-        repository=repo,
-        take_first=None,
-        left_padding=0,
-        key=task_cfg["kwargs"].get("key", "start"),
+    parser = argparse.ArgumentParser(
+        description="Measure TAudio inference time per batch"
     )
-    base_ds = ds_adapter.load_split(args.split)
-
-    # Prepare tasks
-    task_single = create_task("SINGLE_WORD_TIMESTAMP", **task_cfg.get("kwargs", {}))
-    task_single_any = create_task("SINGLE_WORD_TIMESTAMP_ANY", **task_cfg.get("kwargs", {}))
-
-    # Accumulators
-    token_times_single: List[float] = []
-    token_times_any: List[float] = []
-    surrogate_times_single: List[float] = []
-    surrogate_times_any: List[float] = []
-
-    # Iterate examples
-    num = min(args.num_samples, len(base_ds))
-    for i in range(num):
-        example = base_ds[i]
-        # Build eval-mode inputs for each task (these include the audio + prompt)
-        inputs_single = task_single.build_labels(
-            example=example,
-            ds_adapter=ds_adapter,
-            model_adapter=adapter,
-            eval_mode=True,
-        )
-        inputs_any = task_single_any.build_labels(
-            example=example,
-            ds_adapter=ds_adapter,
-            model_adapter=adapter,
-            eval_mode=True,
-        )
-
-        # Token-loss generation timing
-        if args.no_kv_cache:
-            t_single, _, txt_single = measure_generation_time_no_kv(
-                adapter=adapter,
-                processor=adapter.processor,
-                inputs=inputs_single,
-                max_new_tokens=args.max_new_tokens,
-            )
-            t_any, _, txt_any = measure_generation_time_no_kv(
-                adapter=adapter,
-                processor=adapter.processor,
-                inputs=inputs_any,
-                max_new_tokens=args.max_new_tokens,
-            )
-        else:
-            t_single, _, txt_single = measure_generation_time_kv(
-                adapter=adapter,
-                processor=adapter.processor,
-                inputs=inputs_single,
-                max_new_tokens=args.max_new_tokens,
-            )
-            t_any, _, txt_any = measure_generation_time_kv(
-                adapter=adapter,
-                processor=adapter.processor,
-                inputs=inputs_any,
-                max_new_tokens=args.max_new_tokens,
-            )
-        token_times_single.append(t_single)
-        token_times_any.append(t_any)
-        print(f"[decoded][timestamp_single]: {txt_single}")
-        print(f"[decoded][timestamp_single_any]: {txt_any}")
-
-        # Surrogate timing (linear + poisson/bernoulli inference only)
-        s_single = measure_surrogate_time(
-            taudio_model=model,
-            task=task_single,
-            adapter=adapter,
-            inputs=inputs_single,
-            poisson_loss=loss_cfg.get("poisson_loss", False),
-            class_weighting=loss_cfg.get("class_weighting", False),
-        )
-        s_any = measure_surrogate_time(
-            taudio_model=model,
-            task=task_single_any,
-            adapter=adapter,
-            inputs=inputs_any,
-            poisson_loss=loss_cfg.get("poisson_loss", False),
-            class_weighting=loss_cfg.get("class_weighting", False),
-        )
-        surrogate_times_single.append(s_single)
-        surrogate_times_any.append(s_any)
-
-    def _avg(xs: List[float]) -> float:
-        return float(sum(xs) / max(1, len(xs)))
-
-    print("Token generation (KV-cache decode only):")
-    print(f"  timestamp_single:      avg={_avg(token_times_single):.6f}s  samples={len(token_times_single)}")
-    print(f"  timestamp_single_any:  avg={_avg(token_times_any):.6f}s  samples={len(token_times_any)}")
-
-    print("Surrogate path (linear + inference only):")
-    print(f"  timestamp_single:      avg={_avg(surrogate_times_single):.6f}s  samples={len(surrogate_times_single)}")
-    print(f"  timestamp_single_any:  avg={_avg(surrogate_times_any):.6f}s  samples={len(surrogate_times_any)}")
+    parser.add_argument(
+        "--checkpoint",
+        type=str,
+        required=True,
+        help="Path to the .pt checkpoint file"
+    )
+    parser.add_argument(
+        "--config",
+        type=str,
+        required=True,
+        help="Path to the config YAML file"
+    )
+    parser.add_argument(
+        "--batch-size",
+        type=int,
+        required=True,
+        help="Batch size for inference"
+    )
+    parser.add_argument(
+        "--num-batches",
+        type=int,
+        default=None,
+        help="Number of batches to measure (default: 50)"
+    )
+    parser.add_argument(
+        "--warmup-batches",
+        type=int,
+        default=5,
+        help="Number of warmup batches before timing (default: 5)"
+    )
+    parser.add_argument(
+        "--split",
+        type=str,
+        default="test",
+        help="Dataset split to use (default: test)"
+    )
+    
+    args = parser.parse_args()
+    
+    # Load configuration
+    config_manager = ConfigManager()
+    config = config_manager.load_config(args.config)
+    
+    model_config = config['model']
+    loss_config = config['loss']
+    dataset_config = config['dataset']
+    task_config = config['task']
+    system_config = config.get('system', {})
+    
+    # Determine loss type
+    token_loss = loss_config.get('token_loss', False)
+    poisson_loss = loss_config.get('poisson_loss', False)
+    surrogate_loss = loss_config.get('surrogate_loss', False)
+    
+    logging.info(f"Loss configuration: token_loss={token_loss}, poisson_loss={poisson_loss}, surrogate_loss={surrogate_loss}")
+    
+    if not token_loss and not (poisson_loss or surrogate_loss):
+        raise ValueError("Config must have either token_loss or poisson_loss/surrogate_loss enabled")
+    
+    # Create task
+    task = create_task(task_type=task_config['type'], **task_config.get('kwargs', {}))
+    task_type = task_config['type']
+    
+    logging.info(f"Task type: {task_type}")
+    
+    # Build model configuration
+    taudio_config = {
+        **model_config,
+        **loss_config,
+        "task": task
+    }
+    
+    # Create model
+    logging.info("Creating TAudio model...")
+    model = TAudio(**taudio_config)
+    
+    # Load checkpoint
+    logging.info(f"Loading checkpoint from {args.checkpoint}...")
+    state_dict = torch.load(args.checkpoint, map_location='cpu')
+    model.load_state_dict(state_dict, strict=True)
+    logging.info("Checkpoint loaded successfully")
+    
+    # Move model to GPU and set to eval mode
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    model.to(device)
+    model.eval()
+    
+    logging.info(f"Model moved to {device}")
+    
+    # Create dataset and dataloader
+    logging.info("Loading dataset...")
+    ds, ds_adapter = get_benchmark_ds(
+        model_adapter=model.model_adapter,
+        repository=dataset_config['repository'],
+        split=args.split,
+        task=task,
+        eval_mode=token_loss
+    )
+    
+    # Pre-select indices for timestamp_single_any task if needed
+    if hasattr(task, 'select_indices'):
+        ds = task.select_indices(ds, ds_adapter, args.split)
+    
+    dataloader = DataLoader(
+        ds,
+        batch_size=args.batch_size,
+        shuffle=False,
+        collate_fn=collate_fn,
+        num_workers=system_config.get('dataloader_num_workers', 1),
+    )
+    
+    logging.info(f"Dataset loaded with {len(ds)} examples")
+    logging.info(f"Batch size: {args.batch_size}")
+    logging.info(f"Number of batches to measure: {args.num_batches}")
+    logging.info(f"Warmup batches: {args.warmup_batches}")
+    
+    # Warmup runs
+    # logging.info("Running warmup batches...")
+    # warmup_iter = iter(dataloader)
+    # for _ in range(args.warmup_batches):
+    #     try:
+    #         batch = next(warmup_iter)
+    #         batch = {k: v.to(device) for k, v in batch.items()}
+            
+    #         with torch.no_grad():
+    #             if token_loss:
+    #                 gen_inputs = {
+    #                     "input_ids": batch["input_ids"],
+    #                     "attention_mask": batch["attention_mask"],
+    #                     "input_features": batch["input_features"],
+    #                     "feature_attention_mask": batch["feature_attention_mask"],
+    #                 }
+    #                 if task_type == "ALL_TIMESTAMPS":
+    #                     logging.info(model.model_adapter.generate_batch(**gen_inputs, max_new_tokens=4096))
+    #                 else:
+    #                     logging.info(model.generate(**{k: v[0:1] for k, v in gen_inputs.items()}))
+    #             else:
+    #                 _ = model(
+    #                     input_ids=batch["input_ids"],
+    #                     attention_mask=batch["attention_mask"],
+    #                     input_features=batch["input_features"],
+    #                     feature_attention_mask=batch["feature_attention_mask"],
+    #                     inference=True,
+    #                     true_inference=True,
+    #                 )
+    #     except StopIteration:
+    #         logging.warning("Not enough data for warmup, resetting iterator")
+    #         warmup_iter = iter(dataloader)
+    
+    torch.cuda.synchronize()
+    logging.info("Warmup complete")
+    
+    # Measure inference time
+    logging.info("Starting inference timing measurements...")
+    
+    # Reset dataloader for actual measurements
+    dataloader = DataLoader(
+        ds,
+        batch_size=args.batch_size,
+        shuffle=False,
+        collate_fn=collate_fn,
+        num_workers=system_config.get('dataloader_num_workers', 1),
+    )
+    
+    if token_loss:
+        times = measure_token_inference_time(model, dataloader, args.num_batches, task_type)
+        inference_type = "Token Generation"
+    else:
+        times = measure_poisson_inference_time(model, dataloader, args.num_batches)
+        inference_type = "Poisson/Surrogate"
+    
+    # Calculate statistics
+    if len(times) > 0:
+        avg_time = sum(times) / len(times)
+        min_time = min(times)
+        max_time = max(times)
+        
+        # Calculate std dev
+        variance = sum((t - avg_time) ** 2 for t in times) / len(times)
+        std_time = variance ** 0.5
+        
+        # Calculate throughput
+        avg_throughput = args.batch_size / avg_time  # samples per second
+        
+        print("\n" + "=" * 60)
+        print(f"INFERENCE TIMING RESULTS")
+        print("=" * 60)
+        print(f"Config: {args.config}")
+        print(f"Checkpoint: {args.checkpoint}")
+        print(f"Task Type: {task_type}")
+        print(f"Inference Type: {inference_type}")
+        print(f"Batch Size: {args.batch_size}")
+        print(f"Number of Batches Measured: {len(times)}")
+        print("-" * 60)
+        print(f"Average Time per Batch: {avg_time * 1000:.2f} ms")
+        print(f"Std Dev: {std_time * 1000:.2f} ms")
+        print(f"Min Time: {min_time * 1000:.2f} ms")
+        print(f"Max Time: {max_time * 1000:.2f} ms")
+        print("-" * 60)
+        print(f"Average Throughput: {avg_throughput:.2f} samples/second")
+        print(f"Average Time per Sample: {(avg_time / args.batch_size) * 1000:.2f} ms")
+        print("=" * 60)
+    else:
+        logging.error("No timing measurements collected!")
 
 
 if __name__ == "__main__":
     main()
-
 

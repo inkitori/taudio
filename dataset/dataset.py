@@ -64,7 +64,7 @@ def collate_fn(batch: list) -> Dict[str, torch.Tensor]:
     batch_keys = batch[0].keys()
     collated = {}
 
-	# NOTE: by v4.52.4 of transformers, qwen 2.5 omni automatically constructs the correct position_ids based on attention_mask
+    # NOTE: by v4.52.4 of transformers, qwen 2.5 omni automatically constructs the correct position_ids based on attention_mask
     # in the forward pass so theoretically the padding side should have no effect on outputs (potentially up to some nondeterminism in ops)
     for key in batch_keys:
         items = [item[key] for item in batch]
@@ -92,6 +92,7 @@ def get_benchmark_ds(
     task: BaseTask,
     take_first: Optional[int] = None,
     left_padding: int = 0,
+    eval_mode: bool = False
 ) -> Dataset:
     def transform_fn(batch: Dict[str, List[Any]]) -> Dict[str, List[Any]]:
         processed_examples = []
@@ -104,15 +105,21 @@ def get_benchmark_ds(
                 example=example,
                 ds_adapter=ds_adapter,
                 model_adapter=model_adapter,
-                eval_mode=True,
+                eval_mode=eval_mode,
                 include_counts=True
             )
             processed_examples.append(processed_example)
 
-        processed_batch = {
-            key: [dic[key][0] for dic in processed_examples] # we have to unbatch it because we call with eval_mode=True
-            for key in processed_examples[0]
-        }
+        if eval_mode:
+            processed_batch = {
+                key: [dic[key][0] for dic in processed_examples] 
+                for key in processed_examples[0]
+            }
+        else:
+            processed_batch = {
+                key: [dic[key] for dic in processed_examples] 
+                for key in processed_examples[0]
+            }
 
         return processed_batch
 

@@ -462,6 +462,21 @@ def run_iterative_bayesian_greedy(n_pred, log_hazards, tolerance_ms, frame_ms, k
 
     return np.sort(np.array(outputs))
 
+def infer_timestamps_benchmark(n_pred, log_hazards, frame_ms, tolerance_ms):
+    M = int((tolerance_ms * 2) / frame_ms)
+    if M % 2 == 0: M += 1
+
+    hazards = np.exp(log_hazards)
+        
+    kernel = np.ones(M)
+
+    return run_iterative_posterior_mode(
+        n_pred=n_pred,
+        hazards=hazards,
+        kernel=kernel,
+        window_width=M,
+    )
+
 def infer_timestamps(n_pred, log_hazards, frame_ms):
     outputs = {}
 
