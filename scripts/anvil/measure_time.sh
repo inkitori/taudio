@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --partition=ai
 #SBATCH --account=nairr250124-ai
-#SBATCH --mem-per-gpu=96G
+#SBATCH --mem-per-gpu=120G
 #SBATCH --cpus-per-gpu=4
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:1
