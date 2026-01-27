@@ -248,3 +248,13 @@ sbatch $EXCLUDE_NODES scripts/anvil/accelerate_1_gpu_bf16_eval.sh configs/qwen3b
 
 # < 20
 sbatch $EXCLUDE_NODES scripts/anvil/accelerate_1_gpu_bf16_eval.sh configs/qwen3b/librispeech/timestamp_any/ablation/bernoulli+bidirectional_audio+class_weighting[start][bf16][max_20].yaml outputs/qwen3b/librispeech/timestamp_any/ablation/bernoulli+bidirectional_audio+class_weighting[start][bf16][max_20]/20251223_084347/checkpoint_epoch3 test 20
+
+
+# ----------- MEASURE TIME -----------
+# 3B
+sbatch $EXCLUDE_NODES scripts/anvil/measure_time.sh pt_checkpoints/3b_token_epoch3.pt configs/qwen3b/librispeech/timestamp_all/token[start][bf16][lr_1e-6][epoch_3][no_schedule].yaml 1
+sbatch $EXCLUDE_NODES scripts/anvil/measure_time.sh pt_checkpoints/3b_poisson_epoch3.pt configs/qwen3b/librispeech/timestamp_all/poisson[start][bias_-6][bf16][upscale_4][lr_1e-6][epoch_3][no_schedule].yaml 1
+
+# 7B
+sbatch $EXCLUDE_NODES scripts/anvil/measure_time.sh pt_checkpoints/7b_token_epoch4.pt configs/qwen7b/librispeech/timestamp_all/token[start][bf16][lr_1e-6][epoch_6][no_schedule].yaml 1
+sbatch $EXCLUDE_NODES scripts/anvil/measure_time.sh pt_checkpoints/7b_poisson_epoch3.pt configs/qwen7b/librispeech/timestamp_all/poisson[start][bias_-6][bf16][upscale_4][lr_1e-6][epoch_6][no_schedule].yaml 1
