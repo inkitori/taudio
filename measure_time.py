@@ -12,11 +12,17 @@ from typing import List
 import torch
 from torch.utils.data import DataLoader
 from tqdm import tqdm
+import wandb
 
 from dataset.dataset import collate_fn, get_benchmark_ds
 from tasks import create_task
 from taudio import TAudio
-from utils.config_utils import ConfigManager
+from utils.config_utils import (
+    ConfigManager,
+    flatten_config,
+    relative_path_to_experiment_name,
+    relative_path_to_project_name,
+)
 from utils.poisson import infer_timestamps_benchmark
 
 
@@ -159,13 +165,7 @@ def main():
         "--num-batches",
         type=int,
         default=None,
-        help="Number of batches to measure (default: 50)"
-    )
-    parser.add_argument(
-        "--warmup-batches",
-        type=int,
-        default=5,
-        help="Number of warmup batches before timing (default: 5)"
+        help="Number of batches to measure"
     )
     parser.add_argument(
         "--split",
@@ -225,6 +225,28 @@ def main():
     model.eval()
     
     logging.info(f"Model moved to {device}")
+
+    # Initialize wandb
+    run = None
+    wandb_config = config.get("wandb", {})
+    if wandb_config:
+        experiment_name = relative_path_to_experiment_name(args.config, eval=False)
+        project_name = relative_path_to_project_name(args.config, eval=False)
+        run = wandb.init(
+            entity=wandb_config.get("entity"),
+            project="measure_time",
+            name=f"{experiment_name}[{task_config}][{args.split}][bs_{args.batch_size}][num_batches_{args.num_batches}]",
+            config={
+                **flatten_config(config),
+                "measure_time": {
+                    "checkpoint": args.checkpoint,
+                    "config": args.config,
+                    "batch_size": args.batch_size,
+                    "num_batches": args.num_batches,
+                    "split": args.split,
+                },
+            },
+        )
     
     # Create dataset and dataloader
     logging.info("Loading dataset...")
@@ -251,7 +273,6 @@ def main():
     logging.info(f"Dataset loaded with {len(ds)} examples")
     logging.info(f"Batch size: {args.batch_size}")
     logging.info(f"Number of batches to measure: {args.num_batches}")
-    logging.info(f"Warmup batches: {args.warmup_batches}")
     
     # Warmup runs
     # logging.info("Running warmup batches...")
@@ -321,6 +342,20 @@ def main():
         # Calculate throughput
         avg_throughput = args.batch_size / avg_time  # samples per second
         
+        if run is not None:
+            run.log({
+                "timing/avg_ms": avg_time * 1000,
+                "timing/std_ms": std_time * 1000,
+                "timing/min_ms": min_time * 1000,
+                "timing/max_ms": max_time * 1000,
+                "timing/avg_s": avg_time,
+                "timing/throughput_samples_per_s": avg_throughput,
+                "timing/avg_ms_per_sample": (avg_time / args.batch_size) * 1000,
+                "timing/batches_measured": len(times),
+                "timing/inference_type": inference_type,
+                "timing/times_hist": wandb.Histogram(times),
+            })
+
         print("\n" + "=" * 60)
         print(f"INFERENCE TIMING RESULTS")
         print("=" * 60)
@@ -341,6 +376,9 @@ def main():
         print("=" * 60)
     else:
         logging.error("No timing measurements collected!")
+
+    if run is not None:
+        run.finish()
 
 
 if __name__ == "__main__":
