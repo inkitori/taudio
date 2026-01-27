@@ -235,7 +235,7 @@ def main():
         run = wandb.init(
             entity=wandb_config.get("entity"),
             project="measure_time",
-            name=f"{experiment_name}[{task_config}][{args.split}][bs_{args.batch_size}][num_batches_{args.num_batches}]",
+            name=f"[{model_config['model_id']}][{task_config}][{args.split}][bs_{args.batch_size}][num_batches_{args.num_batches}]",
             config={
                 **flatten_config(config),
                 "measure_time": {
