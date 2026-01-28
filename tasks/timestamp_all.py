@@ -77,6 +77,8 @@ def compute_matching_metrics(
     metrics_list = []
     pred_remaining = list(pred_timestamps)
     
+    event_count_prefix = f"{n_gt}events_"
+
     for gt_idx, gt_ts in enumerate(gt_timestamps):
         metrics = {}
         
@@ -108,15 +110,21 @@ def compute_matching_metrics(
             abs_err = round_timestamp_python(abs(pred_timestamps[gt_idx] - gt_ts))
             metrics[key("strongly_aligned", "parsing_error")] = 0.0
             metrics[key("strongly_aligned", "abs_error_sum")] = abs_err
+            metrics[key("strongly_aligned", f"{event_count_prefix}parsing_error")] = 0.0
+            metrics[key("strongly_aligned", f"{event_count_prefix}abs_error_sum")] = abs_err
             for t in THRESHOLDS:
                 ms = int(t * 1000)
                 metrics[key("strongly_aligned", f"correct_{ms}ms")] = 1.0 if abs_err <= t else 0.0
+                metrics[key("strongly_aligned", f"{event_count_prefix}correct_{ms}ms")] = 1.0 if abs_err <= t else 0.0
         else:
             metrics[key("strongly_aligned", "parsing_error")] = 1.0
             metrics[key("strongly_aligned", "abs_error_sum")] = fallback_error
+            metrics[key("strongly_aligned", f"{event_count_prefix}parsing_error")] = 1.0
+            metrics[key("strongly_aligned", f"{event_count_prefix}abs_error_sum")] = fallback_error
             for t in THRESHOLDS:
                 ms = int(t * 1000)
                 metrics[key("strongly_aligned", f"correct_{ms}ms")] = 0.0
+                metrics[key("strongly_aligned", f"{event_count_prefix}correct_{ms}ms")] = 0.0
         
         # --- L1-optimal ---
         if gt_idx in l1_optimal_pairing:
