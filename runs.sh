@@ -289,36 +289,9 @@ sbatch $EXCLUDE_NODES scripts/anvil/measure_time_short.sh pt_checkpoints/7b_pois
 
 # bs 16
 # 3B
-sbatch $EXCLUDE_NODES scripts/anvil/measure_time.sh pt_checkpoints/3b_token_epoch3.pt configs/qwen3b/librispeech/timestamp_all/token[start][bf16][lr_1e-6][epoch_3][no_schedule].yaml 16
+sbatch $EXCLUDE_NODES scripts/anvil/measure_time_short.sh pt_checkpoints/3b_token_epoch3.pt configs/qwen3b/librispeech/timestamp_all/token[start][bf16][lr_1e-6][epoch_3][no_schedule].yaml 16
 sbatch $EXCLUDE_NODES scripts/anvil/measure_time_short.sh pt_checkpoints/3b_poisson_epoch3.pt configs/qwen3b/librispeech/timestamp_all/poisson[start][bias_-6][bf16][upscale_4][lr_1e-6][epoch_3][no_schedule].yaml 16
 
 # 7B
-sbatch $EXCLUDE_NODES scripts/anvil/measure_time.sh pt_checkpoints/7b_token_epoch4.pt configs/qwen7b/librispeech/timestamp_all/token[start][bf16][lr_1e-6][epoch_6][no_schedule].yaml 16
+sbatch $EXCLUDE_NODES scripts/anvil/measure_time_short.sh pt_checkpoints/7b_token_epoch4.pt configs/qwen7b/librispeech/timestamp_all/token[start][bf16][lr_1e-6][epoch_6][no_schedule].yaml 16
 sbatch $EXCLUDE_NODES scripts/anvil/measure_time_short.sh pt_checkpoints/7b_poisson_epoch3.pt configs/qwen7b/librispeech/timestamp_all/poisson[start][bias_-6][bf16][upscale_4][lr_1e-6][epoch_6][no_schedule].yaml 16
-
-# bs 32
-# 3B
-sbatch $EXCLUDE_NODES scripts/anvil/measure_time.sh pt_checkpoints/3b_token_epoch3.pt configs/qwen3b/librispeech/timestamp_all/token[start][bf16][lr_1e-6][epoch_3][no_schedule].yaml 32
-sbatch $EXCLUDE_NODES scripts/anvil/measure_time_short.sh pt_checkpoints/3b_poisson_epoch3.pt configs/qwen3b/librispeech/timestamp_all/poisson[start][bias_-6][bf16][upscale_4][lr_1e-6][epoch_3][no_schedule].yaml 32
-
-# 7B
-sbatch $EXCLUDE_NODES scripts/anvil/measure_time.sh pt_checkpoints/7b_token_epoch4.pt configs/qwen7b/librispeech/timestamp_all/token[start][bf16][lr_1e-6][epoch_6][no_schedule].yaml 32
-sbatch $EXCLUDE_NODES scripts/anvil/measure_time_short.sh pt_checkpoints/7b_poisson_epoch3.pt configs/qwen7b/librispeech/timestamp_all/poisson[start][bias_-6][bf16][upscale_4][lr_1e-6][epoch_6][no_schedule].yaml 32
-
-# bs 64
-# 3B
-sbatch $EXCLUDE_NODES scripts/anvil/measure_time.sh pt_checkpoints/3b_token_epoch3.pt configs/qwen3b/librispeech/timestamp_all/token[start][bf16][lr_1e-6][epoch_3][no_schedule].yaml 64
-sbatch $EXCLUDE_NODES scripts/anvil/measure_time_short.sh pt_checkpoints/3b_poisson_epoch3.pt configs/qwen3b/librispeech/timestamp_all/poisson[start][bias_-6][bf16][upscale_4][lr_1e-6][epoch_3][no_schedule].yaml 64
-
-# 7B
-sbatch $EXCLUDE_NODES scripts/anvil/measure_time.sh pt_checkpoints/7b_token_epoch4.pt configs/qwen7b/librispeech/timestamp_all/token[start][bf16][lr_1e-6][epoch_6][no_schedule].yaml 64
-sbatch $EXCLUDE_NODES scripts/anvil/measure_time_short.sh pt_checkpoints/7b_poisson_epoch3.pt configs/qwen7b/librispeech/timestamp_all/poisson[start][bias_-6][bf16][upscale_4][lr_1e-6][epoch_6][no_schedule].yaml 64
-
-# bs 128
-# 3B
-sbatch $EXCLUDE_NODES scripts/anvil/measure_time.sh pt_checkpoints/3b_token_epoch3.pt configs/qwen3b/librispeech/timestamp_all/token[start][bf16][lr_1e-6][epoch_3][no_schedule].yaml 128
-sbatch $EXCLUDE_NODES scripts/anvil/measure_time_short.sh pt_checkpoints/3b_poisson_epoch3.pt configs/qwen3b/librispeech/timestamp_all/poisson[start][bias_-6][bf16][upscale_4][lr_1e-6][epoch_3][no_schedule].yaml 128
-
-# 7B
-sbatch $EXCLUDE_NODES scripts/anvil/measure_time.sh pt_checkpoints/7b_token_epoch4.pt configs/qwen7b/librispeech/timestamp_all/token[start][bf16][lr_1e-6][epoch_6][no_schedule].yaml 128
-sbatch $EXCLUDE_NODES scripts/anvil/measure_time_short.sh pt_checkpoints/7b_poisson_epoch3.pt configs/qwen7b/librispeech/timestamp_all/poisson[start][bias_-6][bf16][upscale_4][lr_1e-6][epoch_6][no_schedule].yaml 128

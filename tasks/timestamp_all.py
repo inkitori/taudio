@@ -77,7 +77,20 @@ def compute_matching_metrics(
     metrics_list = []
     pred_remaining = list(pred_timestamps)
     
-    event_count_prefix = f"{n_gt}events_"
+
+    if n_gt <= 5:
+        event_count_prefix = f"1-5events_"
+    elif n_gt <= 10:
+        event_count_prefix = f"6-10events_"
+    elif n_gt <= 15:
+        event_count_prefix = f"11-15events_"
+    elif n_gt <= 20:
+        event_count_prefix = f"16-20events_"
+    elif n_gt <= 25:
+        event_count_prefix = f"21-25events_"
+    else:
+        event_count_prefix = f"26+events_"
+
 
     for gt_idx, gt_ts in enumerate(gt_timestamps):
         metrics = {}

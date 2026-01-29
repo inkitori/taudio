@@ -7,10 +7,10 @@ Works with timestamp_single_any and timestamp_all tasks.
 import argparse
 import logging
 import time
-from typing import List
+from typing import Dict, List, Tuple
 
 import torch
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Subset
 from tqdm import tqdm
 import wandb
 
@@ -37,13 +37,17 @@ def measure_token_inference_time(
     dataloader: DataLoader,
     num_batches: int,
     task_type: str,
-) -> List[float]:
+    bucket_label: str,
+) -> Tuple[List[float], List[int]]:
     times = []
+    batch_sizes = []
     
-    for batch_idx, batch in enumerate(tqdm(dataloader, total=num_batches, desc="Token Inference")):
+    for batch_idx, batch in enumerate(tqdm(dataloader, total=num_batches, desc=f"Token Inference [{bucket_label}]")):
         if num_batches is not None and batch_idx >= num_batches:
             break
         
+        batch_sizes.append(batch["input_ids"].size(0))
+
         # Move batch to device
         batch = {k: v.to(next(model.parameters()).device) for k, v in batch.items()}
 
@@ -72,24 +76,28 @@ def measure_token_inference_time(
         
         times.append(end_time - start_time)
     
-    return times
+    return times, batch_sizes
 
 
 def measure_poisson_inference_time(
     model: TAudio,
     dataloader: DataLoader,
     num_batches: int,
-) -> List[float]:
+    bucket_label: str,
+) -> Tuple[List[float], List[int]]:
     """
     Measure inference time for poisson/surrogate loss models.
     Inference involves a forward pass with inference=True to get auxiliary predictions.
     """
     times = []
+    batch_sizes = []
     
-    for batch_idx, batch in enumerate(tqdm(dataloader, total=num_batches, desc="Poisson Inference")):
+    for batch_idx, batch in enumerate(tqdm(dataloader, total=num_batches, desc=f"Poisson Inference [{bucket_label}]")):
         if num_batches is not None and batch_idx >= num_batches:
             break
         
+        batch_sizes.append(batch["input_ids"].size(0))
+
         # Move batch to device
         batch = {k: v.to(next(model.parameters()).device) for k, v in batch.items()}
         
@@ -136,7 +144,78 @@ def measure_poisson_inference_time(
         
         times.append(end_time - start_time)
     
-    return times
+    return times, batch_sizes
+
+
+EVENT_BUCKETS = [
+    {"label": "1-5 events", "min": 1, "max": 5, "key": "1-5_events"},
+    {"label": "6-10 events", "min": 6, "max": 10, "key": "6-10_events"},
+    {"label": "11-15 events", "min": 11, "max": 15, "key": "11-15_events"},
+    {"label": "16-20 events", "min": 16, "max": 20, "key": "16-20_events"},
+    {"label": "21-25 events", "min": 21, "max": 25, "key": "21-25_events"},
+    {"label": "26+ events", "min": 26, "max": None, "key": "26plus_events"},
+]
+
+
+def _normalize_num_events(value: torch.Tensor) -> int:
+    if torch.is_tensor(value):
+        return int(value.item())
+    return int(value)
+
+
+def _bucket_for_num_events(num_events: int) -> Dict[str, str]:
+    for bucket in EVENT_BUCKETS:
+        if bucket["max"] is None:
+            if num_events >= bucket["min"]:
+                return bucket
+        elif bucket["min"] <= num_events <= bucket["max"]:
+            return bucket
+    raise ValueError(f"Unexpected num_events: {num_events}")
+
+
+def _infer_num_events_from_example(example: Dict[str, torch.Tensor]) -> int:
+    if "num_events" in example:
+        return _normalize_num_events(example["num_events"])
+    if "audio_labels" in example:
+        audio_labels = example["audio_labels"]
+        if torch.is_tensor(audio_labels):
+            return int((audio_labels == 1).sum().item())
+        return int(sum(1 for v in audio_labels if v == 1))
+    raise KeyError("Example has neither 'num_events' nor 'audio_labels'.")
+
+
+def _build_bucket_indices(ds) -> Dict[str, List[int]]:
+    indices = {bucket["label"]: [] for bucket in EVENT_BUCKETS}
+    for idx in range(len(ds)):
+        example = ds[idx]
+        num_events = _infer_num_events_from_example(example)
+        bucket = _bucket_for_num_events(num_events)
+        indices[bucket["label"]].append(idx)
+    return indices
+
+
+def _create_bucket_dataloaders(
+    ds,
+    bucket_indices: Dict[str, List[int]],
+    *,
+    batch_size: int,
+    collate_fn,
+    num_workers: int,
+) -> Dict[str, DataLoader]:
+    dataloaders = {}
+    for bucket in EVENT_BUCKETS:
+        label = bucket["label"]
+        indices = bucket_indices[label]
+        if not indices:
+            continue
+        dataloaders[label] = DataLoader(
+            Subset(ds, indices),
+            batch_size=batch_size,
+            shuffle=False,
+            collate_fn=collate_fn,
+            num_workers=num_workers,
+        )
+    return dataloaders
 
 
 def main():
@@ -262,14 +341,6 @@ def main():
     if hasattr(task, 'select_indices'):
         ds = task.select_indices(ds, ds_adapter, args.split)
     
-    dataloader = DataLoader(
-        ds,
-        batch_size=args.batch_size,
-        shuffle=False,
-        collate_fn=collate_fn,
-        num_workers=system_config.get('dataloader_num_workers', 1),
-    )
-    
     logging.info(f"Dataset loaded with {len(ds)} examples")
     logging.info(f"Batch size: {args.batch_size}")
     logging.info(f"Number of batches to measure: {args.num_batches}")
@@ -313,58 +384,80 @@ def main():
     # Measure inference time
     logging.info("Starting inference timing measurements...")
     
-    # Reset dataloader for actual measurements
-    dataloader = DataLoader(
+    # Build bucketed dataloaders based on number of events
+    logging.info("Building event-count buckets...")
+    bucket_indices = _build_bucket_indices(ds)
+    dataloaders = _create_bucket_dataloaders(
         ds,
+        bucket_indices,
         batch_size=args.batch_size,
-        shuffle=False,
         collate_fn=collate_fn,
         num_workers=system_config.get('dataloader_num_workers', 1),
     )
-    
-    if token_loss:
-        times = measure_token_inference_time(model, dataloader, args.num_batches, task_type)
-        inference_type = "Token Generation"
-    else:
-        times = measure_poisson_inference_time(model, dataloader, args.num_batches)
-        inference_type = "Poisson/Surrogate"
-    
-    # Calculate statistics
-    if len(times) > 0:
+
+    inference_type = "Token Generation" if token_loss else "Poisson/Surrogate"
+
+    any_measurements = False
+    for bucket in EVENT_BUCKETS:
+        bucket_label = bucket["label"]
+        bucket_key = bucket["key"]
+        if bucket_label not in dataloaders:
+            logging.info(f"Skipping bucket '{bucket_label}' (no samples)")
+            continue
+
+        dataloader = dataloaders[bucket_label]
+        if token_loss:
+            times, batch_sizes = measure_token_inference_time(
+                model, dataloader, args.num_batches, task_type, bucket_label
+            )
+        else:
+            times, batch_sizes = measure_poisson_inference_time(
+                model, dataloader, args.num_batches, bucket_label
+            )
+
+        if len(times) == 0:
+            logging.warning(f"No timing measurements collected for bucket '{bucket_label}'")
+            continue
+
+        any_measurements = True
         avg_time = sum(times) / len(times)
         min_time = min(times)
         max_time = max(times)
-        
-        # Calculate std dev
+
         variance = sum((t - avg_time) ** 2 for t in times) / len(times)
         std_time = variance ** 0.5
-        
-        # Calculate throughput
-        avg_throughput = args.batch_size / avg_time  # samples per second
-        
+
+        total_samples = sum(batch_sizes)
+        total_time = sum(times)
+        avg_throughput = total_samples / total_time if total_time > 0 else 0.0
+        avg_time_per_sample = (total_time / total_samples) * 1000 if total_samples > 0 else 0.0
+
         if run is not None:
             run.log({
-                "timing/avg_ms": avg_time * 1000,
-                "timing/std_ms": std_time * 1000,
-                "timing/min_ms": min_time * 1000,
-                "timing/max_ms": max_time * 1000,
-                "timing/avg_s": avg_time,
-                "timing/throughput_samples_per_s": avg_throughput,
-                "timing/avg_ms_per_sample": (avg_time / args.batch_size) * 1000,
-                "timing/batches_measured": len(times),
-                "timing/inference_type": inference_type,
-                "timing/times_hist": wandb.Histogram(times),
+                f"timing/{bucket_key}/avg_ms": avg_time * 1000,
+                f"timing/{bucket_key}/std_ms": std_time * 1000,
+                f"timing/{bucket_key}/min_ms": min_time * 1000,
+                f"timing/{bucket_key}/max_ms": max_time * 1000,
+                f"timing/{bucket_key}/avg_s": avg_time,
+                f"timing/{bucket_key}/throughput_samples_per_s": avg_throughput,
+                f"timing/{bucket_key}/avg_ms_per_sample": avg_time_per_sample,
+                f"timing/{bucket_key}/batches_measured": len(times),
+                f"timing/{bucket_key}/samples_measured": total_samples,
+                f"timing/{bucket_key}/inference_type": inference_type,
+                f"timing/{bucket_key}/times_hist": wandb.Histogram(times),
             })
 
         print("\n" + "=" * 60)
-        print(f"INFERENCE TIMING RESULTS")
+        print("INFERENCE TIMING RESULTS")
         print("=" * 60)
         print(f"Config: {args.config}")
         print(f"Checkpoint: {args.checkpoint}")
         print(f"Task Type: {task_type}")
         print(f"Inference Type: {inference_type}")
+        print(f"Bucket: {bucket_label}")
         print(f"Batch Size: {args.batch_size}")
         print(f"Number of Batches Measured: {len(times)}")
+        print(f"Number of Samples Measured: {total_samples}")
         print("-" * 60)
         print(f"Average Time per Batch: {avg_time * 1000:.2f} ms")
         print(f"Std Dev: {std_time * 1000:.2f} ms")
@@ -372,10 +465,11 @@ def main():
         print(f"Max Time: {max_time * 1000:.2f} ms")
         print("-" * 60)
         print(f"Average Throughput: {avg_throughput:.2f} samples/second")
-        print(f"Average Time per Sample: {(avg_time / args.batch_size) * 1000:.2f} ms")
+        print(f"Average Time per Sample: {avg_time_per_sample:.2f} ms")
         print("=" * 60)
-    else:
-        logging.error("No timing measurements collected!")
+
+    if not any_measurements:
+        logging.error("No timing measurements collected across buckets!")
 
     if run is not None:
         run.finish()
