@@ -29,3 +29,5 @@ ontology.json
 dataset_scripts/beat_this/groove_midi/
 env
 *.pt
+pt_checkpoints/
+scripts/
