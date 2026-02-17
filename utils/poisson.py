@@ -178,7 +178,7 @@ def run_iterative_posterior_mode(n_pred, hazards, kernel, window_width):
             seq_lens=seq_lens
         )
         
-        peak_idx = mode_result[0, 0]  # First batch, first prediction
+        peak_idx = mode_result[0, 0]  # first batch first pred
         
         predictions.append(peak_idx)
         

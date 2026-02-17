@@ -30,11 +30,11 @@ nltk.download('stopwords')
 
 The datasets can be found on HuggingFace
 
-1. **LibriSpeech Alignments**  
+1. **LibriSpeech**  
    [https://huggingface.co/datasets/gilkeyio/librispeech-alignments](https://huggingface.co/datasets/gilkeyio/librispeech-alignments)  
 
-2. **LibriCount Timings**  
+2. **LibriCount**  
    [https://huggingface.co/datasets/enyoukai/libricount-timings](https://huggingface.co/datasets/enyoukai/libricount-timings)  
 
-3. **AudioSet Humans (Reprocessed)**  
+3. **AudioSet**  
    [https://huggingface.co/datasets/enyoukai/audioset-humans-reprocessed](https://huggingface.co/datasets/enyoukai/audioset-humans-reprocessed)  
