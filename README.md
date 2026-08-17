@@ -1,3 +1,4 @@
+# Code for Encode Once, Decode Never: Reusing Audio LM Internals for Efficient Temporal Localization (COLM 2026)
 # Setup
 
 ## Environment Setup
